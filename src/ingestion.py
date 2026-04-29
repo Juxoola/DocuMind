@@ -83,6 +83,15 @@ except Exception as e:
 
 import whisperx
 
+def format_seconds(s):
+    """Превращает секунды в формат H:MM:SS или MM:SS."""
+    h = int(s // 3600)
+    m = int((s % 3600) // 60)
+    sec = int(s % 60)
+    if h > 0:
+        return f"{h}:{m:02d}:{sec:02d}"
+    return f"{m}:{sec:02d}"
+
 def get_image_base64(image_path):
     with open(image_path, "rb") as image_file:
         return base64.b64encode(image_file.read()).decode("utf-8")
@@ -157,11 +166,23 @@ def process_audio_video(file_path, images_dir, is_video=False, progress_cb=None)
                 transcript += f"[{s.start:.2f}s -> {s.end:.2f}s] {s.text.strip()}\n"
                 transcript_data.append({"start": s.start, "end": s.end, "text": s.text.strip()})
 
-    if transcript.strip():
-        nodes.append(TextNode(
-            text=f"Транскрипт аудио/видео {file_name}:\n{transcript}",
-            metadata={"file_name": file_name}
-        ))
+    if transcript_data:
+        # Разбиваем транскрипт на чанки по ~30 секунд или по предложениям
+        chunk_text = ""
+        chunk_start = 0
+        for i, seg in enumerate(transcript_data):
+            if not chunk_text:
+                chunk_start = seg["start"]
+            
+            chunk_text += f"[{seg['start']:.1f}s] {seg['text']} "
+            
+            # Если набралось достаточно текста или это последний сегмент
+            if (seg["end"] - chunk_start > 30) or (i == len(transcript_data) - 1):
+                nodes.append(TextNode(
+                    text=f"Транскрипт {file_name} (от {format_seconds(chunk_start)}):\n{chunk_text.strip()}",
+                    metadata={"file_name": file_name, "start": chunk_start}
+                ))
+                chunk_text = ""
     prog(60, "Транскрибация завершена")
 
     if is_video:
@@ -257,8 +278,8 @@ def process_audio_video(file_path, images_dir, is_video=False, progress_cb=None)
             for fut in as_completed(futs):
                 img_path, t, desc = fut.result()
                 nodes.append(TextNode(
-                    text=f"Кадр из видео {file_name} на {t:.1f} секунде. Описание кадра: {desc}",
-                    metadata={"file_name": file_name, "image_path": img_path}
+                    text=f"Кадр из видео {file_name} на {format_seconds(t)}. Описание кадра: {desc}",
+                    metadata={"file_name": file_name, "image_path": img_path, "time": t, "start": t}
                 ))
                 frame_data.append({
                     "time": t,
@@ -306,23 +327,50 @@ def process_pdf(file_path, images_dir):
             ))
             
         drawings = page.get_drawings()
-        has_real_image = len(page.get_images()) > 0
-        has_vector_diagram = False
+        # 1. Проверяем наличие настоящих изображений (игнорируем иконки < 50x50)
+        has_real_image = False
+        for img in page.get_images():
+            if img[2] > 50 and img[3] > 50:
+                has_real_image = True
+                break
         
-        # Эвристика: отличаем сложную диаграмму (примитивы Word) от простой рамки блока кода
+        # 2. Проверяем векторную графику (диаграммы)
+        has_vector_diagram = False
+        drawings = page.get_drawings()
         if not has_real_image and len(drawings) > 0:
-            complex_items = 0
-            rect_items = 0
+            lines = []
+            rects = []
             for d in drawings:
                 for item in d.get("items", []):
-                    if item[0] in ("l", "c", "qu"):
-                        complex_items += 1
+                    if item[0] == "l":
+                        p1, p2 = item[1], item[2]
+                        if abs(p1.y - p2.y) < 2: continue # Игнорируем подчеркивания
+                        lines.append(item)
+                    elif item[0] in ("c", "qu"):
+                        lines.append(item) # Считаем кривые как линии
                     elif item[0] == "re":
-                        rect_items += 1
+                        r = item[1]
+                        if r.width > page.rect.width * 0.9 or r.height > page.rect.height * 0.9: continue
+                        rects.append(r)
             
-            # Если много линий/кривых (блок-схема) или много прямоугольников (сложная таблица/схема)
-            if complex_items > 10 or rect_items > 20 or (complex_items > 2 and rect_items > 5):
+            # Фильтруем "пустые" рамки (например, границы блоков кода), в которых нет других элементов
+            meaningful_rects = []
+            for r in rects:
+                has_internal_content = False
+                for l in lines:
+                    # Если линия начинается, заканчивается или проходит через прямоугольник
+                    if r.contains(l[1]) or r.contains(l[2]):
+                        has_internal_content = True
+                        break
+                # Прямоугольник важен ТОЛЬКО если в нем есть графика (схема)
+                if has_internal_content: 
+                    meaningful_rects.append(r)
+            
+            # Порог для признания страницы "рисунком"
+            # Возвращаемся к более мягким порогам, но с сохранением строгой фильтрации рамок
+            if len(lines) > 8 or len(meaningful_rects) > 5:
                 has_vector_diagram = True
+                print(f"  [PDF] Стр {page_num+1}: Сохраняем как рисунок ({len(lines)} лин, {len(meaningful_rects)} рект)")
 
         if not has_real_image and not has_vector_diagram:
             continue

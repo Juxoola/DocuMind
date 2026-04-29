@@ -12,9 +12,18 @@ import config
 
 from src.ingestion import ingest_file
 from src.rag_pipeline import build_index, retrieve_nodes, build_file_context, make_prompt
+from fastapi.middleware.cors import CORSMiddleware
 from llama_index.core import Settings
 
 app = FastAPI(title="NotebookLM Local Clone")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # Монтируем статику
 os.makedirs(os.path.join(config.BASE_DIR, "static"), exist_ok=True)
@@ -191,9 +200,27 @@ class ChatRequest(BaseModel):
     allowed_files: List[str]
     max_tokens: int = 1024
     notebook_id: str
+    llm_url: Optional[str] = None
+    llm_api_key: Optional[str] = "lm-studio"
+    llm_model: Optional[str] = "gpt-4o"
 
 @app.post("/api/chat")
 async def chat(request: ChatRequest):
+    # Определяем, какой LLM использовать
+    if request.llm_url:
+        from llama_index.llms.openai import OpenAI
+        print(f"DEBUG: Используем пользовательский LLM: {request.llm_url}")
+        active_llm = OpenAI(
+            api_base=request.llm_url,
+            api_key=request.llm_api_key or "lm-studio",
+            model=request.llm_model or "gpt-4o",
+            temperature=0.1,
+            max_tokens=request.max_tokens
+        )
+    else:
+        print(f"DEBUG: Используем системный LLM")
+        active_llm = Settings.llm
+
     if not request.allowed_files:
         async def no_files():
             yield f"data: {json.dumps({'type': 'sources', 'sources': []})}\n\n"
@@ -216,7 +243,7 @@ async def chat(request: ChatRequest):
 
             yield f"data: {json.dumps({'type': 'sources', 'sources': sources}, ensure_ascii=False)}\n\n"
 
-            for chunk in Settings.llm.stream_complete(prompt):
+            for chunk in active_llm.stream_complete(prompt):
                 if chunk.delta:
                     token_count += 1 # Грубая оценка
                     yield f"data: {json.dumps({'type': 'chunk', 'text': chunk.delta}, ensure_ascii=False)}\n\n"

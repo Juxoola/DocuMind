@@ -1,0 +1,76 @@
+@import "tailwindcss";
+
+@theme {
+  --color-background: hsl(222 47% 4%);
+  --color-foreground: hsl(210 40% 98%);
+  --color-card: hsl(222 47% 4%);
+  --color-card-foreground: hsl(210 40% 98%);
+  --color-popover: hsl(222 47% 4%);
+  --color-popover-foreground: hsl(210 40% 98%);
+  --color-primary: hsl(226 70% 55%);
+  --color-primary-foreground: hsl(0 0% 100%);
+  --color-secondary: hsl(222 47% 11%);
+  --color-secondary-foreground: hsl(210 40% 98%);
+  --color-muted: hsl(222 47% 11%);
+  --color-muted-foreground: hsl(215 20% 65%);
+  --color-accent: hsl(222 47% 11%);
+  --color-accent-foreground: hsl(210 40% 98%);
+  --color-destructive: hsl(0 84% 60%);
+  --color-destructive-foreground: hsl(210 40% 98%);
+  --color-border: hsl(217 32% 17%);
+  --color-input: hsl(217 32% 17%);
+  --color-ring: hsl(226 70% 55%);
+  --radius-lg: 1rem;
+  --radius-md: 0.75rem;
+  --radius-sm: 0.5rem;
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+    font-feature-settings: "rlig" 1, "calt" 1;
+  }
+}
+
+@utility glass {
+  @apply bg-background/60 backdrop-blur-xl border-border/50;
+}
+
+@utility glass-card {
+  @apply bg-card/40 backdrop-blur-md border border-white/10 hover:border-white/20 transition-all duration-300;
+}
+
+@utility chat-bubble-ai {
+  @apply bg-muted/40 border border-border/60 rounded-3xl rounded-bl-none px-5 py-4 shadow-sm;
+}
+
+@utility chat-bubble-user {
+  @apply bg-primary text-primary-foreground rounded-3xl rounded-br-none px-5 py-3 shadow-lg shadow-primary/10;
+}
+
+/* Markdown Table Styles */
+.prose table {
+  @apply w-full border-collapse my-4 text-sm;
+}
+.prose th {
+  @apply border border-border bg-muted/50 px-3 py-2 text-left font-bold;
+}
+.prose td {
+  @apply border border-border px-3 py-2;
+}
+.prose tr:nth-child(even) {
+  @apply bg-muted/20;
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+}
+::-webkit-scrollbar-track {
+  @apply bg-transparent;
+}
+::-webkit-scrollbar-thumb {
+  @apply bg-muted-foreground/20 rounded-full hover:bg-muted-foreground/40 transition-colors;
+}
