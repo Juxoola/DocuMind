@@ -9,9 +9,11 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from typing import List, Optional
 import config
+import gc
+import stat
 
 from src.ingestion import ingest_file
-from src.rag_pipeline import build_index, retrieve_nodes, build_file_context, make_prompt
+from src.rag_pipeline import build_index, retrieve_nodes, build_file_context, make_prompt, close_all_clients
 from fastapi.middleware.cors import CORSMiddleware
 from llama_index.core import Settings
 
@@ -50,6 +52,37 @@ def migrate_old_data():
 
 migrate_old_data()
 
+def robust_rmtree(path, max_retries=5, delay=0.5):
+    """Надежное удаление директории для Windows (с обработкой блокировок ChromaDB)."""
+    if not os.path.exists(path):
+        return
+
+    # Сначала пытаемся снять атрибут 'только для чтения'
+    for root, dirs, files in os.walk(path):
+        for f in files:
+            try: os.chmod(os.path.join(root, f), stat.S_IWRITE)
+            except: pass
+        for d in dirs:
+            try: os.chmod(os.path.join(root, d), stat.S_IWRITE)
+            except: pass
+
+    for i in range(max_retries):
+        try:
+            gc.collect() # Принудительно закрываем дескрипторы файлов
+            shutil.rmtree(path)
+            return True
+        except PermissionError:
+            if i < max_retries - 1:
+                time.sleep(delay)
+            else:
+                raise
+        except Exception as e:
+            print(f"Ошибка при удалении {path}: {e}")
+            if i < max_retries - 1:
+                time.sleep(delay)
+            else:
+                raise
+
 @app.get("/", response_class=HTMLResponse)
 async def get_index():
     with open(os.path.join(config.BASE_DIR, "static", "index.html"), "r", encoding="utf-8") as f:
@@ -86,9 +119,10 @@ async def create_notebook(req: CreateNotebookRequest):
 
 @app.delete("/api/notebooks/{nb_id}")
 async def delete_notebook(nb_id: str):
+    close_all_clients() # Закрываем базу перед удалением
     paths = config.get_notebook_paths(nb_id)
     if os.path.exists(paths["base"]):
-        shutil.rmtree(paths["base"])
+        robust_rmtree(paths["base"])
     return {"status": "ok"}
 
 # ── File Operations ──
@@ -103,7 +137,13 @@ async def get_files(notebook_id: str):
     return {"files": files}
 
 @app.post("/api/upload")
-async def upload_file(notebook_id: str, file: UploadFile = File(...)):
+async def upload_file(
+    notebook_id: str, 
+    file: UploadFile = File(...),
+    llm_url: Optional[str] = None,
+    llm_api_key: Optional[str] = None,
+    llm_model: Optional[str] = None
+):
     paths = config.get_notebook_paths(notebook_id)
     os.makedirs(paths["data"], exist_ok=True)
     file_path = os.path.join(paths["data"], file.filename)
@@ -115,6 +155,11 @@ async def upload_file(notebook_id: str, file: UploadFile = File(...)):
     import asyncio
 
     q = queue.Queue()
+    llm_settings = {
+        "llm_url": llm_url,
+        "llm_api_key": llm_api_key,
+        "llm_model": llm_model
+    }
 
     def process_task():
         try:
@@ -122,7 +167,7 @@ async def upload_file(notebook_id: str, file: UploadFile = File(...)):
                 q.put({"type": "progress", "pct": pct, "msg": msg})
 
             prog(5, "Файл сохранён, подготовка...")
-            nodes = ingest_file(file_path, notebook_id, progress_cb=prog)
+            nodes = ingest_file(file_path, notebook_id, progress_cb=prog, llm_settings=llm_settings)
             
             prog(90, "Построение индекса (ChromaDB)...")
             build_index(nodes, notebook_id)
@@ -185,11 +230,12 @@ async def get_video_metadata(filename: str, notebook_id: str):
 
 @app.delete("/api/clear")
 async def clear_notebook(notebook_id: str):
+    close_all_clients() # Закрываем базу перед очисткой
     paths = config.get_notebook_paths(notebook_id)
     for d in ["data", "chroma_db", "images"]:
         p = paths[d]
         if os.path.exists(p):
-            shutil.rmtree(p, ignore_errors=True)
+            robust_rmtree(p)
         os.makedirs(p, exist_ok=True)
     return {"status": "ok"}
 
@@ -268,4 +314,4 @@ async def chat(request: ChatRequest):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+    uvicorn.run("main:app", host=config.HOST, port=config.PORT, reload=True)

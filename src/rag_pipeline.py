@@ -10,15 +10,37 @@ from llama_index.core.schema import TextNode
 
 import config
 import torch
+from transformers import BitsAndBytesConfig
+
+_client_cache = {}
+_model_cache = {}
 
 def init_settings(max_tokens=1024):
+    global _model_cache
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    print(f"Используем устройство для эмбеддингов: {device.upper()}")
+    
+    if "embed_model" not in _model_cache:
+        print(f"Инициализация эмбеддингов: {device.upper()} (Quant: {config.QUANTIZATION})")
+        model_kwargs = {"trust_remote_code": True}
+        
+        if config.QUANTIZATION == "4bit":
+            model_kwargs["quantization_config"] = BitsAndBytesConfig(
+                load_in_4bit=True, 
+                bnb_4bit_compute_dtype=torch.float16,
+                bnb_4bit_quant_type="nf4"
+            )
+        elif config.QUANTIZATION == "int8":
+            model_kwargs["quantization_config"] = BitsAndBytesConfig(load_in_8bit=True)
+        else:
+            model_kwargs["torch_dtype"] = torch.float16
 
-    Settings.embed_model = HuggingFaceEmbedding(
-        model_name=config.EMBEDDING_MODEL_NAME,
-        device=device
-    )
+        _model_cache["embed_model"] = HuggingFaceEmbedding(
+            model_name=config.EMBEDDING_MODEL_NAME,
+            device=device,
+            model_kwargs=model_kwargs
+        )
+    
+    Settings.embed_model = _model_cache["embed_model"]
 
     Settings.llm = OpenAI(
         api_base=config.LM_STUDIO_URL,
@@ -28,11 +50,26 @@ def init_settings(max_tokens=1024):
         max_tokens=max_tokens
     )
 
+def close_all_clients():
+    """Явно закрывает все открытые клиенты ChromaDB для снятия блокировок файлов."""
+    global _client_cache
+    for path, client in _client_cache.items():
+        try:
+            client.close()
+        except:
+            pass
+    _client_cache.clear()
+
 def get_vector_store(notebook_id: str):
+    global _client_cache
     paths = config.get_notebook_paths(notebook_id)
     db_path = paths["chroma_db"]
     os.makedirs(db_path, exist_ok=True)
-    db = chromadb.PersistentClient(path=db_path)
+    
+    if db_path not in _client_cache:
+        _client_cache[db_path] = chromadb.PersistentClient(path=db_path)
+    
+    db = _client_cache[db_path]
     chroma_collection = db.get_or_create_collection("multimodal_rag")
     return ChromaVectorStore(chroma_collection=chroma_collection)
 
@@ -47,6 +84,7 @@ def retrieve_nodes(query: str, notebook_id: str, allowed_files=None, max_tokens=
     """
     Для каждого выбранного файла выполняем отдельный поиск топ-3 чанков.
     """
+    device = "cuda" if torch.cuda.is_available() else "cpu"
     init_settings(max_tokens=max_tokens)
     vector_store = get_vector_store(notebook_id)
     index = VectorStoreIndex.from_vector_store(vector_store)
@@ -65,6 +103,40 @@ def retrieve_nodes(query: str, notebook_id: str, allowed_files=None, max_tokens=
             all_nodes.extend(nodes)
         except Exception as e:
             print(f"Ошибка при поиске в {fname}: {e}")
+
+    # Переранжирование (Reranking) для максимальной точности
+    if all_nodes:
+        print(f"  [RAG] Начальное количество чанков: {len(all_nodes)}")
+        
+        if "reranker" not in _model_cache:
+            print(f"  [RAG] Загрузка реранкера: {config.RERANKER_MODEL_NAME} ({config.QUANTIZATION})")
+            rerank_kwargs = {"trust_remote_code": True}
+            if config.QUANTIZATION == "4bit":
+                rerank_kwargs["quantization_config"] = BitsAndBytesConfig(
+                    load_in_4bit=True, 
+                    bnb_4bit_compute_dtype=torch.float16
+                )
+            elif config.QUANTIZATION == "int8":
+                rerank_kwargs["quantization_config"] = BitsAndBytesConfig(load_in_8bit=True)
+            else:
+                rerank_kwargs["torch_dtype"] = torch.float16
+
+            from sentence_transformers import CrossEncoder
+            _model_cache["reranker"] = CrossEncoder(config.RERANKER_MODEL_NAME, device=device, model_kwargs=rerank_kwargs)
+        
+        model = _model_cache["reranker"]
+        
+        # Подготовка пар для реранкинга
+        pairs = [[query, n.node.get_content()] for n in all_nodes]
+        scores = model.predict(pairs)
+        
+        # Присваиваем скоры и сортируем
+        for node, score in zip(all_nodes, scores):
+            node.score = float(score)
+            
+        all_nodes.sort(key=lambda x: x.score, reverse=True)
+        all_nodes = all_nodes[:15]
+        print(f"  [RAG] После переранжирования: {len(all_nodes)}")
 
     return all_nodes
 
@@ -109,10 +181,16 @@ def make_prompt(query: str, context_str: str) -> str:
         "1. Всегда отвечай на вопрос СРАЗУ, в самом начале ответа.\n"
         "2. Если вопрос содержит варианты ответа (тест) — СНАЧАЛА напиши правильный вариант (букву и текст).\n"
         "3. После прямого ответа приведи подробное объяснение на основе источников.\n\n"
-        "ВАЖНОЕ ПРАВИЛО ЦИТИРОВАНИЯ:\n"
-        "- После КАЖДОГО утверждения ставь [N] — номер файла-источника.\n"
-        "- Если ответа нет ни в одном источнике — скажи \"В документах этого нет\".\n\n"
+        "ВАЖНОЕ ПРАВИЛО ЦИТИРОВАНИЯ (КРИТИЧЕСКИ ДЛЯ СИСТЕМЫ):\n"
+        "- Каждое утверждение ДОЛЖНО завершаться ссылкой в формате [N], где N - номер источника.\n"
+        "- ПРИМЕР: «Поток нельзя запустить дважды [1].»\n"
+        "- ОШИБКА: «Поток нельзя запустить дважды 1.» (так писать ЗАПРЕЩЕНО)\n"
+        "- НИКОГДА не пиши цифру источника без квадратных скобок.\n"
+        "- Если одно утверждение основано на нескольких источниках, пиши [1, 2].\n"
+        "- Все формулы пиши внутри $...$ или $$...$$.\n"
+        "- Если ответа нет в источниках — скажи \"В документах этого нет\".\n\n"
+        "ОТВЕЧАЙ СТРОГО С ИСПОЛЬЗОВАНИЕМ [N] ДЛЯ ССЫЛОК.\n\n"
         f"Доступные источники:\n{context_str}\n\n"
         f"Вопрос пользователя: {query}\n\n"
-        "Твой ответ (каждое утверждение со ссылкой [N]):"
+        "Твой ответ (используй СТРОГО формат [N] для ссылок):"
     )

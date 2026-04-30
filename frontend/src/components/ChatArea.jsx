@@ -3,6 +3,10 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Send, Trash2, Sparkles, Clock, Zap, Cpu, FileText, Settings as SettingsIcon } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import remarkMath from 'remark-math';
+import rehypeKatex from 'rehype-katex';
+import rehypeRaw from 'rehype-raw';
+import 'katex/dist/katex.min.css';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { atomDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import { cn } from '../lib/utils';
@@ -12,7 +16,9 @@ const Citation = ({ n, sources, onClick, onHover, onLeave }) => {
   const src = sources?.[n - 1];
   const btnRef = useRef(null);
 
-  if (!src) return <span className="text-muted-foreground opacity-50 whitespace-nowrap">[{n}]</span>;
+  if (!src) {
+    return <span className="text-muted-foreground opacity-50 whitespace-nowrap">[{n}]</span>;
+  }
 
   const handleMouseEnter = () => {
     if (btnRef.current) {
@@ -36,7 +42,7 @@ const Citation = ({ n, sources, onClick, onHover, onLeave }) => {
   );
 };
 
-export default function ChatArea({ notebook, selectedSources, onOpenSource }) {
+export default function ChatArea({ notebook, selectedSources, onOpenSource, llmSettings, setLlmSettings }) {
   const [messages, setMessages] = useState([
     { role: 'ai', content: 'Привет! Я проанализировал ваши источники и готов ответить на любые вопросы. Что вас интересует?' }
   ]);
@@ -45,14 +51,6 @@ export default function ChatArea({ notebook, selectedSources, onOpenSource }) {
   const [stats, setStats] = useState(null);
   const [maxTokens, setMaxTokens] = useState(1024);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  const [llmSettings, setLlmSettings] = useState(() => {
-    const saved = localStorage.getItem('llm_settings');
-    return saved ? JSON.parse(saved) : {
-      llm_url: 'http://localhost:1234/v1',
-      llm_api_key: 'lm-studio',
-      llm_model: 'gpt-4o'
-    };
-  });
   const [hoveredSource, setHoveredSource] = useState(null);
   const [tooltipCoords, setTooltipCoords] = useState({ x: 0, y: 0 });
   const tooltipTimeoutRef = useRef(null);
@@ -131,7 +129,9 @@ export default function ChatArea({ notebook, selectedSources, onOpenSource }) {
               fullContent = '⚠️ Ошибка: ' + data.text;
               updateAiMessage(aiMsgIndex, fullContent, []);
             }
-          } catch (e) {}
+          } catch (e) {
+            // Ошибка парсинга игнорируется
+          }
         }
       }
     } catch (err) {
@@ -163,79 +163,100 @@ export default function ChatArea({ notebook, selectedSources, onOpenSource }) {
       </div>
     );
 
-    const processText = (child) => {
-      if (child === null || child === undefined) return null;
-      if (typeof child !== 'string') return child;
-      const parts = child.split(/(\S*\s*\[[\d,\s]+\])/g);
-      return parts.map((part, i) => {
-        const match = part.match(/^(\S*)(\s*)\[([\d,\s]+)\]$/);
-        if (match) {
-          const word = match[1];
-          const space = match[2];
-          const nums = match[3].split(',').map(n => n.trim());
-          return (
-            <span key={i} className="whitespace-nowrap inline-flex items-center">
-              {word}
-              <span className="inline-flex ml-0.5">
-                {nums.map((num, idx) => (
-                  <Citation 
-                    key={idx} 
-                    n={parseInt(num)} 
-                    sources={msg.sources} 
-                    onClick={onOpenSource} 
-                    onHover={(src, coords) => {
-                      clearTimeout(tooltipTimeoutRef.current);
-                      setHoveredSource(src);
-                      setTooltipCoords(coords);
-                    }}
-                    onLeave={() => {
-                      tooltipTimeoutRef.current = setTimeout(() => setHoveredSource(null), 200);
-                    }}
-                  />
-                ))}
-              </span>
-            </span>
-          );
-        }
-        return part;
+    // Подготовка сообщения: превращаем [N] в специальные ссылки [N](cite:N)
+    // и нормализуем формулы. Это позволяет ReactMarkdown видеть текст целиком.
+    const preProcessMessage = (text) => {
+      if (!text) return "";
+      
+      // 1. Формулы LaTeX
+      let processed = text
+        .replace(/\\\[([\s\S]*?)\\\]/g, '$$$$$1$$$$')
+        .replace(/\\\(([\s\S]*?)\\\)/g, '$$$1$$');
+
+      // 2. Цитаты: [1] или [1, 2] -> [1](#cite:1)
+      processed = processed.replace(/\[(\d+(?:,\s*\d+)*)\]/g, (match, nums) => {
+        return nums.split(',').map(n => {
+          const num = n.trim();
+          return `[${num}](#cite:${num})`;
+        }).join('');
       });
+
+      // 3. Фолбэк для "голых" цифр: "текст 1." -> "текст [1](#cite:1)."
+      processed = processed.replace(/ (?<!\d)(\d{1,2})(?=[.,;!?]($|\s))/g, (match, num) => {
+        const n = parseInt(num);
+        if (n > 0 && n <= 20) {
+          return ` [${n}](#cite:${n})`;
+        }
+        return match;
+      });
+
+      return processed;
     };
 
     return (
       <div className="prose prose-invert prose-sm max-w-none">
         <ReactMarkdown 
-          remarkPlugins={[remarkGfm]}
+          remarkPlugins={[remarkGfm, remarkMath]}
+          rehypePlugins={[rehypeRaw, rehypeKatex]}
           components={{
-            p: ({ children }) => <p>{React.Children.map(children, processText)}</p>,
-            li: ({ children }) => <li>{React.Children.map(children, processText)}</li>,
-            td: ({ children }) => <td>{React.Children.map(children, processText)}</td>,
-            th: ({ children }) => <th>{React.Children.map(children, processText)}</th>,
+            // Обрабатываем ссылки. Если это наша цитата (cite:N), рисуем кнопку.
+            a: ({ href, children }) => {
+              if (href?.startsWith('#cite:')) {
+                const num = href.split(':')[1];
+                return (
+                  <span className="inline-block ml-1 no-underline">
+                    <Citation 
+                      n={parseInt(num)} 
+                      sources={msg.sources} 
+                      onClick={(src) => {
+                        setHoveredSource(null);
+                        onOpenSource(src);
+                      }} 
+                      onHover={(src, coords) => {
+                        clearTimeout(tooltipTimeoutRef.current);
+                        setHoveredSource(src);
+                        setTooltipCoords(coords);
+                      }}
+                      onLeave={() => {
+                        tooltipTimeoutRef.current = setTimeout(() => setHoveredSource(null), 100);
+                      }}
+                    />
+                  </span>
+                );
+              }
+              return <a href={href} target="_blank" rel="noopener noreferrer">{children}</a>;
+            },
             code({ node, inline, className, children, ...props }) {
               const match = /language-(\w+)/.exec(className || '');
               return !inline && match ? (
-                <div className="rounded-xl overflow-hidden my-4 border border-border/50">
-                  <div className="bg-muted/50 px-4 py-1.5 border-b border-border/50 flex items-center justify-between">
-                    <span className="text-[10px] font-bold text-muted-foreground uppercase">{match[1]}</span>
+                <div className="relative group my-4">
+                  <div className="absolute right-3 top-3 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <button 
+                      onClick={() => navigator.clipboard.writeText(String(children).replace(/\n$/, ''))}
+                      className="p-1.5 bg-white/10 hover:bg-white/20 rounded text-xs text-white/70 flex items-center gap-1"
+                    >
+                      <Zap size={12} /> Copy
+                    </button>
                   </div>
                   <SyntaxHighlighter
                     style={atomDark}
                     language={match[1]}
                     PreTag="div"
-                    className="!m-0 !bg-[#1e1e1e]"
+                    className="rounded-lg !bg-slate-900/50 !p-4 border border-white/5"
                     {...props}
                   >
                     {String(children).replace(/\n$/, '')}
                   </SyntaxHighlighter>
                 </div>
               ) : (
-                <code className={cn("bg-muted px-1.5 py-0.5 rounded text-primary font-mono text-[11px]", className)} {...props}>
+                <code className={cn("bg-white/10 px-1.5 py-0.5 rounded text-indigo-300 font-mono text-xs", className)} {...props}>
                   {children}
                 </code>
               );
             }
           }}
         >
-          {msg.content}
+          {preProcessMessage(msg.content)}
         </ReactMarkdown>
         
         {msg.sources && msg.sources.length > 0 && (
@@ -243,13 +264,26 @@ export default function ChatArea({ notebook, selectedSources, onOpenSource }) {
             {msg.sources.map((src, idx) => (
               <button 
                 key={idx}
-                onClick={() => onOpenSource(src)}
+                title={`${src.file_name} ${src.page ? '(стр. ' + src.page + ')' : ''}`}
+                onClick={() => {
+                  setHoveredSource(null);
+                  onOpenSource(src);
+                }}
+                onMouseEnter={(e) => {
+                  const rect = e.currentTarget.getBoundingClientRect();
+                  clearTimeout(tooltipTimeoutRef.current);
+                  setHoveredSource(src);
+                  setTooltipCoords({ x: rect.left + rect.width / 2, y: rect.top });
+                }}
+                onMouseLeave={() => {
+                  tooltipTimeoutRef.current = setTimeout(() => setHoveredSource(null), 100);
+                }}
                 className="flex items-center gap-2 bg-muted/30 hover:bg-primary/10 border border-border/40 hover:border-primary/30 px-2.5 py-1 rounded-full text-[9px] transition-all"
               >
                 <span className="w-3.5 h-3.5 flex items-center justify-center bg-primary/20 text-primary rounded-full text-[8px] font-bold">
                   {idx + 1}
                 </span>
-                <span className="truncate max-w-[140px] opacity-70 group-hover:opacity-100">{src.file_name}</span>
+                <span className="truncate max-w-[140px] opacity-70 hover:opacity-100">{src.file_name}</span>
               </button>
             ))}
           </div>
@@ -263,8 +297,8 @@ export default function ChatArea({ notebook, selectedSources, onOpenSource }) {
       {/* Header */}
       <div className="flex items-center justify-between p-4 border-b bg-background/80 backdrop-blur-md sticky top-0 z-10">
         <div className="flex items-center gap-2">
-          <Sparkles className="text-primary" size={18} />
-          <h2 className="font-semibold text-sm">Интеллектуальный поиск</h2>
+          <FileText className="text-muted-foreground" size={18} />
+          <h2 className="font-medium text-sm">Ассистент по документам</h2>
         </div>
         <div className="flex items-center gap-4">
           <div className="flex bg-muted p-1 rounded-lg">
@@ -320,9 +354,8 @@ export default function ChatArea({ notebook, selectedSources, onOpenSource }) {
 
       {/* Input Area */}
       <div className="p-6 pt-0">
-        <div className="relative group">
-          <div className="absolute -inset-0.5 bg-gradient-to-r from-primary/50 to-accent/50 rounded-2xl blur opacity-20 group-hover:opacity-40 transition duration-1000"></div>
-          <div className="relative flex items-end gap-2 bg-card border border-border rounded-2xl p-2 pl-4 shadow-2xl">
+        <div className="relative">
+          <div className="flex items-end gap-2 bg-muted/20 border border-border/50 rounded-xl p-2 pl-4">
             <textarea 
               ref={textareaRef}
               value={input}
@@ -409,8 +442,7 @@ export default function ChatArea({ notebook, selectedSources, onOpenSource }) {
               </p>
             </div>
             <div className="mt-3 pt-2 border-t border-border/40 flex justify-between items-center">
-              <span className="text-[9px] font-bold text-primary animate-pulse tracking-tight">Нажмите для перехода</span>
-              <Sparkles size={10} className="text-primary/50" />
+              <span className="text-[9px] font-medium text-muted-foreground uppercase tracking-wider">Нажмите для перехода</span>
             </div>
             <div 
               className="absolute top-full border-[8px] border-transparent border-t-card/98" 

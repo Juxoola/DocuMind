@@ -309,8 +309,6 @@
         let allSources = [];
         let currentMaxTokens = 512;
 
-        // ── Notebook Selection Logic ──
-
         async function loadNotebooks() {
             const nbs = await fetch('/api/notebooks').then(r => r.json());
             const grid = $('notebookGrid');
@@ -357,8 +355,6 @@
             $('appContainer').style.visibility = 'hidden';
             loadNotebooks();
         }
-
-        // ── File Operations ──
 
         async function loadFiles() {
             if (!currentNotebook) return;
@@ -458,7 +454,6 @@
             loadFiles();
         }
 
-        // ── Drag & Drop ──
         const zone = $('uploadZone');
         zone.onclick = () => $('fileInput').click();
         $('fileInput').onchange = e => uploadFiles([...e.target.files]);
@@ -466,7 +461,6 @@
         zone.ondragleave = () => zone.classList.remove('drag-over');
         zone.ondrop = e => { e.preventDefault(); zone.classList.remove('drag-over'); uploadFiles([...e.dataTransfer.files]); };
 
-        // ── Resizable Columns ──
         function initResizer(resizerId, leftId, rightId, isRight) {
             const resizer = $(resizerId);
             const left = $(leftId);
@@ -497,7 +491,6 @@
         }
         initResizer('resizer1', 'sidebar', 'chatCol', false);
 
-        // Viewer Resizer (Left edge of overlay)
         const vResizer = $('viewerResizer');
         const vCol = $('viewerCol');
         let vStartX, vStartWidth;
@@ -521,7 +514,6 @@
             document.removeEventListener('mouseup', vStop);
         }
 
-        // ── Chat & Streaming ──
         function setLen(btn) {
             document.querySelectorAll('.len-btn').forEach(b => b.classList.remove('active'));
             btn.classList.add('active');
@@ -621,47 +613,64 @@
 
         function renderAI(text, sources, container) {
             let counter = 1, map = {}, usedSrc = {};
-            // Собираем уникальные индексы цитат в тексте
-            text.replace(/\[(\d+)\]/g, (_, n) => {
+            
+            // 1. Предварительная обработка (поддержка [1, 2, 3])
+            let processed = text.replace(/\[(\d+(?:,\s*\d+)*)\]/g, (match, nums) => {
+                return nums.split(',').map(n => `[${n.trim()}]`).join('');
+            });
+
+            // Собираем карту цитат из квадратных скобок
+            const citeRegex = /\[(\d+)\]/g;
+            let m;
+            while ((m = citeRegex.exec(processed)) !== null) {
+                const n = m[1];
                 if (!map[n]) {
                     const src = sources[parseInt(n) - 1];
                     if (src) {
                         map[n] = counter;
                         usedSrc[counter] = src;
-                        // Проверяем, есть ли уже этот объект в allSources (по контенту)
                         let existingIdx = allSources.findIndex(s => s.text === src.text && s.file_name === src.file_name);
                         if (existingIdx === -1) allSources.push(src);
                         counter++;
                     }
                 }
-            });
-
+            }
             const placeholder = (n) => `%%CITE${n}%%`;
-            let withPlaceholders = text.replace(/\s*\[(\d+)\]/g, (_, n) => {
-                const newN = map[n]; return newN ? '&nbsp;' + placeholder(newN) : '';
+            
+            // Заменяем [N] на плейсхолдеры
+            processed = processed.replace(/\[(\d+)\]/g, (match, n) => {
+                const newN = map[n];
+                return newN ? placeholder(newN) : match;
             });
 
-            let html = marked.parse(withPlaceholders);
+            let html = marked.parse(processed);
             html = html.replace(/%%CITE(\d+)%%/g, (_, newN) => {
                 const src = usedSrc[parseInt(newN)]; if (!src) return '';
                 const idx = allSources.findIndex(s => s.text === src.text && s.file_name === src.file_name);
-                
-                // Очищаем сниппет от лишних префиксов и парсим как маркдаун
                 const snippetRaw = src.text.replace(/^Source \d+:\s*/im, '').substring(0, 300);
                 const snippetHtml = marked.parse(snippetRaw);
-                
-                // Кодируем HTML для безопасного хранения в атрибуте
                 const encodedSnippet = b64EncodeUnicode(snippetHtml);
-                
                 return `<span class="cite-btn" onclick="openViewer(${idx})" 
                               data-file="${src.file_name.replace(/"/g, '&quot;')}" 
                               data-snippet="${encodedSnippet}">${newN}</span>`;
             });
 
+            if (sources && sources.length > 0) {
+                html += '<div style="margin-top: 16px; display: flex; flex-wrap: wrap; gap: 8px; padding-top: 16px; border-top: 1px solid rgba(255,255,255,0.1);">';
+                sources.forEach((src, idx) => {
+                    const allIdx = allSources.findIndex(s => s.text === src.text && s.file_name === src.file_name);
+                    html += `
+                        <button onclick="openViewer(${allIdx})" class="cite-btn" style="width: auto; height: auto; padding: 4px 10px; border-radius: 20px; font-size: 0.75rem; vertical-align: middle; display: flex; align-items: center; gap: 6px; position: relative; top: 0;">
+                            <span style="width: 14px; height: 14px; background: var(--accent); color: white; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 0.65rem; font-weight: bold;">${idx + 1}</span>
+                            <span style="max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500;">${src.file_name}</span>
+                        </button>
+                    `;
+                });
+                html += '</div>';
+            }
             container.innerHTML = html;
         }
 
-        // Helper for Unicode base64
         function b64EncodeUnicode(str) {
             return btoa(encodeURIComponent(str).replace(/%([0-9A-F]{2})/g, function(match, p1) {
                 return String.fromCharCode('0x' + p1);
@@ -676,7 +685,6 @@
         $('sendBtn').onclick = send;
         $('queryInput').onkeypress = e => { if (e.key === 'Enter') send(); };
 
-        // ── Viewer ──
         function closeViewer() {
             $('viewerCol').classList.remove('open');
             setTimeout(() => {
@@ -702,29 +710,20 @@
                             $('viewerBody').innerHTML = `<div class="viewer-text">Метаданные для видео не найдены. Выполняется анализ или это старый файл.</div>`;
                             return;
                         }
-                        
                         let html = `
                             <div style="padding: 16px; overflow-y: auto; flex: 1;">
                                 <video id="vidPlayer" controls src="${fileUrl}" style="width: 100%; border-radius: 8px; background: #000; margin-bottom: 16px; position: sticky; top: 0; z-index: 10;"></video>
                                 <div class="video-feed" style="display: flex; flex-direction: column; gap: 4px; margin-top: 10px;">
                         `;
-                        
                         let events = [];
-                        if (data.transcript) {
-                            data.transcript.forEach(t => events.push({type: 'text', time: t.start, text: t.text}));
-                        }
-                        if (data.frames) {
-                            data.frames.forEach(f => events.push({type: 'image', time: f.time, image_path: f.image_path, description: f.description}));
-                        }
-                        
+                        if (data.transcript) data.transcript.forEach(t => events.push({type: 'text', time: t.start, text: t.text}));
+                        if (data.frames) data.frames.forEach(f => events.push({type: 'image', time: f.time, image_path: f.image_path, description: f.description}));
                         events.sort((a, b) => a.time - b.time);
-                        
                         const fmtTime = (s) => {
                             let m = Math.floor(s / 60);
                             let sec = Math.floor(s % 60);
                             return `${m}:${sec.toString().padStart(2, '0')}`;
                         };
-                        
                         events.forEach(ev => {
                             const timeStr = fmtTime(ev.time);
                             if (ev.type === 'text') {
@@ -742,28 +741,14 @@
                                          </div>`;
                             }
                         });
-                        
                         html += `</div></div>`;
                         $('viewerBody').innerHTML = html;
-
                         const v = document.getElementById('vidPlayer');
-                        
-                        // Listen for time updates to highlight current segment
-                        v.ontimeupdate = () => {
-                            // Don't auto-scroll while playing, only highlight
-                            highlightFeedItem(v.currentTime, false);
-                        };
-
-                        // Listen for manual seeks to scroll to item
-                        v.onseeked = () => {
-                            highlightFeedItem(v.currentTime, true);
-                        };
-
-                        // Seek if startTime provided
+                        v.ontimeupdate = () => highlightFeedItem(v.currentTime, false);
+                        v.onseeked = () => highlightFeedItem(v.currentTime, true);
                         if (startTime > 0) {
                             const seek = () => { v.currentTime = startTime; v.play(); highlightFeedItem(startTime, true); };
-                            if (v.readyState >= 1) seek();
-                            else v.onloadedmetadata = seek;
+                            if (v.readyState >= 1) seek(); else v.onloadedmetadata = seek;
                         }
                     })
                     .catch(e => {
@@ -780,38 +765,22 @@
 
         function seekVideo(time) {
             const v = document.getElementById('vidPlayer');
-            if (v) {
-                v.currentTime = time;
-                v.play();
-                highlightFeedItem(time, true);
-            }
+            if (v) { v.currentTime = time; v.play(); highlightFeedItem(time, true); }
         }
 
         function highlightFeedItem(time, scroll = false) {
             const items = document.querySelectorAll('.feed-item');
             if (!items.length) return;
-            
-            let closest = null;
-            let minDiff = Infinity;
-            
+            let closest = null; let minDiff = Infinity;
             items.forEach(item => {
                 const itemTime = parseFloat(item.getAttribute('data-time'));
                 const diff = time - itemTime;
-                if (diff >= 0 && diff < minDiff) {
-                    minDiff = diff;
-                    closest = item;
-                }
+                if (diff >= 0 && diff < minDiff) { minDiff = diff; closest = item; }
             });
-
             if (closest) {
-                // Remove highlight from others
                 items.forEach(i => i.classList.remove('active-segment'));
-                // Add highlight to closest
                 closest.classList.add('active-segment');
-                
-                if (scroll) {
-                    closest.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                }
+                if (scroll) closest.scrollIntoView({ behavior: 'smooth', block: 'center' });
             }
         }
 
@@ -820,9 +789,7 @@
             const filename = src.file_name;
             const isVideo = filename.toLowerCase().match(/\.(mp4|avi|mov|mkv)$/i);
             const isPdf = filename.toLowerCase().endsWith('.pdf');
-
             if (isVideo) {
-                // Извлекаем время из текста или меты
                 let time = 0;
                 let m = src.text.match(/\[(\d+\.?\d*)s/);
                 if (m) time = parseFloat(m[1]);
@@ -833,12 +800,10 @@
                 openFileViewer(filename, time);
                 return;
             }
-
             $('viewerCol').classList.add('open');
             $('viewerTitle').textContent = filename;
             const body = $('viewerBody');
             const fileUrl = `/files/${currentNotebook}/data/${encodeURIComponent(filename)}`;
-            
             if (isPdf) {
                 let pageNum = src.page;
                 if (!pageNum) {
@@ -855,46 +820,36 @@
             }
         }
 
-        // ── Tooltip positioning ──
         const gt = $('globalTooltip');
         let tooltipTimeout;
-
         document.addEventListener('mouseover', e => {
             const btn = e.target.closest('.cite-btn');
             if (btn) {
                 clearTimeout(tooltipTimeout);
-                
                 const fileName = btn.getAttribute('data-file');
                 const encodedSnippet = btn.getAttribute('data-snippet');
                 if (!fileName || !encodedSnippet) return;
-                
                 const snippetHtml = b64DecodeUnicode(encodedSnippet);
-                
                 gt.innerHTML = `
                     <div class="tooltip-file">📄 ${fileName}</div>
                     <div class="tooltip-snippet">${snippetHtml}</div>
                 `;
                 gt.classList.add('visible');
-                
-                // Позиционируем после рендера — чтобы знать реальную высоту
                 requestAnimationFrame(() => {
                     const r = btn.getBoundingClientRect();
                     const h = gt.offsetHeight;
                     const w = gt.offsetWidth || 280;
-                    
                     let left = r.left + r.width / 2 - w / 2;
                     left = Math.max(10, Math.min(left, window.innerWidth - w - 10));
                     gt.style.left = left + 'px';
-                    
                     let top = r.top - h - 10;
-                    if (top < 10) top = r.bottom + 10;   // перевернуть вниз
+                    if (top < 10) top = r.bottom + 10;
                     gt.style.top = top + 'px';
                 });
             } else if (e.target.closest('#globalTooltip')) {
                 clearTimeout(tooltipTimeout);
             }
         });
-
         document.addEventListener('mouseout', e => {
             if (e.target.closest('.cite-btn') || e.target.closest('#globalTooltip')) {
                 tooltipTimeout = setTimeout(() => {

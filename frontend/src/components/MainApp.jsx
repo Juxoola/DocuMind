@@ -12,6 +12,16 @@ export default function MainApp({ notebook, onExit }) {
   const [viewerFile, setViewerFile] = useState(null);
   const [isViewerOpen, setIsViewerOpen] = useState(false);
   const [viewerWidth, setViewerWidth] = useState(500);
+  const [sidebarWidth, setSidebarWidth] = useState(300);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  const [llmSettings, setLlmSettings] = useState(() => {
+    const saved = localStorage.getItem('llm_settings');
+    return saved ? JSON.parse(saved) : {
+      llm_url: 'http://localhost:1234/v1',
+      llm_api_key: 'lm-studio',
+      llm_model: 'gpt-4o'
+    };
+  });
 
   useEffect(() => {
     fetchSources();
@@ -23,7 +33,6 @@ export default function MainApp({ notebook, onExit }) {
       const data = await res.json();
       const files = data.files || [];
       setSources(files);
-      // По умолчанию выбираем все новые файлы
       setSelectedSources(files);
     } catch (err) {
       console.error(err);
@@ -43,24 +52,75 @@ export default function MainApp({ notebook, onExit }) {
 
   return (
     <div className="flex h-screen w-full overflow-hidden bg-background relative">
-      {/* Sidebar */}
-      <Sidebar 
-        notebook={notebook}
-        sources={sources}
-        selectedSources={selectedSources}
-        onSelectSources={setSelectedSources}
-        onRefresh={fetchSources}
-        onExit={handleExit}
-        onOpenFile={openViewer}
-      />
+      {/* Sidebar with fixed positioning to avoid squishing chat */}
+      <AnimatePresence initial={false}>
+        {isSidebarOpen && (
+          <motion.div
+            initial={{ x: '-100%', opacity: 0 }}
+            animate={{ x: 0, opacity: 1 }}
+            exit={{ x: '-100%', opacity: 0 }}
+            transition={{ type: 'spring', damping: 25, stiffness: 200 }}
+            className="fixed left-0 top-0 bottom-0 border-r z-[100] bg-background shadow-2xl flex-shrink-0"
+            style={{ width: sidebarWidth }}
+          >
+            <Sidebar 
+              notebook={notebook}
+              sources={sources}
+              selectedSources={selectedSources}
+              onSelectSources={setSelectedSources}
+              onRefresh={fetchSources}
+              onExit={handleExit}
+              onOpenFile={openViewer}
+              llmSettings={llmSettings}
+              width={sidebarWidth}
+              onToggle={() => setIsSidebarOpen(false)}
+            />
 
-      {/* Main Chat Area */}
+            {/* Sidebar Resizer */}
+            <div 
+              className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize z-50 group/s-resizer hover:bg-primary/30 transition-colors"
+              onMouseDown={(e) => {
+                e.preventDefault();
+                const onMouseMove = (e) => {
+                  const newWidth = e.clientX;
+                  // Ограничиваем, чтобы не налезать на чат (max-w-4xl = 896px)
+                  const maxAllowed = (window.innerWidth - 896) / 2 - 20;
+                  if (newWidth > 240 && newWidth < Math.max(240, Math.min(600, maxAllowed))) {
+                    setSidebarWidth(newWidth);
+                  }
+                };
+                const onMouseUp = () => {
+                  document.removeEventListener('mousemove', onMouseMove);
+                  document.removeEventListener('mouseup', onMouseUp);
+                };
+                document.addEventListener('mousemove', onMouseMove);
+                document.addEventListener('mouseup', onMouseUp);
+              }}
+            />
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Toggle Button for Hidden Sidebar */}
+      {!isSidebarOpen && (
+        <motion.button 
+          initial={{ opacity: 0, x: -20 }}
+          animate={{ opacity: 1, x: 0 }}
+          onClick={() => setIsSidebarOpen(true)}
+          className="fixed top-4 left-4 z-[100] w-10 h-10 bg-card border border-border rounded-xl flex items-center justify-center shadow-lg hover:bg-muted transition-all text-muted-foreground"
+        >
+          <ChevronRight size={20} />
+        </motion.button>
+      )}
+
+      {/* Main Chat Area - Always centered relative to the window, Sidebar is now an overlay */}
       <main className="flex-1 flex flex-col min-w-0 bg-background relative z-0">
         <ChatArea 
           notebook={notebook}
           selectedSources={selectedSources}
+          llmSettings={llmSettings}
+          setLlmSettings={setLlmSettings}
           onOpenSource={(src) => {
-             // src может быть объектом {file_name, text, index} из RAG
              setViewerFile(src);
              setIsViewerOpen(true);
           }}
@@ -86,7 +146,7 @@ export default function MainApp({ notebook, onExit }) {
               style={{ width: viewerWidth }}
               className="fixed right-0 top-0 bottom-0 glass z-50 border-l flex flex-col shadow-2xl"
             >
-              {/* Resizer */}
+              {/* Viewer Resizer */}
               <div 
                 className="absolute left-0 top-0 bottom-0 w-2 -left-1 cursor-col-resize z-[60] group/resizer"
                 onMouseDown={(e) => {

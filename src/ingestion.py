@@ -15,6 +15,7 @@ import requests
 import json
 import time
 import gc
+from llama_index.core.node_parser import SentenceSplitter
 
 # Подавляем шумные предупреждения от speechbrain и pyannote
 warnings.filterwarnings("ignore", message="Module 'speechbrain")
@@ -96,13 +97,22 @@ def get_image_base64(image_path):
     with open(image_path, "rb") as image_file:
         return base64.b64encode(image_file.read()).decode("utf-8")
 
-def describe_image_with_lmstudio(image_path):
+def describe_image_with_lmstudio(image_path, llm_settings=None):
     """Отправляет картинку в локальный LM Studio для получения текстового описания."""
     base64_img = get_image_base64(image_path)
-    url = f"{config.LM_STUDIO_URL}/chat/completions"
-    headers = {"Content-Type": "application/json"}
+    
+    # Настройки из параметров или системного конфига
+    api_url = (llm_settings.get("llm_url") if llm_settings else None) or config.LM_STUDIO_URL
+    api_key = (llm_settings.get("llm_api_key") if llm_settings else None) or "lm-studio"
+    model_name = (llm_settings.get("llm_model") if llm_settings else None) or "gpt-4o"
+
+    url = f"{api_url.rstrip('/')}/chat/completions"
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {api_key}"
+    }
     payload = {
-        "model": "gpt-4o", # Обход проверки имени
+        "model": model_name,
         "messages": [
             {
                 "role": "user",
@@ -116,7 +126,7 @@ def describe_image_with_lmstudio(image_path):
         "max_tokens": 300
     }
     try:
-        response = requests.post(url, headers=headers, json=payload)
+        response = requests.post(url, headers=headers, json=payload, timeout=30)
         response.raise_for_status()
         data = response.json()
         return data["choices"][0]["message"]["content"]
@@ -124,18 +134,9 @@ def describe_image_with_lmstudio(image_path):
         print(f"Ошибка при описании картинки {image_path}: {e}")
         return "Изображение без описания."
 
-_whisperx_model = None
-def get_whisperx_model():
-    global _whisperx_model
-    if _whisperx_model is None:
-        device = "cuda" if torch.cuda.is_available() else "cpu"
-        # Для CPU float16 не поддерживается, выбираем int8. Для GPU можно float16.
-        compute_type = "float16" if device == "cuda" else "int8"
-        print(f"Загрузка WhisperX на {device.upper()} с {compute_type}...")
-        _whisperx_model = whisperx.load_model("large-v3", device, compute_type=compute_type)
-    return _whisperx_model
+import gc
 
-def process_audio_video(file_path, images_dir, is_video=False, progress_cb=None):
+def process_audio_video(file_path, images_dir, is_video=False, progress_cb=None, llm_settings=None):
     """Транскрибирует аудио/видео. Для видео извлекает кадры при смене слайда (дебаунс)."""
     def prog(pct, msg):
         print(f"  [{pct}%] {msg}")
@@ -145,7 +146,13 @@ def process_audio_video(file_path, images_dir, is_video=False, progress_cb=None)
     file_name = os.path.basename(file_path)
 
     prog(15, "Загрузка модели транскрибации...")
-    model = get_whisperx_model()
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    # int8 - максимальная экономия памяти
+    compute_type = "int8"
+    
+    print(f"  [DEBUG] Загрузка WhisperX на {device} ({compute_type})...")
+    model = whisperx.load_model("medium", device, compute_type=compute_type)
+    
     prog(20, "Транскрибация речи (это займёт время)...")
     audio = whisperx.load_audio(file_path)
 
@@ -157,14 +164,24 @@ def process_audio_video(file_path, images_dir, is_video=False, progress_cb=None)
             transcript += f"[{seg['start']:.2f}s -> {seg['end']:.2f}s] {seg['text'].strip()}\n"
             transcript_data.append({"start": seg['start'], "end": seg['end'], "text": seg['text'].strip()})
     except Exception as e:
-        print(f"WhisperX VAD упал ({e}). Резервный движок (faster-whisper)...")
-        from faster_whisper import WhisperModel
-        device = "cuda" if torch.cuda.is_available() else "cpu"
-        fw = WhisperModel("large-v3", device=device, compute_type="float16" if device=="cuda" else "int8")
-        for seg, _ in [fw.transcribe(audio, vad_filter=True)]:
-            for s in seg:
+        print(f"WhisperX transcribe error: {e}. Резервный движок (faster-whisper)...")
+        try:
+            from faster_whisper import WhisperModel
+            fw = WhisperModel("medium", device=device, compute_type="int8")
+            segments, _ = fw.transcribe(audio, vad_filter=True)
+            for s in segments:
                 transcript += f"[{s.start:.2f}s -> {s.end:.2f}s] {s.text.strip()}\n"
                 transcript_data.append({"start": s.start, "end": s.end, "text": s.text.strip()})
+            del fw
+        except Exception as e2:
+            print(f"Критическая ошибка транскрибации: {e2}")
+    finally:
+        # Принудительная выгрузка модели для освобождения VRAM
+        print("  [DEBUG] Очистка VRAM после транскрибации...")
+        if 'model' in locals(): del model
+        gc.collect()
+        if device == "cuda":
+            torch.cuda.empty_cache()
 
     if transcript_data:
         # Разбиваем транскрипт на чанки по ~30 секунд или по предложениям
@@ -200,6 +217,9 @@ def process_audio_video(file_path, images_dir, is_video=False, progress_cb=None)
         STABLE_WAIT  = int(fps * 3.0)  # 3 сек без движений -> фиксируем результат
         CHECK_STEP   = max(1, int(fps * 1.0))
         COMPARE_SIZE = (320, 180)
+        
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        duration_sec = total_frames / fps if fps > 0 else 0
 
         prev_saved_thumb = None    # Эталон последнего сохраненного/обновленного кадра
         last_seen_thumb  = None    
@@ -207,59 +227,63 @@ def process_audio_video(file_path, images_dir, is_video=False, progress_cb=None)
         frame_count      = 0
         frame_list       = []      # [(image_path, time_sec)]
 
-        while cap.isOpened():
+        while frame_count < total_frames:
+            cap.set(cv2.CAP_PROP_POS_FRAMES, frame_count)
             ret, frame = cap.read()
             if not ret:
                 break
 
-            if frame_count % CHECK_STEP == 0:
-                thumb = cv2.resize(frame, COMPARE_SIZE)
+            # Прогресс каждые 10 проверок или в конце
+            if (frame_count // CHECK_STEP) % 10 == 0:
+                prog(62 + int((frame_count / total_frames) * 3), 
+                     f"Извлечение кадров: {format_seconds(frame_count/fps)} / {format_seconds(duration_sec)}")
 
-                if last_seen_thumb is None:
-                    last_seen_thumb = thumb
-                    stable_since = frame_count
-                    
-                    img_name = f"video_frame_{uuid.uuid4().hex[:8]}.jpg"
-                    img_path = os.path.join(images_dir, img_name)
-                    cv2.imwrite(img_path, frame)
-                    frame_list.append((img_path, 0.0))
-                    prev_saved_thumb = thumb
-                else:
-                    diff_motion = cv2.absdiff(thumb, last_seen_thumb)
-                    motion_pct = float(np.sum(diff_motion > PIXEL_THR)) / diff_motion.size
-                    
-                    if motion_pct >= MOTION_PCT:
-                        # Движение продолжается
-                        stable_since = frame_count
-                    else:
-                        if frame_count - stable_since >= STABLE_WAIT:
-                            if prev_saved_thumb is not None:
-                                diff_saved = cv2.absdiff(thumb, prev_saved_thumb)
-                                saved_pct = float(np.sum(diff_saved > PIXEL_THR)) / diff_saved.size
-                                
-                                if saved_pct >= UPDATE_PCT:
-                                    img_name = f"video_frame_{uuid.uuid4().hex[:8]}.jpg"
-                                    img_path = os.path.join(images_dir, img_name)
-                                    cv2.imwrite(img_path, frame)
-                                    
-                                    if saved_pct >= NEW_SLIDE_PCT:
-                                        # Полностью новый слайд
-                                        frame_list.append((img_path, frame_count / fps))
-                                    else:
-                                        # Инкрементальное добавление (дорисовали схему) -> ПЕРЕЗАПИСЫВАЕМ
-                                        old_path = frame_list[-1][0]
-                                        if os.path.exists(old_path):
-                                            try: os.remove(old_path)
-                                            except: pass
-                                        frame_list[-1] = (img_path, frame_count / fps)
-                                        
-                                    prev_saved_thumb = thumb
-                                    
-                            stable_since = frame_count
+            thumb = cv2.resize(frame, COMPARE_SIZE)
 
+            if last_seen_thumb is None:
                 last_seen_thumb = thumb
+                stable_since = frame_count
+                
+                img_name = f"video_frame_{uuid.uuid4().hex[:8]}.jpg"
+                img_path = os.path.join(images_dir, img_name)
+                cv2.imwrite(img_path, frame)
+                frame_list.append((img_path, 0.0))
+                prev_saved_thumb = thumb
+            else:
+                diff_motion = cv2.absdiff(thumb, last_seen_thumb)
+                motion_pct = float(np.sum(diff_motion > PIXEL_THR)) / diff_motion.size
+                
+                if motion_pct >= MOTION_PCT:
+                    # Движение продолжается
+                    stable_since = frame_count
+                else:
+                    if frame_count - stable_since >= STABLE_WAIT:
+                        if prev_saved_thumb is not None:
+                            diff_saved = cv2.absdiff(thumb, prev_saved_thumb)
+                            saved_pct = float(np.sum(diff_saved > PIXEL_THR)) / diff_saved.size
+                            
+                            if saved_pct >= UPDATE_PCT:
+                                img_name = f"video_frame_{uuid.uuid4().hex[:8]}.jpg"
+                                img_path = os.path.join(images_dir, img_name)
+                                cv2.imwrite(img_path, frame)
+                                
+                                if saved_pct >= NEW_SLIDE_PCT:
+                                    # Полностью новый слайд
+                                    frame_list.append((img_path, frame_count / fps))
+                                else:
+                                    # Инкрементальное добавление (дорисовали схему) -> ПЕРЕЗАПИСЫВАЕМ
+                                    old_path = frame_list[-1][0]
+                                    if os.path.exists(old_path):
+                                        try: os.remove(old_path)
+                                        except: pass
+                                    frame_list[-1] = (img_path, frame_count / fps)
+                                    
+                                prev_saved_thumb = thumb
+                                
+                        stable_since = frame_count
 
-            frame_count += 1
+            last_seen_thumb = thumb
+            frame_count += CHECK_STEP
 
         cap.release()
         print(f"Извлечено кадров (итоговые состояния): {len(frame_list)}")
@@ -270,10 +294,10 @@ def process_audio_video(file_path, images_dir, is_video=False, progress_cb=None)
 
         def _describe(args):
             img_path, t = args
-            return img_path, t, describe_image_with_lmstudio(img_path)
+            return img_path, t, describe_image_with_lmstudio(img_path, llm_settings=llm_settings)
 
         done = 0
-        with ThreadPoolExecutor(max_workers=3) as exe:
+        with ThreadPoolExecutor(max_workers=5) as exe:
             futs = {exe.submit(_describe, item): item for item in frame_list}
             for fut in as_completed(futs):
                 img_path, t, desc = fut.result()
@@ -312,7 +336,7 @@ def process_audio_video(file_path, images_dir, is_video=False, progress_cb=None)
 
     return nodes
 
-def process_pdf(file_path, images_dir):
+def process_pdf(file_path, images_dir, llm_settings=None):
     print(f"Обработка PDF: {file_path}")
     nodes = []
     file_name = os.path.basename(file_path)
@@ -383,7 +407,7 @@ def process_pdf(file_path, images_dir):
         with open(image_path, "wb") as f:
             f.write(image_bytes)
             
-        desc = describe_image_with_lmstudio(image_path)
+        desc = describe_image_with_lmstudio(image_path, llm_settings=llm_settings)
         
         nodes.append(TextNode(
             text=f"Изображение/Схема из PDF {file_name}, страница {page_num+1}. Описание: {desc}",
@@ -392,7 +416,7 @@ def process_pdf(file_path, images_dir):
             
     return nodes
 
-def process_pptx(file_path, images_dir):
+def process_pptx(file_path, images_dir, llm_settings=None):
     print(f"Обработка презентации: {file_path}")
     nodes = []
     file_name = os.path.basename(file_path)
@@ -411,7 +435,7 @@ def process_pptx(file_path, images_dir):
                 with open(image_path, "wb") as f:
                     f.write(image_bytes)
                     
-                desc = describe_image_with_lmstudio(image_path)
+                desc = describe_image_with_lmstudio(image_path, llm_settings=llm_settings)
                 nodes.append(TextNode(
                     text=f"Изображение со слайда {i+1} презентации {file_name}. Описание: {desc}",
                     metadata={"file_name": file_name, "image_path": image_path}
@@ -426,7 +450,7 @@ def process_pptx(file_path, images_dir):
             
     return nodes
 
-def process_docx(file_path, images_dir):
+def process_docx(file_path, images_dir, llm_settings=None):
     print(f"Обработка DOCX: {file_path}")
     import docx
     nodes = []
@@ -456,7 +480,7 @@ def process_docx(file_path, images_dir):
                     with open(image_path, "wb") as f:
                         f.write(img_bytes)
                         
-                    desc = describe_image_with_lmstudio(image_path)
+                    desc = describe_image_with_lmstudio(image_path, llm_settings=llm_settings)
                     nodes.append(TextNode(
                         text=f"Изображение из документа Word {file_name}. Описание: {desc}",
                         metadata={"file_name": file_name, "image_path": image_path}
@@ -468,30 +492,40 @@ def process_docx(file_path, images_dir):
         
     return nodes
 
-def ingest_file(file_path, notebook_id, progress_cb=None):
+def ingest_file(file_path, notebook_id, progress_cb=None, llm_settings=None):
     paths = config.get_notebook_paths(notebook_id)
     images_dir = paths["images"]
     os.makedirs(images_dir, exist_ok=True)
 
     ext = os.path.splitext(file_path)[1].lower()
     file_name = os.path.basename(file_path)
+    nodes = []
     if ext in ['.mp4', '.avi', '.mkv']:
-        return process_audio_video(file_path, images_dir, is_video=True, progress_cb=progress_cb)
+        nodes = process_audio_video(file_path, images_dir, is_video=True, progress_cb=progress_cb, llm_settings=llm_settings)
     elif ext in ['.mp3', '.wav', '.m4a']:
-        return process_audio_video(file_path, images_dir, is_video=False, progress_cb=progress_cb)
+        nodes = process_audio_video(file_path, images_dir, is_video=False, progress_cb=progress_cb, llm_settings=llm_settings)
     elif ext == '.pdf':
         if progress_cb: progress_cb(50, "Обработка PDF...")
-        return process_pdf(file_path, images_dir)
+        nodes = process_pdf(file_path, images_dir, llm_settings=llm_settings)
     elif ext == '.pptx':
         if progress_cb: progress_cb(50, "Обработка презентации...")
-        return process_pptx(file_path, images_dir)
+        nodes = process_pptx(file_path, images_dir, llm_settings=llm_settings)
     elif ext == '.docx':
         if progress_cb: progress_cb(50, "Обработка документа Word...")
-        return process_docx(file_path, images_dir)
+        nodes = process_docx(file_path, images_dir, llm_settings=llm_settings)
     elif ext == '.txt':
         if progress_cb: progress_cb(50, "Чтение текстового файла...")
         with open(file_path, "r", encoding="utf-8") as f:
-            return [TextNode(text=f.read(), metadata={"file_name": file_name})]
+            nodes = [TextNode(text=f.read(), metadata={"file_name": file_name})]
     else:
         print(f"Неподдерживаемый формат: {ext}")
         return []
+
+    # Применяем умную нарезку (chunking) для всех текстовых нод
+    if nodes:
+        splitter = SentenceSplitter(chunk_size=512, chunk_overlap=50)
+        from llama_index.core import Document
+        docs = [Document(text=n.text, metadata=n.metadata) for n in nodes]
+        nodes = splitter.get_nodes_from_documents(docs)
+        
+    return nodes

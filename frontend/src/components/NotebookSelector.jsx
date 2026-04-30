@@ -7,6 +7,8 @@ import { cn } from '../lib/utils';
 export default function NotebookSelector({ onSelect }) {
   const [notebooks, setNotebooks] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [sortBy, setSortBy] = useState('date_desc'); // 'date_desc', 'date_asc', 'name_asc', 'name_desc'
 
   useEffect(() => {
     fetchNotebooks();
@@ -45,14 +47,26 @@ export default function NotebookSelector({ onSelect }) {
     }
   };
 
+  const filteredNotebooks = notebooks
+    .filter(nb => nb.name.toLowerCase().includes(searchTerm.toLowerCase()))
+    .sort((a, b) => {
+      switch (sortBy) {
+        case 'name_asc': return a.name.localeCompare(b.name);
+        case 'name_desc': return b.name.localeCompare(a.name);
+        case 'date_asc': return a.created_at - b.created_at;
+        case 'date_desc': 
+        default: return b.created_at - a.created_at;
+      }
+    });
+
   return (
     <motion.div 
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, scale: 0.95 }}
-      className="flex flex-col items-center justify-center min-h-screen p-8 bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-primary/10 via-background to-background"
+      className="flex flex-col items-center justify-start min-h-screen p-8 bg-background"
     >
-      <div className="text-center mb-12">
+      <div className="text-center mb-12 mt-12">
         <motion.h1 
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
@@ -66,27 +80,64 @@ export default function NotebookSelector({ onSelect }) {
         </p>
       </div>
 
-      <motion.button
-        whileHover={{ scale: 1.05 }}
-        whileTap={{ scale: 0.95 }}
-        onClick={createNotebook}
-        className="flex items-center gap-2 bg-primary text-primary-foreground px-8 py-4 rounded-full font-semibold shadow-lg shadow-primary/25 mb-16 transition-all"
-      >
-        <Plus size={20} />
-        Создать новый блокнот
-      </motion.button>
+      <div className="flex flex-col items-center gap-6 w-full max-w-5xl mb-12">
+        <motion.button
+          whileHover={{ scale: 1.02 }}
+          whileTap={{ scale: 0.98 }}
+          onClick={createNotebook}
+          className="flex items-center gap-2 bg-primary text-primary-foreground px-8 py-3 rounded-xl font-semibold shadow-lg shadow-primary/20 transition-all w-full md:w-auto justify-center"
+        >
+          <Plus size={20} />
+          Создать новый блокнот
+        </motion.button>
+
+        <div className="flex flex-col md:flex-row gap-4 w-full items-center bg-card/30 backdrop-blur-md p-2 rounded-2xl border border-border/40 shadow-inner">
+          <div className="relative flex-1 w-full flex items-center">
+            <Plus size={16} className="absolute left-4 text-muted-foreground/40" />
+            <input 
+              type="text" 
+              placeholder="Поиск по названию..." 
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="w-full bg-transparent border-none outline-none pl-11 pr-4 py-2.5 text-sm font-medium placeholder:text-muted-foreground/30"
+            />
+          </div>
+          <div className="flex items-center gap-1.5 p-1 bg-muted/20 rounded-xl border border-border/20 overflow-x-auto no-scrollbar">
+            <span className="text-[10px] font-bold text-muted-foreground/40 px-3 uppercase tracking-tighter whitespace-nowrap">Сортировка:</span>
+            {[
+              { id: 'date_desc', label: 'Новые' },
+              { id: 'date_asc', label: 'Старые' },
+              { id: 'name_asc', label: 'А-Я' },
+              { id: 'name_desc', label: 'Я-А' },
+            ].map(opt => (
+              <button 
+                key={opt.id}
+                onClick={() => setSortBy(opt.id)}
+                className={cn(
+                  "px-4 py-1.5 text-[11px] font-bold rounded-lg transition-all whitespace-nowrap",
+                  sortBy === opt.id 
+                    ? "bg-primary text-primary-foreground shadow-md shadow-primary/20 scale-[1.02]" 
+                    : "text-muted-foreground hover:text-foreground hover:bg-muted/40"
+                )}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 w-full max-w-5xl">
-        {notebooks.map((nb, i) => (
+        {filteredNotebooks.map((nb, i) => (
           <motion.div
             key={nb.id}
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.1 * i }}
             onClick={() => onSelect(nb)}
-            className="group relative glass-card p-8 rounded-3xl cursor-pointer overflow-hidden"
+            className="group relative glass-card p-8 rounded-3xl cursor-pointer overflow-hidden border border-border/50 hover:border-primary/30"
           >
-            <div className="absolute top-0 right-0 p-4 opacity-0 group-hover:opacity-100 transition-opacity">
+            <div className="absolute top-0 right-0 p-4 opacity-0 group-hover:opacity-100 transition-opacity z-10">
               <button 
                 onClick={(e) => deleteNotebook(e, nb.id)}
                 className="p-2 hover:bg-destructive/10 text-muted-foreground hover:text-destructive rounded-xl transition-colors"
@@ -99,7 +150,7 @@ export default function NotebookSelector({ onSelect }) {
               <Book size={24} />
             </div>
 
-            <h3 className="text-xl font-bold mb-2">{nb.name}</h3>
+            <h3 className="text-xl font-bold mb-2 group-hover:text-primary transition-colors">{nb.name}</h3>
             
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
               <Clock size={14} />
@@ -112,6 +163,12 @@ export default function NotebookSelector({ onSelect }) {
           </motion.div>
         ))}
       </div>
+
+      {filteredNotebooks.length === 0 && !loading && (
+        <div className="mt-12 text-muted-foreground text-center">
+          <p>Ничего не найдено</p>
+        </div>
+      )}
 
       {loading && <div className="mt-12 animate-pulse text-muted-foreground">Загрузка ваших блокнотов...</div>}
     </motion.div>

@@ -48,10 +48,10 @@ export default function SettingsModal({ isOpen, onClose, settings, onSave }) {
                 type="text"
                 value={localSettings.llm_url}
                 onChange={(e) => setLocalSettings({...localSettings, llm_url: e.target.value})}
-                placeholder="http://localhost:1234/v1"
+                placeholder="http://localhost:8889/v1"
                 className="w-full bg-muted/30 border border-border/50 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all"
               />
-              <p className="text-[10px] text-muted-foreground/60 italic">Для LM Studio обычно: http://localhost:1234/v1</p>
+              <p className="text-[10px] text-muted-foreground/60 italic">Для LM Studio обычно: http://localhost:8889/v1</p>
             </div>
 
             <div className="space-y-2">

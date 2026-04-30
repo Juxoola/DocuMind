@@ -20,6 +20,8 @@ export default function DocumentViewer({ file, notebook, onClose }) {
   
   const isPdf = filename?.toLowerCase().endsWith('.pdf');
   const isVideo = filename?.toLowerCase().match(/\.(mp4|avi|mov|mkv)$/i);
+  const isAudio = filename?.toLowerCase().match(/\.(mp3|wav|m4a|aac|flac)$/i);
+  const isMedia = isVideo || isAudio;
   
   let fileUrl = filename ? `/files/${notebook.id}/data/${encodeURIComponent(filename)}` : '';
   
@@ -32,7 +34,7 @@ export default function DocumentViewer({ file, notebook, onClose }) {
     if (!filename) return;
     setLoading(true);
     
-    if (isVideo) {
+    if (isMedia) {
       fetch(`/api/video_metadata?filename=${encodeURIComponent(filename)}&notebook_id=${notebook.id}`)
         .then(r => r.json())
         .then(data => {
@@ -53,18 +55,26 @@ export default function DocumentViewer({ file, notebook, onClose }) {
 
   // Обработка перехода по времени при клике из чата
   useEffect(() => {
-    // Ищем только если startTime изменился и мы еще не перешли к нему для ЭТОГО объекта file
-    if (isVideo && startTime !== null && vidRef.current && lastSoughtTime.current !== file) {
-      vidRef.current.currentTime = startTime;
-      vidRef.current.play().catch(() => {});
-      lastSoughtTime.current = file; // Запоминаем именно объект, чтобы при его смене сработал переход
-    }
-  }, [startTime, isVideo, file]);
+    if (isMedia && startTime !== null && vidRef.current && lastSoughtTime.current !== file) {
+      const vid = vidRef.current;
+      const doSeek = () => {
+        vid.currentTime = startTime;
+        vid.play().catch(() => {});
+        lastSoughtTime.current = file;
+      };
 
-  const seekVideo = (time) => {
+      if (vid.readyState >= 1) {
+        doSeek();
+      } else {
+        vid.addEventListener('canplay', doSeek, { once: true });
+      }
+    }
+  }, [startTime, isMedia, file]);
+
+  const seekMedia = (time) => {
     if (vidRef.current) {
       vidRef.current.currentTime = time;
-      vidRef.current.play();
+      vidRef.current.play().catch(() => {});
     }
   };
 
@@ -134,25 +144,48 @@ export default function DocumentViewer({ file, notebook, onClose }) {
           </div>
         ) : isPdf ? (
           <iframe 
+            key={filename}
             src={viewerUrl}
             className="w-full h-full border-none"
           />
-        ) : isVideo ? (
+        ) : isMedia ? (
           <div className="h-full flex flex-col overflow-hidden">
-            {/* Video Underlay & Player */}
+            {/* Media Player Area */}
             <div className="relative p-6 pb-0 group">
               {/* Эффект подложки (Glow) */}
               <div className="absolute inset-0 bg-gradient-to-b from-primary/5 to-transparent pointer-events-none opacity-50" />
               <div className="absolute -top-20 left-1/2 -translate-x-1/2 w-full h-40 bg-primary/10 blur-[100px] rounded-full pointer-events-none" />
               
-              <div className="relative z-10 rounded-2xl overflow-hidden shadow-[0_20px_50px_rgba(0,0,0,0.5)] border border-white/10 bg-black aspect-video">
-                <video 
-                  ref={vidRef}
-                  src={fileUrl} 
-                  controls 
-                  onTimeUpdate={(e) => setCurrentTime(e.target.currentTime)}
-                  className="w-full h-full object-contain"
-                />
+              <div className={cn(
+                "relative z-10 rounded-2xl overflow-hidden shadow-[0_20px_50px_rgba(0,0,0,0.5)] border border-white/10 bg-black",
+                isVideo ? "aspect-video" : "py-8 px-6 flex flex-col items-center justify-center bg-gradient-to-br from-card to-muted/20"
+              )}>
+                {isVideo ? (
+                  <video 
+                    ref={vidRef}
+                    src={fileUrl} 
+                    controls 
+                    onTimeUpdate={(e) => setCurrentTime(e.target.currentTime)}
+                    className="w-full h-full object-contain"
+                  />
+                ) : (
+                  <div className="w-full max-w-md flex flex-col items-center gap-6">
+                    <div className="w-20 h-20 bg-primary/20 rounded-full flex items-center justify-center text-primary animate-pulse shadow-[0_0_30px_rgba(var(--primary),0.2)]">
+                      <Play size={32} fill="currentColor" />
+                    </div>
+                    <div className="text-center">
+                       <p className="text-xs font-black uppercase tracking-widest text-primary mb-1">Воспроизведение аудио</p>
+                       <p className="text-[10px] text-muted-foreground truncate max-w-[300px]">{filename}</p>
+                    </div>
+                    <audio 
+                      ref={vidRef}
+                      src={fileUrl} 
+                      controls 
+                      onTimeUpdate={(e) => setCurrentTime(e.target.currentTime)}
+                      className="w-full"
+                    />
+                  </div>
+                )}
               </div>
             </div>
             
@@ -190,7 +223,7 @@ export default function DocumentViewer({ file, notebook, onClose }) {
                             ? "bg-primary/10 border-primary/40 shadow-[0_8px_20px_rgba(var(--primary),0.1)] ring-1 ring-primary/20" 
                             : "bg-muted/30 border-border/40 hover:border-primary/30 hover:bg-muted/50"
                         )}
-                        onClick={() => seekVideo(ev.time)}
+                        onClick={() => seekMedia(ev.time)}
                       >
                         <div className="flex items-center gap-3 mb-2">
                            <div className={cn(
