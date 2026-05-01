@@ -26,3 +26,22 @@ EMBEDDING_MODEL_NAME = os.getenv("EMBEDDING_MODEL_NAME", "Qwen/Qwen3-Embedding-0
 RERANKER_MODEL_NAME = os.getenv("RERANKER_MODEL_NAME", "Qwen/Qwen3-Reranker-0.6B")
 # Квантование: 'fp16', 'int8' или '4bit'
 QUANTIZATION = os.getenv("QUANTIZATION", "int8")
+
+# ── Настройки локальных GGUF моделей ──
+
+# Базовая директория для поиска GGUF моделей (можно указать несколько через ;)
+# Например: "F:/llm/mradermacher;D:/models"
+GGUF_SEARCH_DIRS = os.getenv("GGUF_SEARCH_DIRS", "F:/llm")
+
+# Порт для llama-cpp-python сервера (запускается локально)
+GGUF_SERVER_PORT = int(os.getenv("GGUF_SERVER_PORT", 8081))
+GGUF_SERVER_HOST = os.getenv("GGUF_SERVER_HOST", "127.0.0.1")
+
+# Количество потоков для инференса (0 = авто)
+GGUF_THREADS = int(os.getenv("GGUF_THREADS", 0))
+
+# Контекст (токенов)
+GGUF_CTX_SIZE = int(os.getenv("GGUF_CTX_SIZE", 4096))
+
+# GPU слоёв (-1 = все на GPU, 0 = только CPU)
+GGUF_GPU_LAYERS = int(os.getenv("GGUF_GPU_LAYERS", -1))

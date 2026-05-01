@@ -14,6 +14,7 @@ import stat
 
 from src.ingestion import ingest_file
 from src.rag_pipeline import build_index, retrieve_nodes, build_file_context, make_prompt, close_all_clients
+from src.gguf_manager import scan_gguf_dirs, start_gguf_server, stop_gguf_server, get_server_status, get_gguf_server_url
 from fastapi.middleware.cors import CORSMiddleware
 from llama_index.core import Settings
 
@@ -142,7 +143,10 @@ async def upload_file(
     file: UploadFile = File(...),
     llm_url: Optional[str] = None,
     llm_api_key: Optional[str] = None,
-    llm_model: Optional[str] = None
+    llm_model: Optional[str] = None,
+    use_gguf: Optional[str] = None,
+    gguf_model_path: Optional[str] = None,
+    gguf_mmproj_path: Optional[str] = None,
 ):
     paths = config.get_notebook_paths(notebook_id)
     os.makedirs(paths["data"], exist_ok=True)
@@ -155,10 +159,42 @@ async def upload_file(
     import asyncio
 
     q = queue.Queue()
+    
+    # Определяем эффективный LLM URL — если выбрана GGUF модель, используем локальный сервер
+    effective_llm_url = llm_url
+    effective_llm_api_key = llm_api_key
+    effective_llm_model = llm_model
+    
+    if use_gguf == "true" and gguf_model_path:
+        # Запускаем GGUF сервер если нужно
+        gguf_status = get_server_status()
+        if not gguf_status["running"]:
+            result = start_gguf_server(
+                gguf_path=gguf_model_path,
+                mmproj_path=gguf_mmproj_path if gguf_mmproj_path else None,
+            )
+            if result["status"] == "ok":
+                effective_llm_url = result["url"]
+                effective_llm_api_key = "not-needed"
+                effective_llm_model = os.path.basename(gguf_model_path)
+            else:
+                q.put({"type": "error", "msg": f"Ошибка запуска GGUF сервера: {result['msg']}"})
+                async def error_gen():
+                    while not q.empty():
+                        msg = q.get()
+                        yield f"data: {json.dumps(msg, ensure_ascii=False)}\n\n"
+                return StreamingResponse(error_gen(), media_type="text/event-stream")
+        else:
+            gguf_url = get_gguf_server_url()
+            if gguf_url:
+                effective_llm_url = gguf_url
+                effective_llm_api_key = "not-needed"
+                effective_llm_model = gguf_status.get("info", {}).get("model_name", "gguf-model")
+
     llm_settings = {
-        "llm_url": llm_url,
-        "llm_api_key": llm_api_key,
-        "llm_model": llm_model
+        "llm_url": effective_llm_url,
+        "llm_api_key": effective_llm_api_key,
+        "llm_model": effective_llm_model
     }
 
     def process_task():
@@ -239,6 +275,60 @@ async def clear_notebook(notebook_id: str):
         os.makedirs(p, exist_ok=True)
     return {"status": "ok"}
 
+# ── GGUF Model Management ──
+
+@app.get("/api/gguf-models")
+async def api_scan_gguf_models():
+    """Сканирует директории и возвращает список доступных GGUF моделей."""
+    try:
+        models = scan_gguf_dirs()
+        return {"models": models}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/gguf-server/status")
+async def api_gguf_server_status():
+    """Возвращает статус GGUF сервера."""
+    return get_server_status()
+
+class GGUFServerRequest(BaseModel):
+    gguf_model_path: str
+    gguf_mmproj_path: Optional[str] = None
+    ctx_size: Optional[int] = None
+    gpu_layers: Optional[int] = None
+    threads: Optional[int] = None
+
+@app.post("/api/gguf-server/start")
+async def api_gguf_server_start(req: GGUFServerRequest):
+    """Запускает GGUF сервер с выбранной моделью."""
+    result = start_gguf_server(
+        gguf_path=req.gguf_model_path,
+        mmproj_path=req.gguf_mmproj_path,
+        ctx_size=req.ctx_size,
+        gpu_layers=req.gpu_layers,
+        threads=req.threads,
+    )
+    if result["status"] == "error":
+        raise HTTPException(status_code=500, detail=result["msg"])
+    return result
+
+@app.post("/api/gguf-server/stop")
+async def api_gguf_server_stop():
+    """Останавливает GGUF сервер."""
+    return stop_gguf_server()
+
+@app.get("/api/gguf-config")
+async def api_get_gguf_config():
+    """Возвращает текущие настройки GGUF из конфига."""
+    return {
+        "search_dirs": config.GGUF_SEARCH_DIRS,
+        "server_port": config.GGUF_SERVER_PORT,
+        "server_host": config.GGUF_SERVER_HOST,
+        "default_ctx_size": config.GGUF_CTX_SIZE,
+        "default_gpu_layers": config.GGUF_GPU_LAYERS,
+        "default_threads": config.GGUF_THREADS,
+    }
+
 # ── Chat ──
 
 class ChatRequest(BaseModel):
@@ -249,17 +339,50 @@ class ChatRequest(BaseModel):
     llm_url: Optional[str] = None
     llm_api_key: Optional[str] = "lm-studio"
     llm_model: Optional[str] = "gpt-4o"
+    # GGUF параметры
+    use_gguf: Optional[str] = None
+    gguf_model_path: Optional[str] = None
+    gguf_mmproj_path: Optional[str] = None
 
 @app.post("/api/chat")
 async def chat(request: ChatRequest):
     # Определяем, какой LLM использовать
-    if request.llm_url:
+    effective_llm_url = request.llm_url
+    effective_llm_api_key = request.llm_api_key
+    effective_llm_model = request.llm_model
+    
+    # Если выбрана GGUF модель — используем локальный сервер
+    if request.use_gguf == "true" and request.gguf_model_path:
+        gguf_status = get_server_status()
+        if not gguf_status["running"]:
+            # Автозапуск сервера
+            result = start_gguf_server(
+                gguf_path=request.gguf_model_path,
+                mmproj_path=request.gguf_mmproj_path if request.gguf_mmproj_path else None,
+            )
+            if result["status"] == "ok":
+                effective_llm_url = result["url"]
+                effective_llm_api_key = "not-needed"
+                effective_llm_model = os.path.basename(request.gguf_model_path)
+            else:
+                async def error_gen():
+                    yield f"data: {json.dumps({'type': 'error', 'text': f'Ошибка запуска GGUF сервера: {result[\"msg\"]}'}, ensure_ascii=False)}\n\n"
+                    yield "data: [DONE]\n\n"
+                return StreamingResponse(error_gen(), media_type="text/event-stream")
+        else:
+            gguf_url = get_gguf_server_url()
+            if gguf_url:
+                effective_llm_url = gguf_url
+                effective_llm_api_key = "not-needed"
+                effective_llm_model = gguf_status.get("info", {}).get("model_name", "gguf-model")
+    
+    if effective_llm_url:
         from llama_index.llms.openai import OpenAI
-        print(f"DEBUG: Используем пользовательский LLM: {request.llm_url}")
+        print(f"DEBUG: Используем LLM: {effective_llm_url} (model: {effective_llm_model})")
         active_llm = OpenAI(
-            api_base=request.llm_url,
-            api_key=request.llm_api_key or "lm-studio",
-            model=request.llm_model or "gpt-4o",
+            api_base=effective_llm_url,
+            api_key=effective_llm_api_key or "lm-studio",
+            model=effective_llm_model or "gpt-4o",
             temperature=0.1,
             max_tokens=request.max_tokens
         )
@@ -301,7 +424,7 @@ async def chat(request: ChatRequest):
                 'total_tokens': token_count,
                 'tokens_per_sec': round(token_count / elapsed, 1) if elapsed > 0 else 0
             })}\n\n"
-            
+        
             yield "data: [DONE]\n\n"
 
         except Exception as e:
@@ -311,6 +434,11 @@ async def chat(request: ChatRequest):
             yield "data: [DONE]\n\n"
 
     return StreamingResponse(generate(), media_type="text/event-stream")
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    """Останавливаем GGUF сервер при выключении."""
+    stop_gguf_server()
 
 if __name__ == "__main__":
     import uvicorn

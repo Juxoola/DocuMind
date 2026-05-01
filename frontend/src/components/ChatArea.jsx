@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Send, Trash2, Sparkles, Clock, Zap, Cpu, FileText, Settings as SettingsIcon } from 'lucide-react';
+import { Send, Trash2, Sparkles, Clock, Zap, Cpu, FileText, Settings as SettingsIcon, HardDrive } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
@@ -295,11 +295,16 @@ export default function ChatArea({ notebook, selectedSources, onOpenSource, llmS
   return (
     <div className="flex flex-col h-full w-full max-w-4xl mx-auto">
       {/* Header */}
-      <div className="flex items-center justify-between p-4 border-b bg-background/80 backdrop-blur-md sticky top-0 z-10">
-        <div className="flex items-center gap-2">
-          <FileText className="text-muted-foreground" size={18} />
-          <h2 className="font-medium text-sm">Ассистент по документам</h2>
-        </div>
+	<div className="flex items-center justify-between p-4 border-b bg-background/80 backdrop-blur-md sticky top-0 z-10">
+		<div className="flex items-center gap-2">
+			<FileText className="text-muted-foreground" size={18} />
+			<h2 className="font-medium text-sm">Ассистент по документам</h2>
+			{llmSettings.use_gguf === 'true' && (
+				<span className="flex items-center gap-1 px-2 py-0.5 bg-green-500/10 text-green-500 rounded-full text-[9px] font-bold border border-green-500/20">
+					<HardDrive size={10} /> GGUF
+				</span>
+			)}
+		</div>
         <div className="flex items-center gap-4">
           <div className="flex bg-muted p-1 rounded-lg">
             {[512, 1024, 2048].map(tokens => (

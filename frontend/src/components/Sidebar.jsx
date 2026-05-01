@@ -40,13 +40,17 @@ export default function Sidebar({
       const formData = new FormData();
       formData.append('file', file);
       
-      const uploadUrl = new URL(`/api/upload`, window.location.origin);
-      uploadUrl.searchParams.append('notebook_id', notebook.id);
-      if (llmSettings) {
-        if (llmSettings.llm_url) uploadUrl.searchParams.append('llm_url', llmSettings.llm_url);
-        if (llmSettings.llm_api_key) uploadUrl.searchParams.append('llm_api_key', llmSettings.llm_api_key);
-        if (llmSettings.llm_model) uploadUrl.searchParams.append('llm_model', llmSettings.llm_model);
-      }
+		const uploadUrl = new URL(`/api/upload`, window.location.origin);
+		uploadUrl.searchParams.append('notebook_id', notebook.id);
+		if (llmSettings) {
+			if (llmSettings.llm_url) uploadUrl.searchParams.append('llm_url', llmSettings.llm_url);
+			if (llmSettings.llm_api_key) uploadUrl.searchParams.append('llm_api_key', llmSettings.llm_api_key);
+			if (llmSettings.llm_model) uploadUrl.searchParams.append('llm_model', llmSettings.llm_model);
+			// GGUF параметры
+			if (llmSettings.use_gguf) uploadUrl.searchParams.append('use_gguf', llmSettings.use_gguf);
+			if (llmSettings.gguf_model_path) uploadUrl.searchParams.append('gguf_model_path', llmSettings.gguf_model_path);
+			if (llmSettings.gguf_mmproj_path) uploadUrl.searchParams.append('gguf_mmproj_path', llmSettings.gguf_mmproj_path);
+		}
 
       try {
         const response = await fetch(uploadUrl.toString(), {

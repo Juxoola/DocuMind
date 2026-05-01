@@ -14,14 +14,17 @@ export default function MainApp({ notebook, onExit }) {
   const [viewerWidth, setViewerWidth] = useState(500);
   const [sidebarWidth, setSidebarWidth] = useState(300);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
-  const [llmSettings, setLlmSettings] = useState(() => {
-    const saved = localStorage.getItem('llm_settings');
-    return saved ? JSON.parse(saved) : {
-      llm_url: 'http://localhost:1234/v1',
-      llm_api_key: 'lm-studio',
-      llm_model: 'gpt-4o'
-    };
-  });
+	const [llmSettings, setLlmSettings] = useState(() => {
+		const saved = localStorage.getItem('llm_settings');
+		return saved ? JSON.parse(saved) : {
+			llm_url: 'http://localhost:1234/v1',
+			llm_api_key: 'lm-studio',
+			llm_model: 'gpt-4o',
+			use_gguf: '',
+			gguf_model_path: '',
+			gguf_mmproj_path: '',
+		};
+	});
 
   useEffect(() => {
     fetchSources();
