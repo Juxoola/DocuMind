@@ -6,8 +6,10 @@ import { cn } from '../lib/utils';
 export default function DocumentViewer({ file, notebook, onClose }) {
   const [content, setContent] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [pptxData, setPptxData] = useState(null);
   const [videoMeta, setVideoMeta] = useState(null);
   const [currentTime, setCurrentTime] = useState(0);
+  const [showRawText, setShowRawText] = useState(false);
   const vidRef = useRef(null);
   const feedRef = useRef(null);
   const itemRefs = useRef({});
@@ -21,7 +23,9 @@ export default function DocumentViewer({ file, notebook, onClose }) {
   const isPdf = filename?.toLowerCase().endsWith('.pdf');
   const isVideo = filename?.toLowerCase().match(/\.(mp4|avi|mov|mkv)$/i);
   const isAudio = filename?.toLowerCase().match(/\.(mp3|wav|m4a|aac|flac)$/i);
+  const isPpt = filename?.toLowerCase().match(/\.(pptx|ppt)$/i);
   const isMedia = isVideo || isAudio;
+  const isSpecial = isPdf || isMedia || isPpt;
   
   let fileUrl = filename ? `/files/${notebook.id}/data/${encodeURIComponent(filename)}` : '';
   
@@ -41,16 +45,28 @@ export default function DocumentViewer({ file, notebook, onClose }) {
           if (!data.error) setVideoMeta(data);
           setLoading(false);
         });
-    } else if (!isPdf) {
+    } else if (isPpt) {
+      fetch(`/api/video_metadata?filename=${encodeURIComponent(filename)}&notebook_id=${notebook.id}`)
+        .then(r => r.json())
+        .then(data => {
+          if (!data.error) setPptxData(data);
+          setLoading(false);
+        });
+    }
+    
+    // Всегда загружаем текстовый контент для режима "Сырой текст"
+    if (!isMedia) {
       fetch(`/api/source_content?filename=${encodeURIComponent(filename)}&notebook_id=${notebook.id}`)
         .then(r => r.json())
         .then(data => {
           setContent(data.text);
-          setLoading(false);
+          if (!isSpecial) setLoading(false);
         });
     } else {
-      setLoading(false);
+      if (isSpecial) setLoading(false);
     }
+    
+    if (isPdf) setLoading(false);
   }, [filename, notebook.id]);
 
   // Обработка перехода по времени при клике из чата
@@ -107,15 +123,21 @@ export default function DocumentViewer({ file, notebook, onClose }) {
     return bestIdx;
   }, [feedItems, currentTime]);
 
-  // Автопрокрутка к активному элементу
+  // Автопрокрутка к активному элементу (для видео и презентаций)
   useEffect(() => {
-    if (activeIndex !== -1 && itemRefs.current[activeIndex]) {
+    if (isMedia && activeIndex !== -1 && itemRefs.current[activeIndex]) {
       itemRefs.current[activeIndex].scrollIntoView({
         behavior: 'smooth',
         block: 'center'
       });
     }
-  }, [activeIndex]);
+    if (isPpt && page && itemRefs.current[page]) {
+      itemRefs.current[page].scrollIntoView({
+        behavior: 'smooth',
+        block: 'start'
+      });
+    }
+  }, [activeIndex, page, isPpt, isMedia]);
 
   return (
     <div className="flex flex-col h-full overflow-hidden bg-background">
@@ -130,9 +152,24 @@ export default function DocumentViewer({ file, notebook, onClose }) {
             <span className="text-[10px] text-muted-foreground uppercase tracking-widest font-black opacity-70">Просмотр документа</span>
           </div>
         </div>
-        <button onClick={onClose} className="p-2 hover:bg-muted rounded-xl transition-all hover:rotate-90">
-          <X size={18} />
-        </button>
+        <div className="flex items-center gap-2">
+          {!isMedia && (
+            <button 
+              onClick={() => setShowRawText(!showRawText)}
+              className={cn(
+                "px-3 py-1.5 text-[10px] font-bold rounded-lg transition-all border",
+                showRawText 
+                  ? "bg-primary text-primary-foreground border-primary" 
+                  : "bg-muted/50 text-muted-foreground border-border/40 hover:border-primary/30"
+              )}
+            >
+              {showRawText ? "Визуальный вид" : "Сырой текст"}
+            </button>
+          )}
+          <button onClick={onClose} className="p-2 hover:bg-muted rounded-xl transition-all hover:rotate-90">
+            <X size={18} />
+          </button>
+        </div>
       </div>
 
       {/* Body */}
@@ -141,6 +178,12 @@ export default function DocumentViewer({ file, notebook, onClose }) {
           <div className="h-full flex flex-col items-center justify-center gap-4 text-muted-foreground">
              <div className="w-10 h-10 border-2 border-primary border-t-transparent rounded-full animate-spin shadow-[0_0_15px_rgba(var(--primary),0.3)]" />
              <span className="text-[10px] font-bold uppercase tracking-tighter">Загрузка контента...</span>
+          </div>
+        ) : showRawText ? (
+          <div className="h-full p-8 overflow-y-auto prose prose-invert prose-sm max-w-none">
+            <pre className="whitespace-pre-wrap font-sans text-xs leading-loose text-foreground/80">
+              {content || 'Текст пуст или извлекается...'}
+            </pre>
           </div>
         ) : isPdf ? (
           <iframe 
@@ -266,6 +309,66 @@ export default function DocumentViewer({ file, notebook, onClose }) {
                 )}
                </div>
             </div>
+          </div>
+        ) : isPpt && pptxData?.has_pdf ? (
+          <iframe 
+            key={filename + "_pdf"}
+            src={`/static/pdfjs/web/viewer.html?file=${encodeURIComponent(`/files/${notebook.id}/data/${pptxData.pdf_name}`)}${page ? `#page=${page}` : ''}`}
+            className="w-full h-full border-none"
+          />
+        ) : isPpt ? (
+          <div className="h-full overflow-y-auto p-6 space-y-8 custom-scrollbar bg-muted/10">
+            {pptxData?.slides?.map((slide, i) => (
+              <motion.div 
+                key={i}
+                ref={el => itemRefs.current[slide.number] = el}
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                className={cn(
+                  "bg-card border rounded-3xl overflow-hidden shadow-xl transition-all",
+                  page === slide.number ? "ring-2 ring-primary border-primary/50" : "border-border/50"
+                )}
+              >
+                <div className="bg-muted/30 p-4 border-b flex items-center justify-between">
+                  <span className="text-[10px] font-black uppercase tracking-widest text-primary">Слайд {slide.number}</span>
+                  {slide.title && <span className="text-xs font-bold truncate max-w-[70%]">{slide.title}</span>}
+                </div>
+                
+                <div className="p-8 space-y-6">
+                  {slide.images && slide.images.length > 0 && (
+                    <div className="grid grid-cols-1 gap-4">
+                      {slide.images.map((img, imgIdx) => (
+                        <div key={imgIdx} className="group relative rounded-2xl overflow-hidden border border-border shadow-md bg-black">
+                           <img 
+                            src={`/files/${notebook.id}/images/${img.path}`} 
+                            className="w-full h-auto max-h-[400px] object-contain transition-transform duration-500 group-hover:scale-[1.02]"
+                           />
+                           {img.description && (
+                             <div className="absolute bottom-0 left-0 right-0 p-3 bg-black/60 backdrop-blur-md opacity-0 group-hover:opacity-100 transition-opacity">
+                               <p className="text-[10px] text-white/80 leading-relaxed italic">{img.description}</p>
+                             </div>
+                           )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  
+                  {slide.text && (
+                    <div className="prose prose-invert prose-sm max-w-none">
+                      <p className="text-sm leading-relaxed text-foreground/80 whitespace-pre-wrap font-medium">
+                        {slide.text}
+                      </p>
+                    </div>
+                  )}
+                </div>
+              </motion.div>
+            ))}
+            {!pptxData && !loading && (
+               <div className="h-full flex flex-col items-center justify-center py-20 opacity-30 text-center">
+                <AlertCircle size={32} className="mb-4" />
+                <p className="text-xs font-bold uppercase tracking-widest">Презентация обрабатывается...</p>
+              </div>
+            )}
           </div>
         ) : (
           <div className="h-full p-8 overflow-y-auto prose prose-invert prose-sm max-w-none">

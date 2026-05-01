@@ -117,13 +117,21 @@ def describe_image_with_lmstudio(image_path, llm_settings=None):
             {
                 "role": "user",
                 "content": [
-                    {"type": "text", "text": "Опиши всё, что видишь на этом слайде/кадре: схемы, графики, таблицы, а также весь видимый текст. Если на кадре есть текстовые тезисы или определения, обязательно выпиши их."},
+                    {"type": "text", "text": """ВНИМАТЕЛЬНО проанализируй это изображение (слайд презентации или кадр видео). 
+Твоя задача — составить максимально подробное описание для поисковой системы.
+
+1. ТЕКСТ: Выпиши ВЕСЬ текст, который видишь, включая заголовки, подписи и мелкий шрифт.
+2. ГРАФИКА: Если есть схемы, диаграммы или графики — опиши их структуру, оси, легенду и основные данные/тренды.
+3. ВИЗУАЛ: Опиши ключевые изображения, иконки или фотографии.
+4. СМЫСЛ: Кратко сформулируй главный тезис этого кадра.
+
+ЗАПРЕЩЕНО давать пустые или отказные ответы типа 'на слайде ничего нет' или 'уточните поиск'. Если слайд пуст, опиши хотя бы фон или логотипы. Пиши только по делу, на русском языке."""},
                     {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_img}"}}
                 ]
             }
         ],
-        "temperature": 0.1,
-        "max_tokens": 300
+        "temperature": 0.0,
+        "max_tokens": 500
     }
     try:
         response = requests.post(url, headers=headers, json=payload, timeout=30)
@@ -416,38 +424,96 @@ def process_pdf(file_path, images_dir, llm_settings=None):
             
     return nodes
 
+def convert_pptx_to_pdf(pptx_path, pdf_path):
+    """Конвертирует PPTX в PDF через Microsoft PowerPoint (только для Windows)."""
+    try:
+        import win32com.client
+        import pythoncom
+        pythoncom.CoInitialize()
+        powerpoint = win32com.client.Dispatch("Powerpoint.Application")
+        # 32 = ppSaveAsPDF
+        deck = powerpoint.Presentations.Open(os.path.abspath(pptx_path), WithWindow=False)
+        deck.SaveAs(os.path.abspath(pdf_path), 32)
+        deck.Close()
+        powerpoint.Quit()
+        return True
+    except Exception as e:
+        print(f"Ошибка конвертации PPTX в PDF: {e}")
+        return False
+
 def process_pptx(file_path, images_dir, llm_settings=None):
     print(f"Обработка презентации: {file_path}")
     nodes = []
     file_name = os.path.basename(file_path)
+    
+    # Пытаемся конвертировать в PDF для лучшего отображения
+    pdf_path = file_path.rsplit('.', 1)[0] + ".pdf"
+    has_pdf = False
+    if sys.platform == "win32":
+        has_pdf = convert_pptx_to_pdf(file_path, pdf_path)
+
     prs = Presentation(file_path)
+    
+    pptx_metadata = {
+        "file_name": file_name,
+        "has_pdf": has_pdf,
+        "pdf_name": os.path.basename(pdf_path) if has_pdf else None,
+        "slides": []
+    }
+
     for i, slide in enumerate(prs.slides):
         slide_text = []
+        slide_images = []
+        
+        title = ""
+        if slide.shapes.title:
+            title = slide.shapes.title.text
+            
         for shape in slide.shapes:
-            if hasattr(shape, "text"):
+            if hasattr(shape, "text") and shape != slide.shapes.title:
                 slide_text.append(shape.text)
                 
             if hasattr(shape, "image"):
-                image = shape.image
-                image_bytes = image.blob
-                image_filename = f"pptx_img_{uuid.uuid4().hex[:8]}.{image.ext}"
-                image_path = os.path.join(images_dir, image_filename)
-                with open(image_path, "wb") as f:
-                    f.write(image_bytes)
-                    
-                desc = describe_image_with_lmstudio(image_path, llm_settings=llm_settings)
-                nodes.append(TextNode(
-                    text=f"Изображение со слайда {i+1} презентации {file_name}. Описание: {desc}",
-                    metadata={"file_name": file_name, "image_path": image_path}
-                ))
+                try:
+                    image = shape.image
+                    image_bytes = image.blob
+                    image_filename = f"pptx_img_{uuid.uuid4().hex[:8]}.{image.ext}"
+                    image_path = os.path.join(images_dir, image_filename)
+                    with open(image_path, "wb") as f:
+                        f.write(image_bytes)
+                        
+                    desc = describe_image_with_lmstudio(image_path, llm_settings=llm_settings)
+                    nodes.append(TextNode(
+                        text=f"Изображение со слайда {i+1} презентации {file_name}. Описание: {desc}",
+                        metadata={"file_name": file_name, "image_path": image_path, "page": i + 1}
+                    ))
+                    slide_images.append({
+                        "path": image_filename,
+                        "description": desc
+                    })
+                except Exception as e:
+                    print(f"Ошибка извлечения картинки из PPTX: {e}")
                 
-        if slide_text:
-            text_content = "\n".join(slide_text)
+        text_content = "\n".join(slide_text)
+        if text_content.strip() or title:
             nodes.append(TextNode(
-                text=f"Текст со слайда {i+1} презентации {file_name}:\n{text_content}",
-                metadata={"file_name": file_name}
+                text=f"Слайд {i+1}: {title}\n{text_content}",
+                metadata={"file_name": file_name, "page": i + 1}
             ))
             
+        pptx_metadata["slides"].append({
+            "number": i + 1,
+            "title": title,
+            "text": text_content,
+            "images": slide_images
+        })
+            
+    # Сохраняем метаданные для фронтенда
+    data_dir = os.path.dirname(file_path)
+    json_path = os.path.join(data_dir, f"{file_name}.json")
+    with open(json_path, "w", encoding="utf-8") as f:
+        json.dump(pptx_metadata, f, ensure_ascii=False, indent=2)
+
     return nodes
 
 def process_docx(file_path, images_dir, llm_settings=None):

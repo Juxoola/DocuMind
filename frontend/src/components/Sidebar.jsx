@@ -187,14 +187,28 @@ export default function Sidebar({
 
       {/* Sources List */}
       <div className="flex-1 overflow-y-auto px-4 py-2 space-y-2 custom-scrollbar">
-        <div className="flex items-center justify-between px-2 mb-2">
-          <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Источники ({sources.length})</span>
-          <button onClick={clearDatabase} className="text-destructive hover:bg-destructive/10 p-1 rounded-md transition-colors" title="Очистить базу">
-             <Database size={12} />
-          </button>
-        </div>
-        
-        {sources.map((file) => (
+        {(() => {
+          const filtered = sources.filter(s => {
+            const low = s.toLowerCase();
+            if (low.endsWith('.pdf')) {
+              const base = s.slice(0, -4);
+              return !sources.some(other => {
+                const olow = other.toLowerCase();
+                return olow === base.toLowerCase() + '.pptx' || olow === base.toLowerCase() + '.ppt';
+              });
+            }
+            return true;
+          });
+          
+          return (
+            <>
+              <div className="flex items-center justify-between px-2 mb-2">
+                <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Источники ({filtered.length})</span>
+                <button onClick={clearDatabase} className="text-destructive hover:bg-destructive/10 p-1 rounded-md transition-colors" title="Очистить базу">
+                   <Database size={12} />
+                </button>
+              </div>
+              {filtered.map((file) => (
           <div 
             key={file}
             className={cn(
@@ -239,13 +253,15 @@ export default function Sidebar({
             </div>
           </div>
         ))}
-
-        {sources.length === 0 && !uploading && (
+        {filtered.length === 0 && !uploading && (
           <div className="text-center py-8 opacity-40">
             <FileText size={32} className="mx-auto mb-2" />
             <p className="text-[10px]">Нет источников</p>
           </div>
         )}
+            </>
+          );
+        })()}
       </div>
 
       <div className="mt-auto flex flex-col border-t bg-muted/5">

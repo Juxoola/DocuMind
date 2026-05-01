@@ -9,6 +9,8 @@ export default function NotebookSelector({ onSelect }) {
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [sortBy, setSortBy] = useState('date_desc'); // 'date_desc', 'date_asc', 'name_asc', 'name_desc'
+  const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+  const [newNotebookName, setNewNotebookName] = useState('');
 
   useEffect(() => {
     fetchNotebooks();
@@ -25,11 +27,13 @@ export default function NotebookSelector({ onSelect }) {
     }
   };
 
-  const createNotebook = async () => {
-    const name = prompt('Введите название блокнота:');
-    if (!name) return;
+  const handleCreateSubmit = async (e) => {
+    if (e) e.preventDefault();
+    if (!newNotebookName.trim()) return;
     try {
-      await axios.post('/api/notebooks', { name });
+      await axios.post('/api/notebooks', { name: newNotebookName });
+      setNewNotebookName('');
+      setIsCreateModalOpen(false);
       fetchNotebooks();
     } catch (err) {
       alert('Ошибка создания');
@@ -84,7 +88,7 @@ export default function NotebookSelector({ onSelect }) {
         <motion.button
           whileHover={{ scale: 1.02 }}
           whileTap={{ scale: 0.98 }}
-          onClick={createNotebook}
+          onClick={() => setIsCreateModalOpen(true)}
           className="flex items-center gap-2 bg-primary text-primary-foreground px-8 py-3 rounded-xl font-semibold shadow-lg shadow-primary/20 transition-all w-full md:w-auto justify-center"
         >
           <Plus size={20} />
@@ -171,6 +175,56 @@ export default function NotebookSelector({ onSelect }) {
       )}
 
       {loading && <div className="mt-12 animate-pulse text-muted-foreground">Загрузка ваших блокнотов...</div>}
+
+      {/* Custom Creation Modal */}
+      {isCreateModalOpen && (
+        <div className="fixed inset-0 z-[200] flex items-center justify-center p-4">
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            onClick={() => setIsCreateModalOpen(false)}
+            className="absolute inset-0 bg-background/80 backdrop-blur-md"
+          />
+          <motion.div 
+            initial={{ scale: 0.9, opacity: 0, y: 20 }}
+            animate={{ scale: 1, opacity: 1, y: 0 }}
+            className="relative bg-card border border-border shadow-2xl rounded-3xl p-8 w-full max-w-md"
+          >
+            <h2 className="text-2xl font-bold mb-2 text-center">Новый блокнот</h2>
+            <p className="text-muted-foreground text-sm text-center mb-8">
+              Введите название для вашего нового рабочего пространства.
+            </p>
+            <form onSubmit={handleCreateSubmit} className="space-y-6">
+              <div className="space-y-2">
+                <input 
+                  autoFocus
+                  type="text" 
+                  placeholder="Название блокнота" 
+                  value={newNotebookName}
+                  onChange={(e) => setNewNotebookName(e.target.value)}
+                  className="w-full bg-muted/50 border border-border/50 rounded-xl px-4 py-3 outline-none focus:border-primary/50 focus:ring-4 focus:ring-primary/10 transition-all font-medium"
+                />
+              </div>
+              <div className="flex gap-3">
+                <button 
+                  type="button"
+                  onClick={() => setIsCreateModalOpen(false)}
+                  className="flex-1 px-4 py-3 rounded-xl border border-border hover:bg-muted transition-colors font-semibold text-sm"
+                >
+                  Отмена
+                </button>
+                <button 
+                  type="submit"
+                  disabled={!newNotebookName.trim()}
+                  className="flex-[2] px-4 py-3 rounded-xl bg-primary text-primary-foreground hover:opacity-90 disabled:opacity-50 transition-all font-semibold text-sm shadow-lg shadow-primary/20"
+                >
+                  Создать
+                </button>
+              </div>
+            </form>
+          </motion.div>
+        </div>
+      )}
     </motion.div>
   );
 }
