@@ -85,9 +85,7 @@ def get_image_base64(image_path):
 
 def describe_image_with_lmstudio(image_path, llm_settings=None, existing_llm=None):
     """Отправляет картинку в локальный LM Studio или использует прямой GGUF для получения описания."""
-    prompt = """/no_think
-<|vision_start|><|vision_end|>Проанализируй это изображение (кадр из видео или слайд презентации) и составь его подробное описание на русском языке для системы поиска.
-ИНСТРУКЦИЯ: Пиши ТОЛЬКО финальный результат. НЕ ИСПОЛЬЗУЙ теги <think> и не описывай свои рассуждения.
+    prompt = """Проанализируй это изображение (кадр из видео или слайд презентации) и составь его подробное описание на русском языке для системы поиска.
 
 1. ТЕКСТ: Выпиши весь видимый текст, заголовки и важные подписи.
 2. ГРАФИКА: Опиши схемы, таблицы или графики, если они есть.
@@ -100,6 +98,7 @@ def describe_image_with_lmstudio(image_path, llm_settings=None, existing_llm=Non
     if llm_settings and llm_settings.get("use_gguf_direct"):
         try:
             from llama_cpp import Llama
+            from llama_cpp.llama_chat_format import Llava15ChatHandler
             
             if existing_llm:
                 llm = existing_llm
@@ -109,26 +108,30 @@ def describe_image_with_lmstudio(image_path, llm_settings=None, existing_llm=Non
                 if not mmproj_path or not os.path.exists(mmproj_path):
                     return "Изображение без описания (нет mmproj)."
                 
+                chat_handler = Llava15ChatHandler(clip_model_path=mmproj_path)
                 llm = Llama(
-                    model_path=config.resolve_model_path(gguf_path),
-                    clip_model_path=config.resolve_model_path(mmproj_path),
+                    model_path=gguf_path,
+                    chat_handler=chat_handler,
                     n_ctx=8192,
                     n_gpu_layers=-1,
                     verbose=False,
-                    type_k=2, type_v=2
                 )
             
             image_path_norm = os.path.normpath(image_path)
-            llm.reset()
             base64_data = get_image_base64(image_path)
+            
+            # Используем формат сообщений для ChatHandler
             response = llm.create_chat_completion(
-                messages=[{
-                    "role": "user",
-                    "content": [
-                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_data}"}},
-                        {"type": "text", "text": prompt}
-                    ]
-                }],
+                messages=[
+                    {"role": "system", "content": "You are a helpful assistant that describes images in Russian."},
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": prompt},
+                            {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_data}"}}
+                        ]
+                    }
+                ],
                 temperature=0.2,
                 max_tokens=500,
             )
@@ -288,10 +291,13 @@ def process_audio_video(file_path, images_dir, is_video=False, progress_cb=None,
                 g_path = config.resolve_model_path(llm_settings["gguf_model_path"])
                 m_path = config.resolve_model_path(llm_settings["gguf_mmproj_path"])
                 print(f"[GGUF Direct Vision] Загрузка модели: {os.path.basename(g_path)}")
+                from llama_cpp import Llama
+                from llama_cpp.llama_chat_format import Llava15ChatHandler
+                chat_handler = Llava15ChatHandler(clip_model_path=m_path)
                 shared_llm = Llama(
                     model_path=g_path,
-                    clip_model_path=m_path,
-                    n_ctx=8192, n_gpu_layers=-1, verbose=False, type_k=2, type_v=2
+                    chat_handler=chat_handler,
+                    n_ctx=8192, n_gpu_layers=-1, verbose=False
                 )
             except Exception as e: print(f"GGUF init error: {e}")
 
