@@ -176,6 +176,7 @@ def describe_image_with_lmstudio(image_path, llm_settings=None, existing_llm=Non
         return "Изображение без описания."
 
 def process_audio_video(file_path, images_dir, is_video=False, progress_cb=None, llm_settings=None):
+    file_name = os.path.basename(file_path)
     def prog(pct, msg):
         print(f"  [{pct}%] {msg}")
         if progress_cb: progress_cb(pct, msg)
@@ -234,6 +235,7 @@ def save_high_res_frame(video_path, time_sec, output_path):
     except: pass
 
 def process_audio_video(file_path, images_dir, is_video=False, progress_cb=None, llm_settings=None):
+    file_name = os.path.basename(file_path)
     def prog(pct, msg):
         print(f"  [{pct}%] {msg}")
         if progress_cb: progress_cb(pct, msg)
@@ -344,6 +346,7 @@ def process_audio_video(file_path, images_dir, is_video=False, progress_cb=None,
                     chat_handler=chat_handler,
                     n_ctx=8192, n_gpu_layers=-1, verbose=False,
                     n_batch=1024, # Стабильное ускорение
+                    n_threads=8,  # Оптимально для Ryzen 7 5700X3D
                     n_parallel=1
                 )
             except Exception as e: print(f"GGUF init error: {e}")
