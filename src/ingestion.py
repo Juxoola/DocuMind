@@ -129,7 +129,7 @@ def describe_image_with_lmstudio(image_path, llm_settings=None, existing_llm=Non
                         {"type": "image_url", "image_url": {"url": f"file://{image_path_norm}"}}
                     ]
                 }],
-                temperature=0.0,
+                temperature=0.2,
                 max_tokens=500,
             )
             result = response["choices"][0]["message"]["content"]
@@ -154,7 +154,7 @@ def describe_image_with_lmstudio(image_path, llm_settings=None, existing_llm=Non
                 {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_img}"}}
             ]
         }],
-        "temperature": 0.0,
+        "temperature": 0.2,
         "max_tokens": 500
     }
     try:
@@ -222,13 +222,20 @@ def process_audio_video(file_path, images_dir, is_video=False, progress_cb=None,
             return cv2.resize(f, (int(w * scale), SAVE_HEIGHT), interpolation=cv2.INTER_AREA)
         
         total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        duration_sec = total_frames / fps if fps > 0 else 0
         prev_saved_thumb = None; last_seen_thumb = None; stable_since = 0; frame_count = 0
         frame_list = []
-
+        
         while frame_count < total_frames:
             cap.set(cv2.CAP_PROP_POS_FRAMES, frame_count)
             ret, frame = cap.read()
             if not ret: break
+            
+            # Прогресс каждые 10 проверок или в конце
+            if (frame_count // CHECK_STEP) % 10 == 0:
+                prog(62 + int((frame_count / total_frames) * 3), 
+                     f"Извлечение кадров: {format_seconds(frame_count/fps)} / {format_seconds(duration_sec)}")
+            
             
             thumb = cv2.resize(frame, COMPARE_SIZE)
             if last_seen_thumb is None:
