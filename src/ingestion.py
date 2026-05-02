@@ -254,6 +254,7 @@ def ensure_720p_video(file_path, prog_cb=None):
     if ext not in ['.mp4', '.avi', '.mkv', '.mov']: return file_path
     temp_path = file_path + ".720p.mp4"
     if prog_cb: prog_cb(5, "Оптимизация видео (NVENC)...")
+    from imageio_ffmpeg import get_ffmpeg_exe
     cmd = [
         get_ffmpeg_exe(), "-y", 
         "-hwaccel", "cuda", "-hwaccel_output_format", "cuda", 
