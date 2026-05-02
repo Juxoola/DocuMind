@@ -1,0 +1,6 @@
+The user wants a one-sentence description of the provided image.
+
+1.  **Analyze the image:**
+    *   **Content:** It's a single Unicode character, the Cyrillic letter "ё" (yo).
+    *   **Style:** It looks like a simple, clean font, possibly a sans-serif or a serif, but it's just a single glyph.
+    *   **Context:** It's a digital image, likely a screenshot or a file upload of

@@ -1,5 +1,4 @@
 import os
-import sys
 import base64
 from llama_cpp import Llama
 import config
@@ -8,79 +7,73 @@ def get_image_base64(image_path):
     with open(image_path, "rb") as image_file:
         return base64.b64encode(image_file.read()).decode("utf-8")
 
-def test_vision(image_path, gguf_path, mmproj_path):
-    print(f"--- Тестирование Vision ---")
-    print(f"Модель: {gguf_path}")
-    print(f"Проектор: {mmproj_path}")
-    print(f"Картинка: {image_path}")
+def run_single_test(llm, prompt, image_b64, name):
+    print(f"\n>>> ТЕСТ: {name}")
+    try:
+        # Пробуем разные варианты структуры content
+        # Вариант А: Изображение ПЕРЕД текстом
+        res = llm.create_chat_completion(
+            messages=[{
+                "role": "user",
+                "content": [
+                    {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_b64}"}},
+                    {"type": "text", "text": prompt}
+                ]
+            }],
+            temperature=0.1,
+            max_tokens=100
+        )
+        print(f"      [Результат (Img-Text)]: {res['choices'][0]['message']['content'].strip()[:200]}")
+        
+        # Вариант Б: Текст ПЕРЕД изображением
+        res = llm.create_chat_completion(
+            messages=[{
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": prompt},
+                    {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_b64}"}}
+                ]
+            }],
+            temperature=0.1,
+            max_tokens=100
+        )
+        print(f"      [Результат (Text-Img)]: {res['choices'][0]['message']['content'].strip()[:200]}")
+    except Exception as e:
+        print(f"      [ОШИБКА]: {e}")
+
+def main():
+    last = config.load_last_model()
+    g_path = config.resolve_model_path(last.get("gguf"))
+    m_path = config.resolve_model_path(last.get("mmproj"))
     
-    if not os.path.exists(gguf_path) or not os.path.exists(mmproj_path):
-        print("Ошибка: Файлы модели не найдены!")
+    # Берем тестовую картинку (вебинар из ваших логов)
+    test_img = "C:/test/notebooks/04f63ba3/images/video_frame_161d4224.jpg"
+    if not os.path.exists(test_img):
+        print(f"Картинка {test_img} не найдена. Тест невозможен.")
         return
-
-    print("Загрузка модели...")
-    llm = Llama(
-        model_path=gguf_path,
-        chat_format="chatml",
-        clip_model_path=mmproj_path,
-        n_ctx=4096,
-        n_gpu_layers=-1,
-        verbose=False
-    )
-
-    prompt = """Проанализируй это изображение (кадр из видео или слайд презентации) и составь его подробное описание на русском языке для системы поиска.
-
-1. ТЕКСТ: Выпиши весь видимый текст, заголовки и важные подписи.
-2. ГРАФИКА: Опиши схемы, таблицы или графики, если они есть.
-3. ВИЗУАЛ: Опиши ключевые объекты, людей или обстановку.
-4. СМЫСЛ: Кратко сформулируй основную тему этого кадра.
-
-Пиши объективно и только по делу."""
-
-    print("Кодирование изображения...")
-    base64_data = get_image_base64(image_path)
     
-    print("Генерация описания...")
-    response = llm.create_chat_completion(
-        messages=[{
-            "role": "user",
-            "content": [
-                {"type": "text", "text": prompt},
-                {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_data}"}}
-            ]
-        }],
-        temperature=0.2,
-        max_tokens=500
-    )
+    img_b64 = get_image_base64(test_img)
+    prompt = "Опиши это изображение одним предложением на русском языке."
 
-    result = response["choices"][0]["message"]["content"]
-    print("\n[РЕЗУЛЬТАТ]:")
-    print("-" * 30)
-    print(result)
-    print("-" * 30)
+    formats = ["qwen", "chatml", None]
+    
+    for fmt in formats:
+        print(f"\n" + "="*50)
+        print(f"ЗАГРУЗКА МОДЕЛИ С FORMAT: {fmt}")
+        print("="*50)
+        try:
+            llm = Llama(
+                model_path=g_path,
+                clip_model_path=m_path,
+                chat_format=fmt,
+                n_ctx=4096,
+                n_gpu_layers=-1,
+                verbose=False
+            )
+            run_single_test(llm, prompt, img_b64, f"Format={fmt}")
+            del llm # Очистка для следующего теста
+        except Exception as e:
+            print(f"Не удалось загрузить модель с форматом {fmt}: {e}")
 
 if __name__ == "__main__":
-    # Берем последнюю использованную модель
-    last = config.load_last_model()
-    g = last.get("gguf")
-    m = last.get("mmproj")
-    
-    if not g or not m:
-        print("Ошибка: Нет сохраненной конфигурации модели. Сначала запустите ингестию через UI.")
-        sys.exit(1)
-        
-    # Ищем тестовую картинку в первой попавшейся папке images ноутбуков
-    test_img = None
-    if os.path.exists(config.NOTEBOOKS_DIR):
-        for nb_id in os.listdir(config.NOTEBOOKS_DIR):
-            img_dir = os.path.join(config.NOTEBOOKS_DIR, nb_id, "images")
-            if os.path.exists(img_dir):
-                files = os.listdir(img_dir)
-                if files:
-                    test_img = os.path.join(img_dir, files[0])
-                    break
-    
-    if not test_img:
-        print("Ошибка: Не найдено ни одного изображения для теста в папках ноутбуков.")
-    else:
-        test_vision(test_img, config.resolve_model_path(g), config.resolve_model_path(m))
+    main()

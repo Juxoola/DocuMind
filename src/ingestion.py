@@ -85,14 +85,14 @@ def get_image_base64(image_path):
 
 def describe_image_with_lmstudio(image_path, llm_settings=None, existing_llm=None):
     """Отправляет картинку в локальный LM Studio или использует прямой GGUF для получения описания."""
-    prompt = """Проанализируй это изображение (кадр из видео или слайд презентации) и составь его подробное описание на русском языке для системы поиска.
+    prompt = """<|vision_start|><|vision_end|>Проанализируй это изображение (кадр из видео или слайд презентации) и составь его подробное описание на русском языке для системы поиска.
 
 1. ТЕКСТ: Выпиши весь видимый текст, заголовки и важные подписи.
 2. ГРАФИКА: Опиши схемы, таблицы или графики, если они есть.
 3. ВИЗУАЛ: Опиши ключевые объекты, людей или обстановку.
 4. СМЫСЛ: Кратко сформулируй основную тему этого кадра.
 
-Пиши объективно и только по делу."""
+Пиши объективно и только по делу. Обязательно отвечай на русском языке."""
 
     # Режим прямого GGUF (через llama-cpp-python)
     if llm_settings and llm_settings.get("use_gguf_direct"):
@@ -109,9 +109,8 @@ def describe_image_with_lmstudio(image_path, llm_settings=None, existing_llm=Non
                 
                 llm = Llama(
                     model_path=config.resolve_model_path(gguf_path),
-                    chat_format="chatml",
                     clip_model_path=config.resolve_model_path(mmproj_path),
-                    n_ctx=4096,
+                    n_ctx=8192,
                     n_gpu_layers=-1,
                     verbose=False,
                     type_k=2, type_v=2
@@ -124,8 +123,8 @@ def describe_image_with_lmstudio(image_path, llm_settings=None, existing_llm=Non
                 messages=[{
                     "role": "user",
                     "content": [
-                        {"type": "text", "text": prompt},
-                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_data}"}}
+                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_data}"}},
+                        {"type": "text", "text": prompt}
                     ]
                 }],
                 temperature=0.2,
@@ -284,9 +283,8 @@ def process_audio_video(file_path, images_dir, is_video=False, progress_cb=None,
                 print(f"[GGUF Direct Vision] Загрузка модели: {os.path.basename(g_path)}")
                 shared_llm = Llama(
                     model_path=g_path,
-                    chat_format="chatml",
                     clip_model_path=m_path,
-                    n_ctx=4096, n_gpu_layers=-1, verbose=False, type_k=2, type_v=2
+                    n_ctx=8192, n_gpu_layers=-1, verbose=False, type_k=2, type_v=2
                 )
             except Exception as e: print(f"GGUF init error: {e}")
 
