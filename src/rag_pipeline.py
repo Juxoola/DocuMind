@@ -27,6 +27,26 @@ def preload_all_models():
             print(f"  [RAG] Предзагрузка реранкера: {config.RERANKER_MODEL_NAME}")
             from sentence_transformers import CrossEncoder
             _model_cache["reranker"] = CrossEncoder(config.RERANKER_MODEL_NAME, device=device)
+    
+    # Загружаем GGUF LLM для зрения, если есть пути (из конфига или сохраненные)
+    last = config.load_last_model()
+    gguf_path = last.get("gguf") or os.getenv("DEFAULT_GGUF_MODEL")
+    mmproj_path = last.get("mmproj") or os.getenv("DEFAULT_MMPROJ_MODEL")
+    
+    if gguf_path and mmproj_path:
+        if "vision_llm" not in _model_cache:
+            g_path = config.resolve_model_path(gguf_path)
+            m_path = config.resolve_model_path(mmproj_path)
+            if os.path.exists(g_path) and os.path.exists(m_path):
+                print(f"  [RAG] Предзагрузка Vision LLM: {os.path.basename(g_path)}")
+                from llama_cpp import Llama
+                _model_cache["vision_llm"] = Llama(
+                    model_path=g_path,
+                    chat_format="chatml",
+                    clip_model_path=m_path,
+                    n_ctx=4096, n_gpu_layers=-1, verbose=False, type_k=2, type_v=2
+                )
+            
     print("[RAG] Все модели загружены.")
 
 def init_settings(max_tokens=1024):

@@ -18,8 +18,24 @@ from src.gguf_manager import scan_gguf_dirs
 from src.gguf_direct import get_gguf_llm, unload_all_models, get_loaded_models
 from fastapi.middleware.cors import CORSMiddleware
 from llama_index.core import Settings
+from contextlib import asynccontextmanager
 
-app = FastAPI(title="NotebookLM Local Clone")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup: Предзагрузка моделей
+    print("[SERVER] Запуск системы...")
+    try:
+        preload_all_models()
+    except Exception as e:
+        print(f"[ERROR] Ошибка предзагрузки моделей: {e}")
+    
+    yield
+    
+    # Shutdown: Выгрузка
+    print("[SERVER] Остановка системы...")
+    unload_all_models()
+
+app = FastAPI(title="NotebookLM Local Clone", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -171,6 +187,8 @@ async def upload_file(
         # Используем прямой API вместо сервера
         use_gguf_direct = True
         effective_llm_model = os.path.basename(gguf_model_path)
+        # Сохраняем как последнюю удачную конфигурацию
+        config.save_last_model(gguf_model_path, gguf_mmproj_path)
 
     llm_settings = {
         "llm_url": effective_llm_url,
@@ -292,6 +310,15 @@ async def api_get_gguf_config():
         "default_threads": config.GGUF_THREADS,
     }
 
+class UpdateModelDirsRequest(BaseModel):
+    dirs: str
+
+@app.post("/api/update-model-dirs")
+async def update_model_dirs(req: UpdateModelDirsRequest):
+    """Обновляет директории поиска моделей в реальном времени."""
+    config.GGUF_SEARCH_DIRS = req.dirs
+    return {"status": "ok", "new_dirs": config.GGUF_SEARCH_DIRS}
+
 # ── Chat ──
 
 class ChatRequest(BaseModel):
@@ -324,6 +351,7 @@ async def chat(request: ChatRequest):
                 temperature=0.1,
                 max_tokens=request.max_tokens,
             )
+            config.save_last_model(request.gguf_model_path, request.gguf_mmproj_path)
         except Exception as e:
             async def error_gen():
                 error_msg = f"Ошибка загрузки GGUF модели: {str(e)}"
@@ -393,17 +421,8 @@ async def chat(request: ChatRequest):
 
     return StreamingResponse(generate(), media_type="text/event-stream")
 
-@app.on_event("shutdown")
-async def shutdown_event():
-    """Выгружаем GGUF модели из памяти при выключении."""
-    unload_all_models()
+# Убрали старый shutdown
 
 if __name__ == "__main__":
     import uvicorn
-    # Предзагрузка моделей перед запуском
-    try:
-        preload_all_models()
-    except Exception as e:
-        print(f"[ERROR] Ошибка предзагрузки моделей: {e}")
-        
     uvicorn.run("main:app", host=config.HOST, port=config.PORT, reload=True)

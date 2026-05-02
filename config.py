@@ -1,4 +1,5 @@
 import os
+import json
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 NOTEBOOKS_DIR = os.path.join(BASE_DIR, "notebooks")
@@ -45,6 +46,22 @@ GGUF_CTX_SIZE = int(os.getenv("GGUF_CTX_SIZE", 4096))
 
 # GPU слоёв (-1 = все на GPU, 0 = только CPU)
 GGUF_GPU_LAYERS = int(os.getenv("GGUF_GPU_LAYERS", -1))
+
+LAST_MODELS_FILE = os.path.join(BASE_DIR, "last_models.json")
+
+def save_last_model(gguf_path, mmproj_path):
+    try:
+        with open(LAST_MODELS_FILE, "w", encoding="utf-8") as f:
+            json.dump({"gguf": gguf_path, "mmproj": mmproj_path}, f)
+    except: pass
+
+def load_last_model():
+    try:
+        if os.path.exists(LAST_MODELS_FILE):
+            with open(LAST_MODELS_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+    except: pass
+    return {"gguf": None, "mmproj": None}
 
 def resolve_model_path(path_or_filename: str) -> str:
     """
