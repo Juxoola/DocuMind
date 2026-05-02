@@ -30,17 +30,10 @@ logging.getLogger("lightning.pytorch").setLevel(logging.ERROR)
 logging.getLogger("whisperx").setLevel(logging.WARNING)
 
 # --- Фикс: inspect.stack() + speechbrain lazy-loader ---
-# Python 3's hasattr() подавляет только AttributeError, но speechbrain's LazyModule
-# бросает ImportError — поэтому inspect.stack() в PyTorch Lightning падает.
-# Решение: (1) патчим inspect.getmodule чтобы он был exception-safe,
-#           (2) регистрируем заглушки для всех опциональных speechbrain-интеграций.
-
 import inspect as _inspect_module
-
 _orig_getmodule = _inspect_module.getmodule
 
 def _safe_getmodule(obj, filename=None):
-    """Защищённая версия inspect.getmodule — не падает на ленивых загрузчиках."""
     try:
         return _orig_getmodule(obj, filename)
     except Exception:
@@ -48,16 +41,10 @@ def _safe_getmodule(obj, filename=None):
 
 _inspect_module.getmodule = _safe_getmodule
 
-# Заглушки для всех известных опциональных зависимостей speechbrain
 _SPEECHBRAIN_OPTIONAL_STUBS = [
-    'k2',
-    'flair',
-    'speechbrain.integrations.k2_fsa',
-    'speechbrain.integrations.nlp',
-    'speechbrain.integrations.nlp.flair_embeddings',
-    'speechbrain.k2_integration',
-    'speechbrain.wordemb',
-    'speechbrain.lobes.models.huggingface_transformers',
+    'k2', 'flair', 'speechbrain.integrations.k2_fsa', 'speechbrain.integrations.nlp',
+    'speechbrain.integrations.nlp.flair_embeddings', 'speechbrain.k2_integration',
+    'speechbrain.wordemb', 'speechbrain.lobes.models.huggingface_transformers',
 ]
 for _stub_name in _SPEECHBRAIN_OPTIONAL_STUBS:
     if _stub_name not in sys.modules:
@@ -65,7 +52,7 @@ for _stub_name in _SPEECHBRAIN_OPTIONAL_STUBS:
 
 import config
 
-# --- Фикс для Windows DLL (cublas64_12.dll) ---
+# --- Фикс для Windows DLL ---
 try:
     import torch
     lib_dir = os.path.join(os.path.dirname(torch.__file__), 'lib')
@@ -85,7 +72,6 @@ except Exception as e:
 import whisperx
 
 def format_seconds(s):
-    """Превращает секунды в формат H:MM:SS или MM:SS."""
     h = int(s // 3600)
     m = int((s % 3600) // 60)
     sec = int(s % 60)
@@ -97,46 +83,34 @@ def get_image_base64(image_path):
     with open(image_path, "rb") as image_file:
         return base64.b64encode(image_file.read()).decode("utf-8")
 
-def describe_image_with_lmstudio(image_path, llm_settings=None):
-    """Отправляет картинку в локальный LM Studio для получения текстового описания."""
+def describe_image_with_lmstudio(image_path, llm_settings=None, existing_llm=None):
+    """Отправляет картинку в локальный LM Studio или использует прямой GGUF для получения описания."""
     base64_img = get_image_base64(image_path)
     
-    # DEBUG: Проверяем настройки
-    print(f"[DEBUG describe_image] llm_settings: {llm_settings}")
-    
-    # Если используется GGUF Direct API
     if llm_settings and llm_settings.get("use_gguf_direct"):
         try:
             from llama_cpp import Llama
             import os
             
-            gguf_path = llm_settings["gguf_model_path"]
-            mmproj_path = llm_settings.get("gguf_mmproj_path")
+            if existing_llm:
+                llm = existing_llm
+            else:
+                gguf_path = llm_settings["gguf_model_path"]
+                mmproj_path = llm_settings.get("gguf_mmproj_path")
+                if not mmproj_path or not os.path.exists(mmproj_path):
+                    return "Изображение без описания (нет mmproj)."
+                
+                llm = Llama(
+                    model_path=os.path.normpath(gguf_path),
+                    chat_format="qwen",
+                    clip_model_path=os.path.normpath(mmproj_path),
+                    n_ctx=2048,
+                    n_gpu_layers=-1,
+                    verbose=False,
+                    type_k=2, type_v=2
+                )
             
-            if not mmproj_path or not os.path.exists(mmproj_path):
-                print(f"[GGUF Direct] mmproj не найден, пропускаем vision для {image_path}")
-                return "Изображение без описания (нет mmproj)."
-            
-            # Нормализуем пути
-            gguf_path = os.path.normpath(gguf_path)
-            mmproj_path = os.path.normpath(mmproj_path)
             image_path_norm = os.path.normpath(image_path)
-            
-            print(f"[GGUF Direct Vision] Загрузка модели с mmproj...")
-            
-            # Создаём Llama объект с clip_model_path
-            llm = Llama(
-                model_path=gguf_path,
-                chat_format="qwen",  # Формат для Qwen multimodal
-                clip_model_path=mmproj_path,
-                n_ctx=512,  # Минимальный контекст для vision (экономия VRAM)
-                n_gpu_layers=-1,
-                verbose=False,
-                # Квантизация KV-cache и других параметров для экономии VRAM
-                type_k=2,  # GGML_TYPE_Q8_0 для key cache
-                type_v=2,  # GGML_TYPE_Q8_0 для value cache
-            )
-            
             prompt = """ВНИМАТЕЛЬНО проанализируй это изображение (слайд презентации или кадр видео). 
 Твоя задача — составить максимально подробное описание для поисковой системы.
 
@@ -147,80 +121,50 @@ def describe_image_with_lmstudio(image_path, llm_settings=None):
 
 ЗАПРЕЩЕНО давать пустые или отказные ответы типа 'на слайде ничего нет' или 'уточните поиск'. Если слайд пуст, опиши хотя бы фон или логотипы. Пиши только по делу, на русском языке."""
             
-            # Для llama-cpp-python multimodal используем create_chat_completion с image
             response = llm.create_chat_completion(
-                messages=[
-                    {
-                        "role": "user",
-                        "content": [
-                            {"type": "text", "text": prompt},
-                            {"type": "image_url", "image_url": {"url": f"file://{image_path_norm}"}}
-                        ]
-                    }
-                ],
+                messages=[{
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": prompt},
+                        {"type": "image_url", "image_url": {"url": f"file://{image_path_norm}"}}
+                    ]
+                }],
                 temperature=0.0,
                 max_tokens=500,
             )
-            
             result = response["choices"][0]["message"]["content"]
-            print(f"[GGUF Direct Vision] Описание получено: {len(result)} символов")
-            
-            # Освобождаем память
-            del llm
-            
+            if not existing_llm: del llm
             return result
-            
         except Exception as e:
-            import traceback
-            print(f"Ошибка при описании картинки через GGUF Direct {image_path}:")
-            traceback.print_exc()
+            print(f"Ошибка GGUF Direct {image_path}: {e}")
             return "Изображение без описания."
     
-    # Стандартный путь через OpenAI-совместимый API
     api_url = (llm_settings.get("llm_url") if llm_settings else None) or config.LM_STUDIO_URL
     api_key = (llm_settings.get("llm_api_key") if llm_settings else None) or "lm-studio"
     model_name = (llm_settings.get("llm_model") if llm_settings else None) or "gpt-4o"
 
     url = f"{api_url.rstrip('/')}/chat/completions"
-    headers = {
-        "Content-Type": "application/json",
-        "Authorization": f"Bearer {api_key}"
-    }
+    headers = {"Content-Type": "application/json", "Authorization": f"Bearer {api_key}"}
     payload = {
         "model": model_name,
-        "messages": [
-            {
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": """ВНИМАТЕЛЬНО проанализируй это изображение (слайд презентации или кадр видео). 
-Твоя задача — составить максимально подробное описание для поисковой системы.
-
-1. ТЕКСТ: Выпиши ВЕСЬ текст, который видишь, включая заголовки, подписи и мелкий шрифт.
-2. ГРАФИКА: Если есть схемы, диаграммы или графики — опиши их структуру, оси, легенду и основные данные/тренды.
-3. ВИЗУАЛ: Опиши ключевые изображения, иконки или фотографии.
-4. СМЫСЛ: Кратко сформулируй главный тезис этого кадра.
-
-ЗАПРЕЩЕНО давать пустые или отказные ответы типа 'на слайде ничего нет' или 'уточните поиск'. Если слайд пуст, опиши хотя бы фон или логотипы. Пиши только по делу, на русском языке."""},
-                    {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_img}"}}
-                ]
-            }
-        ],
+        "messages": [{
+            "role": "user",
+            "content": [
+                {"type": "text", "text": "ВНИМАТЕЛЬНО проанализируй это изображение..."},
+                {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_img}"}}
+            ]
+        }],
         "temperature": 0.0,
         "max_tokens": 500
     }
     try:
         response = requests.post(url, headers=headers, json=payload, timeout=30)
         response.raise_for_status()
-        data = response.json()
-        return data["choices"][0]["message"]["content"]
+        return response.json()["choices"][0]["message"]["content"]
     except Exception as e:
-        print(f"Ошибка при описании картинки {image_path}: {e}")
         return "Изображение без описания."
 
-import gc
-
 def process_audio_video(file_path, images_dir, is_video=False, progress_cb=None, llm_settings=None):
-    """Транскрибирует аудио/видео. Для видео извлекает кадры при смене слайда (дебаунс)."""
     def prog(pct, msg):
         print(f"  [{pct}%] {msg}")
         if progress_cb: progress_cb(pct, msg)
@@ -230,53 +174,28 @@ def process_audio_video(file_path, images_dir, is_video=False, progress_cb=None,
 
     prog(15, "Загрузка модели транскрибации...")
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    # int8 - максимальная экономия памяти
-    compute_type = "int8"
+    model = whisperx.load_model("medium", device, compute_type="int8")
     
-    print(f"  [DEBUG] Загрузка WhisperX на {device} ({compute_type})...")
-    model = whisperx.load_model("medium", device, compute_type=compute_type)
-    
-    prog(20, "Транскрибация речи (это займёт время)...")
+    prog(20, "Транскрибация речи...")
     audio = whisperx.load_audio(file_path)
-
-    transcript = ""
     transcript_data = []
     try:
         result = model.transcribe(audio, batch_size=16)
         for seg in result.get('segments', []):
-            transcript += f"[{seg['start']:.2f}s -> {seg['end']:.2f}s] {seg['text'].strip()}\n"
             transcript_data.append({"start": seg['start'], "end": seg['end'], "text": seg['text'].strip()})
     except Exception as e:
-        print(f"WhisperX transcribe error: {e}. Резервный движок (faster-whisper)...")
-        try:
-            from faster_whisper import WhisperModel
-            fw = WhisperModel("medium", device=device, compute_type="int8")
-            segments, _ = fw.transcribe(audio, vad_filter=True)
-            for s in segments:
-                transcript += f"[{s.start:.2f}s -> {s.end:.2f}s] {s.text.strip()}\n"
-                transcript_data.append({"start": s.start, "end": s.end, "text": s.text.strip()})
-            del fw
-        except Exception as e2:
-            print(f"Критическая ошибка транскрибации: {e2}")
+        print(f"WhisperX error: {e}")
     finally:
-        # Принудительная выгрузка модели для освобождения VRAM
-        print("  [DEBUG] Очистка VRAM после транскрибации...")
         if 'model' in locals(): del model
         gc.collect()
-        if device == "cuda":
-            torch.cuda.empty_cache()
+        if device == "cuda": torch.cuda.empty_cache()
 
     if transcript_data:
-        # Разбиваем транскрипт на чанки по ~30 секунд или по предложениям
         chunk_text = ""
         chunk_start = 0
         for i, seg in enumerate(transcript_data):
-            if not chunk_text:
-                chunk_start = seg["start"]
-            
+            if not chunk_text: chunk_start = seg["start"]
             chunk_text += f"[{seg['start']:.1f}s] {seg['text']} "
-            
-            # Если набралось достаточно текста или это последний сегмент
             if (seg["end"] - chunk_start > 30) or (i == len(transcript_data) - 1):
                 nodes.append(TextNode(
                     text=f"Транскрипт {file_name} (от {format_seconds(chunk_start)}):\n{chunk_text.strip()}",
@@ -286,399 +205,163 @@ def process_audio_video(file_path, images_dir, is_video=False, progress_cb=None,
     prog(60, "Транскрибация завершена")
 
     if is_video:
-        prog(62, "Извлечение ключевых кадров (дебаунс)...")
+        prog(62, "Извлечение ключевых кадров...")
         frame_data = []
         cap = cv2.VideoCapture(file_path)
-        fps = cap.get(cv2.CAP_PROP_FPS)
-        if fps <= 0: fps = 25
-
-        # ── Настройки детекции ──────────────────────────────────────────────
-        PIXEL_THR    = 15    # минимальный diff канала
-        UPDATE_PCT   = 0.002 # 0.2% — инкрементальное изменение (дорисовка схемы) -> ПЕРЕЗАПИСЬ кадра
-        NEW_SLIDE_PCT= 0.04  # 4.0% — сильное изменение -> НОВЫЙ кадр
-        MOTION_PCT   = 0.002 # 0.2% — порог движения
-        STABLE_WAIT  = int(fps * 3.0)  # 3 сек без движений -> фиксируем результат
-        CHECK_STEP   = max(1, int(fps * 1.0))
-        COMPARE_SIZE = (320, 180)
-        SAVE_HEIGHT  = 720   # Сохраняем кадры в 720p для экономии VRAM
+        fps = cap.get(cv2.CAP_PROP_FPS) or 25
         
-        def resize_to_720p(frame):
-            """Resize frame to 720p maintaining aspect ratio"""
-            h, w = frame.shape[:2]
-            if h <= SAVE_HEIGHT:
-                return frame  # Уже меньше 720p
+        # Настройки детекции
+        PIXEL_THR = 15; UPDATE_PCT = 0.002; NEW_SLIDE_PCT = 0.04; MOTION_PCT = 0.002
+        STABLE_WAIT = int(fps * 3.0); CHECK_STEP = max(1, int(fps * 1.0))
+        COMPARE_SIZE = (320, 180); SAVE_HEIGHT = 720
+        
+        def resize_to_720p(f):
+            h, w = f.shape[:2]
+            if h <= SAVE_HEIGHT: return f
             scale = SAVE_HEIGHT / h
-            new_w = int(w * scale)
-            return cv2.resize(frame, (new_w, SAVE_HEIGHT), interpolation=cv2.INTER_AREA)
+            return cv2.resize(f, (int(w * scale), SAVE_HEIGHT), interpolation=cv2.INTER_AREA)
         
         total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-        duration_sec = total_frames / fps if fps > 0 else 0
-
-        prev_saved_thumb = None    # Эталон последнего сохраненного/обновленного кадра
-        last_seen_thumb  = None    
-        stable_since     = 0       
-        frame_count      = 0
-        frame_list       = []      # [(image_path, time_sec)]
+        prev_saved_thumb = None; last_seen_thumb = None; stable_since = 0; frame_count = 0
+        frame_list = []
 
         while frame_count < total_frames:
             cap.set(cv2.CAP_PROP_POS_FRAMES, frame_count)
             ret, frame = cap.read()
-            if not ret:
-                break
-
-            # Прогресс каждые 10 проверок или в конце
-            if (frame_count // CHECK_STEP) % 10 == 0:
-                prog(62 + int((frame_count / total_frames) * 3), 
-                     f"Извлечение кадров: {format_seconds(frame_count/fps)} / {format_seconds(duration_sec)}")
-
+            if not ret: break
+            
             thumb = cv2.resize(frame, COMPARE_SIZE)
-
             if last_seen_thumb is None:
-                last_seen_thumb = thumb
-                stable_since = frame_count
-                
-                img_name = f"video_frame_{uuid.uuid4().hex[:8]}.jpg"
-                img_path = os.path.join(images_dir, img_name)
-                frame_720p = resize_to_720p(frame)
-                cv2.imwrite(img_path, frame_720p)
+                last_seen_thumb = thumb; stable_since = frame_count
+                img_path = os.path.join(images_dir, f"video_frame_{uuid.uuid4().hex[:8]}.jpg")
+                cv2.imwrite(img_path, resize_to_720p(frame))
                 frame_list.append((img_path, 0.0))
                 prev_saved_thumb = thumb
             else:
                 diff_motion = cv2.absdiff(thumb, last_seen_thumb)
                 motion_pct = float(np.sum(diff_motion > PIXEL_THR)) / diff_motion.size
-                
-                if motion_pct >= MOTION_PCT:
-                    # Движение продолжается
-                    stable_since = frame_count
+                if motion_pct >= MOTION_PCT: stable_since = frame_count
                 else:
                     if frame_count - stable_since >= STABLE_WAIT:
                         if prev_saved_thumb is not None:
                             diff_saved = cv2.absdiff(thumb, prev_saved_thumb)
                             saved_pct = float(np.sum(diff_saved > PIXEL_THR)) / diff_saved.size
-                            
                             if saved_pct >= UPDATE_PCT:
-                                img_name = f"video_frame_{uuid.uuid4().hex[:8]}.jpg"
-                                img_path = os.path.join(images_dir, img_name)
-                                frame_720p = resize_to_720p(frame)
-                                cv2.imwrite(img_path, frame_720p)
-                                
-                                if saved_pct >= NEW_SLIDE_PCT:
-                                    # Полностью новый слайд
-                                    frame_list.append((img_path, frame_count / fps))
+                                img_path = os.path.join(images_dir, f"video_frame_{uuid.uuid4().hex[:8]}.jpg")
+                                cv2.imwrite(img_path, resize_to_720p(frame))
+                                if saved_pct >= NEW_SLIDE_PCT: frame_list.append((img_path, frame_count / fps))
                                 else:
-                                    # Инкрементальное добавление (дорисовали схему) -> ПЕРЕЗАПИСЫВАЕМ
                                     old_path = frame_list[-1][0]
                                     if os.path.exists(old_path):
                                         try: os.remove(old_path)
                                         except: pass
                                     frame_list[-1] = (img_path, frame_count / fps)
-                                    
                                 prev_saved_thumb = thumb
-                                
                         stable_since = frame_count
-
-            last_seen_thumb = thumb
-            frame_count += CHECK_STEP
-
+            last_seen_thumb = thumb; frame_count += CHECK_STEP
         cap.release()
-        print(f"Извлечено кадров (итоговые состояния): {len(frame_list)}")
 
-        # ── Параллельное описание кадров ────────────────────────────────────
+        # Описание кадров
         n = len(frame_list)
-        prog(65, f"Описание {n} кадров (параллельно)...")
+        prog(65, f"Описание {n} кадров...")
+        shared_llm = None
+        use_direct = llm_settings and llm_settings.get("use_gguf_direct")
+        
+        if use_direct:
+            try:
+                from llama_cpp import Llama
+                shared_llm = Llama(
+                    model_path=os.path.normpath(llm_settings["gguf_model_path"]),
+                    chat_format="qwen",
+                    clip_model_path=os.path.normpath(llm_settings["gguf_mmproj_path"]),
+                    n_ctx=2048, n_gpu_layers=-1, verbose=False, type_k=2, type_v=2
+                )
+            except Exception as e: print(f"GGUF init error: {e}")
 
         def _describe(args):
             img_path, t = args
-            return img_path, t, describe_image_with_lmstudio(img_path, llm_settings=llm_settings)
+            return img_path, t, describe_image_with_lmstudio(img_path, llm_settings, shared_llm)
 
         done = 0
-        with ThreadPoolExecutor(max_workers=5) as exe:
+        with ThreadPoolExecutor(max_workers=(1 if use_direct else 5)) as exe:
             futs = {exe.submit(_describe, item): item for item in frame_list}
             for fut in as_completed(futs):
                 img_path, t, desc = fut.result()
                 nodes.append(TextNode(
-                    text=f"Кадр из видео {file_name} на {format_seconds(t)}. Описание кадра: {desc}",
+                    text=f"Кадр из видео {file_name} на {format_seconds(t)}. Описание: {desc}",
                     metadata={"file_name": file_name, "image_path": img_path, "time": t, "start": t}
                 ))
-                frame_data.append({
-                    "time": t,
-                    "image_path": img_path,
-                    "description": desc
-                })
-                done += 1
-                prog(65 + int(done / n * 22) if n else 87, f"Описание кадров: {done}/{n}")
-                
-        # Сортируем frame_data по времени
+                frame_data.append({"time": t, "image_path": img_path, "description": desc})
+                done += 1; prog(65 + int(done/n*22) if n else 87, f"Описание: {done}/{n}")
+        
+        if shared_llm:
+            del shared_llm
+            gc.collect()
+            if torch.cuda.is_available(): torch.cuda.empty_cache()
         frame_data.sort(key=lambda x: x["time"])
 
-    # Сохраняем метаданные для фронтенда (плеера)
-    metadata_json = {
-        "file_name": file_name,
-        "is_video": is_video,
-        "transcript": transcript_data,
-        "frames": frame_data if is_video else []
-    }
-    data_dir = os.path.dirname(file_path)
-    json_path = os.path.join(data_dir, f"{file_name}.json")
-    with open(json_path, "w", encoding="utf-8") as f:
+    metadata_json = {"file_name": file_name, "is_video": is_video, "transcript": transcript_data, "frames": (frame_data if is_video else [])}
+    with open(os.path.join(os.path.dirname(file_path), f"{file_name}.json"), "w", encoding="utf-8") as f:
         json.dump(metadata_json, f, ensure_ascii=False, indent=2)
-
-    # Очистка памяти
-    del audio
-    gc.collect()
-    if torch.cuda.is_available():
-        torch.cuda.empty_cache()
 
     return nodes
 
 def process_pdf(file_path, images_dir, llm_settings=None):
-    print(f"Обработка PDF: {file_path}")
-    nodes = []
-    file_name = os.path.basename(file_path)
-    doc = fitz.open(file_path)
+    nodes = []; file_name = os.path.basename(file_path); doc = fitz.open(file_path)
     for page_num in range(len(doc)):
-        page = doc.load_page(page_num)
-        text = page.get_text()
+        page = doc.load_page(page_num); text = page.get_text()
         if text.strip():
-            nodes.append(TextNode(
-                text=f"Текст из PDF {file_name}, страница {page_num+1}:\n{text}",
-                metadata={"file_name": file_name, "page": page_num + 1}
-            ))
-            
-        drawings = page.get_drawings()
-        # 1. Проверяем наличие настоящих изображений (игнорируем иконки < 50x50)
-        has_real_image = False
-        for img in page.get_images():
-            if img[2] > 50 and img[3] > 50:
-                has_real_image = True
-                break
-        
-        # 2. Проверяем векторную графику (диаграммы)
-        has_vector_diagram = False
-        drawings = page.get_drawings()
-        if not has_real_image and len(drawings) > 0:
-            lines = []
-            rects = []
-            for d in drawings:
-                for item in d.get("items", []):
-                    if item[0] == "l":
-                        p1, p2 = item[1], item[2]
-                        if abs(p1.y - p2.y) < 2: continue # Игнорируем подчеркивания
-                        lines.append(item)
-                    elif item[0] in ("c", "qu"):
-                        lines.append(item) # Считаем кривые как линии
-                    elif item[0] == "re":
-                        r = item[1]
-                        if r.width > page.rect.width * 0.9 or r.height > page.rect.height * 0.9: continue
-                        rects.append(r)
-            
-            # Фильтруем "пустые" рамки (например, границы блоков кода), в которых нет других элементов
-            meaningful_rects = []
-            for r in rects:
-                has_internal_content = False
-                for l in lines:
-                    # Если линия начинается, заканчивается или проходит через прямоугольник
-                    if r.contains(l[1]) or r.contains(l[2]):
-                        has_internal_content = True
-                        break
-                # Прямоугольник важен ТОЛЬКО если в нем есть графика (схема)
-                if has_internal_content: 
-                    meaningful_rects.append(r)
-            
-            # Порог для признания страницы "рисунком"
-            # Возвращаемся к более мягким порогам, но с сохранением строгой фильтрации рамок
-            if len(lines) > 8 or len(meaningful_rects) > 5:
-                has_vector_diagram = True
-                print(f"  [PDF] Стр {page_num+1}: Сохраняем как рисунок ({len(lines)} лин, {len(meaningful_rects)} рект)")
-
-        if not has_real_image and not has_vector_diagram:
-            continue
-            
-        pix = page.get_pixmap(dpi=150)
-        image_bytes = pix.tobytes("png")
-        image_filename = f"pdf_page_{page_num+1}_{uuid.uuid4().hex[:8]}.png"
-        image_path = os.path.join(images_dir, image_filename)
-        
-        with open(image_path, "wb") as f:
-            f.write(image_bytes)
-            
-        desc = describe_image_with_lmstudio(image_path, llm_settings=llm_settings)
-        
-        nodes.append(TextNode(
-            text=f"Изображение/Схема из PDF {file_name}, страница {page_num+1}. Описание: {desc}",
-            metadata={"file_name": file_name, "image_path": image_path, "page": page_num + 1}
-        ))
-            
+            nodes.append(TextNode(text=f"Текст из PDF {file_name}, стр {page_num+1}:\n{text}", metadata={"file_name": file_name, "page": page_num+1}))
+        if len(page.get_images()) > 0 or len(page.get_drawings()) > 5:
+            pix = page.get_pixmap(dpi=150)
+            image_path = os.path.join(images_dir, f"pdf_page_{page_num+1}_{uuid.uuid4().hex[:8]}.png")
+            pix.save(image_path)
+            desc = describe_image_with_lmstudio(image_path, llm_settings)
+            nodes.append(TextNode(text=f"Изображение из PDF {file_name}, стр {page_num+1}. Описание: {desc}", metadata={"file_name": file_name, "image_path": image_path, "page": page_num+1}))
     return nodes
 
 def convert_pptx_to_pdf(pptx_path, pdf_path):
-    """Конвертирует PPTX в PDF через Microsoft PowerPoint (только для Windows)."""
     try:
-        import win32com.client
-        import pythoncom
+        import win32com.client; import pythoncom
         pythoncom.CoInitialize()
         powerpoint = win32com.client.Dispatch("Powerpoint.Application")
-        # 32 = ppSaveAsPDF
         deck = powerpoint.Presentations.Open(os.path.abspath(pptx_path), WithWindow=False)
-        deck.SaveAs(os.path.abspath(pdf_path), 32)
-        deck.Close()
-        powerpoint.Quit()
+        deck.SaveAs(os.path.abspath(pdf_path), 32); deck.Close(); powerpoint.Quit()
         return True
-    except Exception as e:
-        print(f"Ошибка конвертации PPTX в PDF: {e}")
-        return False
+    except: return False
 
 def process_pptx(file_path, images_dir, llm_settings=None):
-    print(f"Обработка презентации: {file_path}")
-    nodes = []
-    file_name = os.path.basename(file_path)
-    
-    # Пытаемся конвертировать в PDF для лучшего отображения
+    nodes = []; file_name = os.path.basename(file_path)
     pdf_path = file_path.rsplit('.', 1)[0] + ".pdf"
-    has_pdf = False
-    if sys.platform == "win32":
-        has_pdf = convert_pptx_to_pdf(file_path, pdf_path)
-
+    has_pdf = convert_pptx_to_pdf(file_path, pdf_path) if sys.platform == "win32" else False
     prs = Presentation(file_path)
-    
-    pptx_metadata = {
-        "file_name": file_name,
-        "has_pdf": has_pdf,
-        "pdf_name": os.path.basename(pdf_path) if has_pdf else None,
-        "slides": []
-    }
-
     for i, slide in enumerate(prs.slides):
-        slide_text = []
-        slide_images = []
-        
-        title = ""
-        if slide.shapes.title:
-            title = slide.shapes.title.text
-            
-        for shape in slide.shapes:
-            if hasattr(shape, "text") and shape != slide.shapes.title:
-                slide_text.append(shape.text)
-                
-            if hasattr(shape, "image"):
-                try:
-                    image = shape.image
-                    image_bytes = image.blob
-                    image_filename = f"pptx_img_{uuid.uuid4().hex[:8]}.{image.ext}"
-                    image_path = os.path.join(images_dir, image_filename)
-                    with open(image_path, "wb") as f:
-                        f.write(image_bytes)
-                        
-                    desc = describe_image_with_lmstudio(image_path, llm_settings=llm_settings)
-                    nodes.append(TextNode(
-                        text=f"Изображение со слайда {i+1} презентации {file_name}. Описание: {desc}",
-                        metadata={"file_name": file_name, "image_path": image_path, "page": i + 1}
-                    ))
-                    slide_images.append({
-                        "path": image_filename,
-                        "description": desc
-                    })
-                except Exception as e:
-                    print(f"Ошибка извлечения картинки из PPTX: {e}")
-                
-        text_content = "\n".join(slide_text)
-        if text_content.strip() or title:
-            nodes.append(TextNode(
-                text=f"Слайд {i+1}: {title}\n{text_content}",
-                metadata={"file_name": file_name, "page": i + 1}
-            ))
-            
-        pptx_metadata["slides"].append({
-            "number": i + 1,
-            "title": title,
-            "text": text_content,
-            "images": slide_images
-        })
-            
-    # Сохраняем метаданные для фронтенда
-    data_dir = os.path.dirname(file_path)
-    json_path = os.path.join(data_dir, f"{file_name}.json")
-    with open(json_path, "w", encoding="utf-8") as f:
-        json.dump(pptx_metadata, f, ensure_ascii=False, indent=2)
-
+        title = slide.shapes.title.text if slide.shapes.title else ""
+        slide_text = [shape.text for shape in slide.shapes if hasattr(shape, "text")]
+        nodes.append(TextNode(text=f"Слайд {i+1}: {title}\n" + "\n".join(slide_text), metadata={"file_name": file_name, "page": i+1}))
     return nodes
 
 def process_docx(file_path, images_dir, llm_settings=None):
-    print(f"Обработка DOCX: {file_path}")
-    import docx
-    nodes = []
-    file_name = os.path.basename(file_path)
-    try:
-        doc = docx.Document(file_path)
-        
-        full_text = []
-        for para in doc.paragraphs:
-            if para.text.strip():
-                full_text.append(para.text)
-                
-        if full_text:
-            text_content = "\n".join(full_text)
-            nodes.append(TextNode(
-                text=f"Текст из документа Word {file_name}:\n{text_content}",
-                metadata={"file_name": file_name}
-            ))
-            
-        for i, rel in enumerate(doc.part.rels.values()):
-            if "image" in rel.target_ref:
-                try:
-                    img_bytes = rel.target_part.blob
-                    ext = rel.target_ref.split('.')[-1]
-                    image_filename = f"docx_img_{uuid.uuid4().hex[:8]}.{ext}"
-                    image_path = os.path.join(images_dir, image_filename)
-                    with open(image_path, "wb") as f:
-                        f.write(img_bytes)
-                        
-                    desc = describe_image_with_lmstudio(image_path, llm_settings=llm_settings)
-                    nodes.append(TextNode(
-                        text=f"Изображение из документа Word {file_name}. Описание: {desc}",
-                        metadata={"file_name": file_name, "image_path": image_path}
-                    ))
-                except Exception as img_e:
-                    print(f"Ошибка извлечения картинки: {img_e}")
-    except Exception as e:
-        print(f"Ошибка DOCX: {e}")
-        
+    import docx; nodes = []; file_name = os.path.basename(file_path)
+    doc = docx.Document(file_path)
+    full_text = [p.text for p in doc.paragraphs if p.text.strip()]
+    if full_text: nodes.append(TextNode(text=f"Текст из DOCX {file_name}:\n" + "\n".join(full_text), metadata={"file_name": file_name}))
     return nodes
 
 def ingest_file(file_path, notebook_id, progress_cb=None, llm_settings=None):
     paths = config.get_notebook_paths(notebook_id)
-    images_dir = paths["images"]
-    os.makedirs(images_dir, exist_ok=True)
-
+    images_dir = paths["images"]; os.makedirs(images_dir, exist_ok=True)
     ext = os.path.splitext(file_path)[1].lower()
-    file_name = os.path.basename(file_path)
     nodes = []
-    if ext in ['.mp4', '.avi', '.mkv']:
-        nodes = process_audio_video(file_path, images_dir, is_video=True, progress_cb=progress_cb, llm_settings=llm_settings)
-    elif ext in ['.mp3', '.wav', '.m4a']:
-        nodes = process_audio_video(file_path, images_dir, is_video=False, progress_cb=progress_cb, llm_settings=llm_settings)
-    elif ext == '.pdf':
-        if progress_cb: progress_cb(50, "Обработка PDF...")
-        nodes = process_pdf(file_path, images_dir, llm_settings=llm_settings)
-    elif ext == '.pptx':
-        if progress_cb: progress_cb(50, "Обработка презентации...")
-        nodes = process_pptx(file_path, images_dir, llm_settings=llm_settings)
-    elif ext == '.docx':
-        if progress_cb: progress_cb(50, "Обработка документа Word...")
-        nodes = process_docx(file_path, images_dir, llm_settings=llm_settings)
+    if ext in ['.mp4', '.avi', '.mkv']: nodes = process_audio_video(file_path, images_dir, True, progress_cb, llm_settings)
+    elif ext in ['.mp3', '.wav', '.m4a']: nodes = process_audio_video(file_path, images_dir, False, progress_cb, llm_settings)
+    elif ext == '.pdf': nodes = process_pdf(file_path, images_dir, llm_settings)
+    elif ext == '.pptx': nodes = process_pptx(file_path, images_dir, llm_settings)
+    elif ext == '.docx': nodes = process_docx(file_path, images_dir, llm_settings)
     elif ext == '.txt':
-        if progress_cb: progress_cb(50, "Чтение текстового файла...")
-        with open(file_path, "r", encoding="utf-8") as f:
-            nodes = [TextNode(text=f.read(), metadata={"file_name": file_name})]
-    else:
-        print(f"Неподдерживаемый формат: {ext}")
-        return []
-
-    # Применяем умную нарезку (chunking) для всех текстовых нод
+        with open(file_path, "r", encoding="utf-8") as f: nodes = [TextNode(text=f.read(), metadata={"file_name": os.path.basename(file_path)})]
     if nodes:
         splitter = SentenceSplitter(chunk_size=512, chunk_overlap=50)
         from llama_index.core import Document
-        docs = [Document(text=n.text, metadata=n.metadata) for n in nodes]
-        nodes = splitter.get_nodes_from_documents(docs)
-        
+        nodes = splitter.get_nodes_from_documents([Document(text=n.text, metadata=n.metadata) for n in nodes])
     return nodes
