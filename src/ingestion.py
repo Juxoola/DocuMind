@@ -256,12 +256,12 @@ def process_audio_video(file_path, images_dir, is_video=False, progress_cb=None,
         STABLE_WAIT_SEC = 3.0; CHECK_STEP_SEC = 1.0
         COMPARE_SIZE = (320, 180)
         
-        # Запускаем FFmpeg Pipe для получения превью 1 раз в секунду
+        # Запускаем FFmpeg Pipe: декодирование и ресайз полностью на GPU
         cmd = [
             ffmpeg, "-hide_banner", "-loglevel", "error",
-            "-hwaccel", "cuda",
+            "-hwaccel", "cuda", "-hwaccel_output_format", "cuda",
             "-i", file_path,
-            "-vf", f"fps=1/{CHECK_STEP_SEC},scale={COMPARE_SIZE[0]}:{COMPARE_SIZE[1]}",
+            "-vf", f"fps=1/{CHECK_STEP_SEC},scale_cuda={COMPARE_SIZE[0]}:{COMPARE_SIZE[1]},hwdownload,format=bgr24",
             "-f", "image2pipe", "-vcodec", "rawvideo", "-pix_fmt", "bgr24", "pipe:1"
         ]
         
