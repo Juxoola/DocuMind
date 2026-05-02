@@ -234,6 +234,10 @@ def save_high_res_frame(video_path, time_sec, output_path):
     except: pass
 
 def process_audio_video(file_path, images_dir, is_video=False, progress_cb=None, llm_settings=None):
+    def prog(pct, msg):
+        print(f"  [{pct}%] {msg}")
+        if progress_cb: progress_cb(pct, msg)
+
     if is_video:
         prog(62, "Извлечение ключевых кадров (CUDA Accelerated)...")
         frame_data = []
@@ -456,11 +460,11 @@ def ensure_720p_video(file_path, prog_cb=None):
         ffmpeg = get_ffmpeg_exe()
         temp_path = file_path + ".720p.mp4"
         
-        # Сжимаем через GPU (h264_nvenc)
+        # Ультра-быстрое сжатие через GPU (пресет p1 для скорости)
         cmd = [
-            ffmpeg, "-y", "-hwaccel", "cuda", "-i", file_path,
-            "-vf", "scale=-2:720",
-            "-c:v", "h264_nvenc", "-preset", "p4", "-tune", "hq", "-cq", "23",
+            ffmpeg, "-y", "-hwaccel", "cuda", "-hwaccel_output_format", "cuda", "-i", file_path,
+            "-vf", "scale_cuda=-2:720",
+            "-c:v", "h264_nvenc", "-preset", "p1", "-tune", "ull", # p1 + ull = максимальная скорость
             "-c:a", "aac", "-b:a", "128k", 
             temp_path
         ]
