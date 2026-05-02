@@ -22,12 +22,10 @@ from contextlib import asynccontextmanager
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup: Предзагрузка моделей
-    print("[SERVER] Запуск системы...")
-    try:
-        preload_all_models()
-    except Exception as e:
-        print(f"[ERROR] Ошибка предзагрузки моделей: {e}")
+    # Фоновая предзагрузка моделей (сервер запустится мгновенно)
+    import threading
+    from src.rag_pipeline import preload_all_models
+    threading.Thread(target=preload_all_models, daemon=True).start()
     
     yield
     
