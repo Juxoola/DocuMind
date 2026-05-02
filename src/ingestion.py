@@ -257,9 +257,9 @@ def ensure_720p_video(file_path, prog_cb=None):
     from imageio_ffmpeg import get_ffmpeg_exe
     cmd = [
         get_ffmpeg_exe(), "-y", 
-        "-hwaccel", "cuda", "-hwaccel_output_format", "cuda", 
+        "-hwaccel", "cuda", 
         "-i", file_path, 
-        "-vf", "scale_cuda=-2:720", 
+        "-vf", "scale=-2:720", 
         "-c:v", "hevc_nvenc", "-preset", "p4", 
         "-rc", "vbr", "-cq", "28", "-b:v", "600k", "-maxrate:v", "1.2M", "-bufsize:v", "2M",
         "-pix_fmt", "yuv420p", "-tag:v", "hvc1",
