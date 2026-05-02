@@ -252,45 +252,92 @@ def process_docx(file_path, images_dir, llm_settings=None):
 def ensure_720p_video(file_path, prog_cb=None):
     ext = os.path.splitext(file_path)[1].lower()
     if ext not in ['.mp4', '.avi', '.mkv', '.mov']: return file_path
-    temp_path = file_path + ".720p.mp4"
-    if prog_cb: prog_cb(5, "Оптимизация видео (NVENC)...")
-    from imageio_ffmpeg import get_ffmpeg_exe
-    cmd = [
-        get_ffmpeg_exe(), "-y", 
-        "-hwaccel", "cuda", 
-        "-i", file_path, 
-        "-vf", "scale=-2:720", 
-        "-c:v", "hevc_nvenc", "-preset", "p4", 
-        "-rc", "vbr", "-cq", "28", "-b:v", "600k", "-maxrate:v", "1.2M", "-bufsize:v", "2M",
-        "-pix_fmt", "yuv420p", "-tag:v", "hvc1",
-        "-c:a", "aac", "-b:a", "128k", 
-        "-movflags", "+faststart",
-        temp_path
-    ]
-    import subprocess
-    result = subprocess.run(cmd, capture_output=True, text=True)
     
-    if result.returncode == 0 and os.path.exists(temp_path) and os.path.getsize(temp_path) > 1000:
-        # Удаляем оригинал и переименовываем в .mp4
+    from imageio_ffmpeg import get_ffmpeg_exe
+    ffmpeg = get_ffmpeg_exe()
+    
+    # 1. Получаем длительность
+    def get_duration(path):
+        try:
+            cmd = [ffmpeg, "-i", path]
+            res = subprocess.run(cmd, capture_output=True, text=True)
+            for line in res.stderr.split("\n"):
+                if "Duration" in line:
+                    time_str = line.split("Duration: ")[1].split(",")[0]
+                    h, m, s = time_str.split(":")
+                    return float(h)*3600 + float(m)*60 + float(s)
+        except: pass
+        return 0
+
+    duration = get_duration(file_path)
+    temp_final = file_path + ".720p.mp4"
+    
+    # Если видео короткое (< 2 мин), кодируем в один поток, но на GPU
+    if duration < 120:
+        if prog_cb: prog_cb(5, "Оптимизация видео (GPU)...")
+        cmd = [
+            ffmpeg, "-y", "-hwaccel", "cuda", "-hwaccel_output_format", "cuda",
+            "-i", file_path, "-vf", "scale_cuda=1280:720:format=yuv420p",
+            "-c:v", "hevc_nvenc", "-preset", "p1", "-rc", "constqp", "-qp", "30",
+            "-pix_fmt", "yuv420p", "-tag:v", "hvc1", "-c:a", "aac", "-b:a", "128k", "-movflags", "+faststart",
+            temp_final
+        ]
+        subprocess.run(cmd, capture_output=True)
+    else:
+        # ТУРБО-РЕЖИМ: Параллельное кодирование 4 сегментов
+        if prog_cb: prog_cb(5, "Турбо-оптимизация (Параллельный GPU)...")
+        import concurrent.futures
+        num_workers = 4
+        seg_len = duration / num_workers
+        temp_dir = file_path + "_parts"
+        os.makedirs(temp_dir, exist_ok=True)
+        
+        def encode_seg(idx):
+            out_part = os.path.join(temp_dir, f"part_{idx}.mp4")
+            cmd = [
+                ffmpeg, "-y", "-hwaccel", "cuda", "-hwaccel_output_format", "cuda",
+                "-ss", str(idx * seg_len), "-t", str(seg_len), "-i", file_path,
+                "-vf", "scale_cuda=1280:720:format=yuv420p",
+                "-c:v", "hevc_nvenc", "-preset", "p1", "-rc", "constqp", "-qp", "30",
+                "-an", out_part # Без звука для скорости, звук возьмем в конце
+            ]
+            subprocess.run(cmd, capture_output=True)
+            return out_part
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=num_workers) as ex:
+            parts = list(ex.map(encode_seg, range(num_workers)))
+        
+        # Склеиваем видео и добавляем звук из оригинала
+        list_path = os.path.join(temp_dir, "list.txt")
+        with open(list_path, "w") as f:
+            for p in parts: f.write(f"file '{os.path.abspath(p)}'\n")
+        
+        # Финальная сборка: видео из кусков + аудио из оригинала
+        merge_cmd = [
+            ffmpeg, "-y", "-f", "concat", "-safe", "0", "-i", list_path,
+            "-i", file_path, "-map", "0:v", "-map", "1:a?", # Маппим видео из склейки и звук из оригинала
+            "-c", "copy", "-c:a", "aac", "-b:a", "128k", "-movflags", "+faststart", temp_final
+        ]
+        subprocess.run(merge_cmd, capture_output=True)
+        
+        # Очистка временных файлов
+        import shutil
+        try: shutil.rmtree(temp_dir)
+        except: pass
+
+    # Замена оригинала
+    if os.path.exists(temp_final) and os.path.getsize(temp_final) > 1000:
         if os.path.exists(file_path):
             try: os.remove(file_path)
             except: pass
-        
         new_path = os.path.splitext(file_path)[0] + ".mp4"
-        if os.path.exists(new_path) and new_path != temp_path:
+        if os.path.exists(new_path) and new_path != temp_final:
             try: os.remove(new_path)
             except: pass
-            
-        os.rename(temp_path, new_path)
+        os.rename(temp_final, new_path)
         file_path = new_path
-        if prog_cb: prog_cb(9, "Видео оптимизировано")
-    else:
-        print(f"[FFmpeg Error] Не удалось оптимизировать видео. Код: {result.returncode}")
-        if result.stderr: print(f"Детали: {result.stderr[-500:]}")
-        if os.path.exists(temp_path):
-            try: os.remove(temp_path)
-            except: pass
-            
+        if prog_cb: prog_cb(9, "Видео оптимизировано (Турбо)")
+    
     return file_path
 
 def ensure_mp3_audio(file_path, prog_cb=None):
