@@ -2,11 +2,14 @@ import os
 import sys
 import types
 import warnings
+import subprocess
+import shutil
 import cv2
 import uuid
 import numpy as np
 import fitz  # PyMuPDF
 from pptx import Presentation
+import concurrent.futures
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import torch
 from llama_index.core.schema import TextNode
@@ -344,7 +347,6 @@ def ensure_720p_video(file_path, prog_cb=None):
     else:
         # ТУРБО-РЕЖИМ: Параллельное кодирование 4 сегментов
         if prog_cb: prog_cb(5, "Турбо-оптимизация (Параллельный GPU)...")
-        import concurrent.futures
         num_workers = 4
         seg_len = duration / num_workers
         temp_dir = file_path + "_parts"
@@ -379,7 +381,6 @@ def ensure_720p_video(file_path, prog_cb=None):
         subprocess.run(merge_cmd, capture_output=True)
         
         # Очистка временных файлов
-        import shutil
         try: shutil.rmtree(temp_dir)
         except: pass
 
