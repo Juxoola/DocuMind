@@ -229,10 +229,30 @@ async def upload_file(
 
 @app.delete("/api/files/{filename}")
 async def delete_file(filename: str, notebook_id: str):
+    import gc, time
+    import cv2
     paths = config.get_notebook_paths(notebook_id)
     file_path = os.path.join(paths["data"], filename)
+    
     if os.path.exists(file_path):
-        os.remove(file_path)
+        # Если это видео, пытаемся освободить дескриптор, если он был занят
+        if filename.lower().endswith(('.mp4', '.avi', '.mov')):
+            cap = cv2.VideoCapture(file_path)
+            try:
+                fps = cap.get(cv2.CAP_PROP_FPS) or 25
+                total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+                duration_sec = total_frames / fps if fps > 0 else 0
+            finally:
+                cap.release()
+                
+        gc.collect()
+        for i in range(5):
+            try:
+                os.remove(file_path)
+                break
+            except PermissionError:
+                if i == 4: raise
+                time.sleep(0.5)
     
     # Удаляем из ChromaDB
     from src.rag_pipeline import get_vector_store
