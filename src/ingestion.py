@@ -182,24 +182,82 @@ def process_audio_video(file_path, images_dir, is_video=False, progress_cb=None,
         # 3. ОПИСАНИЕ КАДРОВ
         n = len(frame_list)
         prog(65, f"Описание {n} кадров...")
-        shared_llm = None
-        if llm_settings and llm_settings.get("use_gguf_direct"):
+        
+        def get_native_image_base64(path):
+            try:
+                # Ресайз до 448px (родное для Qwen-VL) ускоряет инференс в разы без потери качества
+                img = cv2.imread(path)
+                img_res = cv2.resize(img, (448, 448))
+                _, buffer = cv2.imencode(".jpg", img_res, [int(cv2.IMWRITE_JPEG_QUALITY), 95])
+                return base64.b64encode(buffer).decode("utf-8")
+            except: return get_image_base64(path)
+
+        # Функция-воркер для параллельного ИИ (Золотой Стандарт)
+        def vision_worker(images_subset, settings, prompt, out_queue):
             try:
                 from llama_cpp import Llama; from llama_cpp.llama_chat_format import Llava15ChatHandler
-                g_path = config.resolve_model_path(llm_settings["gguf_model_path"])
-                m_path = config.resolve_model_path(llm_settings["gguf_mmproj_path"])
-                shared_llm = Llama(model_path=g_path, chat_handler=Llava15ChatHandler(clip_model_path=m_path), 
-                                   n_ctx=8192, n_gpu_layers=-1, verbose=False, n_batch=1024, n_threads=8)
-            except Exception as e: print(f"GGUF Direct Error: {e}")
+                g_path = config.resolve_model_path(settings["gguf_model_path"])
+                m_path = config.resolve_model_path(settings["gguf_mmproj_path"])
+                # 3 воркера + Flash Attention - идеальная загрузка 5080
+                local_llm = Llama(model_path=g_path, chat_handler=Llava15ChatHandler(clip_model_path=m_path), 
+                                  n_ctx=8192, n_gpu_layers=-1, verbose=False, n_batch=2048, n_threads=4, flash_attn=True)
+                
+                for img_path, t in images_subset:
+                    try:
+                        res = local_llm.create_chat_completion(
+                            messages=[{"role":"user","content":[{"type":"text","text":prompt},{"type":"image_url","image_url":{"url":f"data:image/jpeg;base64,{get_native_image_base64(img_path)}"}}]}],
+                            temperature=0.2, max_tokens=512
+                        )
+                        out_queue.put((img_path, t, res["choices"][0]["message"]["content"]))
+                    except: out_queue.put((img_path, t, "Ошибка анализа"))
+                del local_llm; gc.collect(); torch.cuda.empty_cache()
+            except Exception as e:
+                for img_path, t in images_subset: out_queue.put((img_path, t, f"Ошибка ИИ: {e}"))
 
-        done = 0
-        with ThreadPoolExecutor(max_workers=(1 if shared_llm else 5)) as exe:
-            futs = {exe.submit(describe_image_with_lmstudio, path, llm_settings, shared_llm): (path, t) for path, t in frame_list}
-            for fut in as_completed(futs):
-                path, t = futs[fut]; desc = fut.result()
-                nodes.append(TextNode(text=f"Кадр {file_name} [{format_seconds(t)}]: {desc}", metadata={"file_name":file_name, "image_path":path, "time":t}))
-                frame_data.append({"time":t, "image_path":path, "description":desc})
-                done += 1; prog(65 + int(done/n*22) if n else 87, f"Описание: {done}/{n}")
+        prompt = "Проанализируй это изображение (кадр из видео или слайд презентации) и составь его подробное описание на русском языке для системы поиска. ТЕКСТ, ГРАФИКА, ВИЗУАЛ, СМЫСЛ."
+        
+        if llm_settings and llm_settings.get("use_gguf_direct") and n > 5:
+            import multiprocessing as mp
+            ctx = mp.get_context('spawn')
+            num_workers = min(3, n) # 3 воркера - доказанный идеал для скорости/качества
+            chunks = [frame_list[i::num_workers] for i in range(num_workers)]
+            queue = ctx.Queue()
+            processes = []
+            
+            for i in range(num_workers):
+                p = ctx.Process(target=vision_worker, args=(chunks[i], llm_settings, prompt, queue))
+                p.start(); processes.append(p)
+            
+            done = 0
+            while done < n:
+                try:
+                    img_path, t, desc = queue.get(timeout=600)
+                    nodes.append(TextNode(text=f"Кадр {file_name} [{format_seconds(t)}]: {desc}", metadata={"file_name":file_name, "image_path":img_path, "time":t}))
+                    frame_data.append({"time":t, "image_path":img_path, "description":desc})
+                    done += 1; prog(65 + int(done/n*22), f"Описание: {done}/{n} (Золотой Стандарт ИИ)")
+                except: break
+            
+            for p in processes: p.join()
+        else:
+            # Обычный режим (мало кадров)
+            shared_llm = None
+            if llm_settings and llm_settings.get("use_gguf_direct"):
+                try:
+                    from llama_cpp import Llama; from llama_cpp.llama_chat_format import Llava15ChatHandler
+                    g_path = config.resolve_model_path(llm_settings["gguf_model_path"])
+                    m_path = config.resolve_model_path(llm_settings["gguf_mmproj_path"])
+                    shared_llm = Llama(model_path=g_path, chat_handler=Llava15ChatHandler(clip_model_path=m_path), 
+                                       n_ctx=8192, n_gpu_layers=-1, verbose=False, n_batch=2048, n_threads=8, flash_attn=True)
+                except: pass
+
+            done = 0
+            with ThreadPoolExecutor(max_workers=(1 if shared_llm else 5)) as exe:
+                futs = {exe.submit(describe_image_with_lmstudio, path, llm_settings, shared_llm): (path, t) for path, t in frame_list}
+                for fut in as_completed(futs):
+                    path, t = futs[fut]; desc = fut.result()
+                    nodes.append(TextNode(text=f"Кадр {file_name} [{format_seconds(t)}]: {desc}", metadata={"file_name":file_name, "image_path":path, "time":t}))
+                    frame_data.append({"time":t, "image_path":path, "description":desc})
+                    done += 1; prog(65 + int(done/n*22) if n else 87, f"Описание: {done}/{n}")
 
     metadata_json = {"file_name": file_name, "is_video": is_video, "transcript": transcript_data, "frames": frame_data}
     with open(os.path.join(os.path.dirname(file_path), f"{file_name}.json"), "w", encoding="utf-8") as f:

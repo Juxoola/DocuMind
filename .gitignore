@@ -1,1 +1,7 @@
 notebooks/
+
+scratch/
+*.json
+*.mp4
+temp/
+__pycache__/
