@@ -126,8 +126,8 @@ def describe_image_with_lmstudio(image_path, llm_settings=None):
             
             # Создаём Llama объект с clip_model_path
             llm = Llama(
-                model_path=gguf_path,
-                chat_format="llava-1-5",  # Формат для multimodal
+                model_path=model_path,
+                chat_format="qwen2-vl",  # Формат для Qwen multimodal
                 clip_model_path=mmproj_path,
                 n_ctx=2048,  # Меньший контекст для vision
                 n_gpu_layers=-1,
