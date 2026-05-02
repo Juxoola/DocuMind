@@ -86,6 +86,7 @@ def get_image_base64(image_path):
 def describe_image_with_lmstudio(image_path, llm_settings=None, existing_llm=None):
     """Отправляет картинку в локальный LM Studio или использует прямой GGUF для получения описания."""
     prompt = """<|vision_start|><|vision_end|>Проанализируй это изображение (кадр из видео или слайд презентации) и составь его подробное описание на русском языке для системы поиска.
+ОТВЕЧАЙ СРАЗУ, БЕЗ РАССУЖДЕНИЙ (ТЕГОВ <think>).
 
 1. ТЕКСТ: Выпиши весь видимый текст, заголовки и важные подписи.
 2. ГРАФИКА: Опиши схемы, таблицы или графики, если они есть.
@@ -130,9 +131,14 @@ def describe_image_with_lmstudio(image_path, llm_settings=None, existing_llm=Non
                 temperature=0.2,
                 max_tokens=500,
             )
-            result = response["choices"][0]["message"]["content"]
+            desc = response["choices"][0]["message"]["content"]
+            
+            # Очистка от тегов <think> (для моделей типа DeepSeek-R1)
+            import re
+            desc = re.sub(r'<think>.*?</think>', '', desc, flags=re.DOTALL).strip()
+            
             if not existing_llm: del llm
-            return result
+            return desc
         except Exception as e:
             print(f"Ошибка GGUF Direct {image_path}: {e}")
             return "Изображение без описания."
@@ -291,8 +297,8 @@ def process_audio_video(file_path, images_dir, is_video=False, progress_cb=None,
         def _describe(args):
             img_path, t = args
             desc = describe_image_with_lmstudio(img_path, llm_settings, shared_llm)
-            # Вывод описания в консоль
-            print(f"      [Кадр {format_seconds(t)}] Описание: {desc[:150]}...")
+            # Вывод ПОЛНОГО описания в консоль
+            print(f"      [Кадр {format_seconds(t)}] Описание:\n{desc}\n" + "-"*30)
             return img_path, t, desc
 
         done = 0
