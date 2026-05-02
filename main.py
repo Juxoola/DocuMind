@@ -366,7 +366,8 @@ async def chat(request: ChatRequest):
                 effective_llm_model = os.path.basename(request.gguf_model_path)
             else:
                 async def error_gen():
-                    yield f"data: {json.dumps({'type': 'error', 'text': f'Ошибка запуска GGUF сервера: {result[\"msg\"]}'}, ensure_ascii=False)}\n\n"
+                    error_msg = f"Ошибка запуска GGUF сервера: {result['msg']}"
+                    yield f"data: {json.dumps({'type': 'error', 'text': error_msg}, ensure_ascii=False)}\n\n"
                     yield "data: [DONE]\n\n"
                 return StreamingResponse(error_gen(), media_type="text/event-stream")
         else:
