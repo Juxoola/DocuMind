@@ -270,7 +270,17 @@ def ensure_720p_video(file_path, prog_cb=None):
     import subprocess
     subprocess.run(cmd, capture_output=True)
     if os.path.exists(temp_path):
-        os.remove(file_path); os.rename(temp_path, file_path)
+        # Удаляем оригинал и переименовываем в .mp4, чтобы расширение соответствовало контейнеру
+        if os.path.exists(file_path):
+            os.remove(file_path)
+        
+        new_path = os.path.splitext(file_path)[0] + ".mp4"
+        # Если файл с таким именем уже есть (например, старый mp4), удаляем его
+        if os.path.exists(new_path) and new_path != temp_path:
+            os.remove(new_path)
+            
+        os.rename(temp_path, new_path)
+        file_path = new_path
         if prog_cb: prog_cb(9, "Видео оптимизировано")
     return file_path
 
