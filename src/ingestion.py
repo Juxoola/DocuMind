@@ -101,7 +101,46 @@ def describe_image_with_lmstudio(image_path, llm_settings=None):
     """Отправляет картинку в локальный LM Studio для получения текстового описания."""
     base64_img = get_image_base64(image_path)
     
-    # Настройки из параметров или системного конфига
+    # Если используется GGUF Direct API
+    if llm_settings and llm_settings.get("use_gguf_direct"):
+        try:
+            from src.gguf_direct import get_gguf_llm
+            from llama_index.core.base.llms.types import ChatMessage, MessageRole
+            
+            llm = get_gguf_llm(
+                gguf_path=llm_settings["gguf_model_path"],
+                mmproj_path=llm_settings.get("gguf_mmproj_path"),
+                temperature=0.0,
+                max_tokens=500,
+            )
+            
+            # Для multimodal моделей через llama-cpp-python
+            prompt = """ВНИМАТЕЛЬНО проанализируй это изображение (слайд презентации или кадр видео). 
+Твоя задача — составить максимально подробное описание для поисковой системы.
+
+1. ТЕКСТ: Выпиши ВЕСЬ текст, который видишь, включая заголовки, подписи и мелкий шрифт.
+2. ГРАФИКА: Если есть схемы, диаграммы или графики — опиши их структуру, оси, легенду и основные данные/тренды.
+3. ВИЗУАЛ: Опиши ключевые изображения, иконки или фотографии.
+4. СМЫСЛ: Кратко сформулируй главный тезис этого кадра.
+
+ЗАПРЕЩЕНО давать пустые или отказные ответы типа 'на слайде ничего нет' или 'уточните поиск'. Если слайд пуст, опиши хотя бы фон или логотипы. Пиши только по делу, на русском языке."""
+            
+            # Для llama-cpp-python с mmproj нужно передать путь к изображению
+            messages = [
+                ChatMessage(role=MessageRole.USER, content=[
+                    {"type": "text", "text": prompt},
+                    {"type": "image_url", "image_url": {"url": image_path}}
+                ])
+            ]
+            
+            response = llm.chat(messages)
+            return response.message.content
+            
+        except Exception as e:
+            print(f"Ошибка при описании картинки через GGUF Direct {image_path}: {e}")
+            return "Изображение без описания."
+    
+    # Стандартный путь через OpenAI-совместимый API
     api_url = (llm_settings.get("llm_url") if llm_settings else None) or config.LM_STUDIO_URL
     api_key = (llm_settings.get("llm_api_key") if llm_settings else None) or "lm-studio"
     model_name = (llm_settings.get("llm_model") if llm_settings else None) or "gpt-4o"
