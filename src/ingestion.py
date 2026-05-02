@@ -304,8 +304,7 @@ def process_audio_video(file_path, images_dir, is_video=False, progress_cb=None,
         def _describe(args):
             img_path, t = args
             desc = describe_image_with_lmstudio(img_path, llm_settings, shared_llm)
-            # Вывод ПОЛНОГО описания в консоль
-            print(f"      [Кадр {format_seconds(t)}] Описание:\n{desc}\n" + "-"*30)
+            # Вывод в консоль отключен по просьбе пользователя
             return img_path, t, desc
 
         done = 0
