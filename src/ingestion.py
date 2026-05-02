@@ -408,16 +408,66 @@ def ensure_720p_video(file_path, prog_cb=None):
         print(f"Ошибка при сжатии видео: {e}")
     return file_path
 
+def ensure_mp3_audio(file_path, prog_cb=None):
+    """Конвертирует аудио в MP3 128k для экономии места."""
+    try:
+        import subprocess
+        from imageio_ffmpeg import get_ffmpeg_exe
+        ext = os.path.splitext(file_path)[1].lower()
+        if ext == '.mp3': return file_path
+        
+        if prog_cb: prog_cb(7, "Конвертация аудио в MP3...")
+        ffmpeg = get_ffmpeg_exe()
+        temp_path = file_path + ".temp.mp3"
+        
+        cmd = [ffmpeg, "-y", "-i", file_path, "-acodec", "libmp3lame", "-ab", "128k", temp_path]
+        subprocess.run(cmd, capture_output=True)
+        
+        if os.path.exists(temp_path):
+            os.remove(file_path)
+            new_path = os.path.splitext(file_path)[0] + ".mp3"
+            if os.path.exists(new_path): os.remove(new_path)
+            os.rename(temp_path, new_path)
+            return new_path
+    except Exception as e: print(f"Ошибка при конвертации аудио: {e}")
+    return file_path
+
+def ensure_720p_image(file_path, prog_cb=None):
+    """Сжимает фото до 720p."""
+    try:
+        img = cv2.imread(file_path)
+        if img is None: return file_path
+        h, w = img.shape[:2]
+        if h <= 720: return file_path
+        
+        if prog_cb: prog_cb(7, f"Сжатие фото до 720p (было {h}p)...")
+        scale = 720 / h
+        resized = cv2.resize(img, (int(w * scale), 720), interpolation=cv2.INTER_AREA)
+        cv2.imwrite(file_path, resized)
+    except Exception as e: print(f"Ошибка при сжатии фото: {e}")
+    return file_path
+
 def ingest_file(file_path, notebook_id, progress_cb=None, llm_settings=None):
     paths = config.get_notebook_paths(notebook_id)
     images_dir = paths["images"]; os.makedirs(images_dir, exist_ok=True)
     ext = os.path.splitext(file_path)[1].lower()
+    
+    # Авто-оптимизация медиа
     if ext in ['.mp4', '.avi', '.mkv']:
         file_path = ensure_720p_video(file_path, progress_cb)
-    
+    elif ext in ['.mp3', '.wav', '.m4a', '.flac']:
+        file_path = ensure_mp3_audio(file_path, progress_cb)
+        ext = os.path.splitext(file_path)[1].lower() # Обновляем расширение
+    elif ext in ['.jpg', '.jpeg', '.png', '.webp']:
+        file_path = ensure_720p_image(file_path, progress_cb)
+
     nodes = []
     if ext in ['.mp4', '.avi', '.mkv']: nodes = process_audio_video(file_path, images_dir, True, progress_cb, llm_settings)
     elif ext in ['.mp3', '.wav', '.m4a']: nodes = process_audio_video(file_path, images_dir, False, progress_cb, llm_settings)
+    elif ext in ['.jpg', '.jpeg', '.png', '.webp']:
+        desc = describe_image_with_lmstudio(file_path, llm_settings)
+        nodes = [TextNode(text=f"Изображение {os.path.basename(file_path)}. Описание: {desc}", 
+                          metadata={"file_name": os.path.basename(file_path), "image_path": file_path})]
     elif ext == '.pdf': nodes = process_pdf(file_path, images_dir, llm_settings)
     elif ext == '.pptx': nodes = process_pptx(file_path, images_dir, llm_settings)
     elif ext == '.docx': nodes = process_docx(file_path, images_dir, llm_settings)
