@@ -139,7 +139,15 @@ def start_gguf_server(
         sock.close()
         return {"status": "error", "msg": f"Порт {config.GGUF_SERVER_PORT} уже занят. Остановите предыдущий сервер."}
     
-    if not os.path.exists(gguf_path):
+    # Нормализуем пути (конвертируем все слэши в нативный формат ОС)
+    gguf_path = os.path.normpath(gguf_path)
+    if mmproj_path:
+        mmproj_path = os.path.normpath(mmproj_path)
+    
+    print(f"[GGUF] DEBUG: gguf_path = {repr(gguf_path)}")
+    print(f"[GGUF] DEBUG: mmproj_path = {repr(mmproj_path)}")
+    
+    if not gguf_path or not os.path.exists(gguf_path):
         return {"status": "error", "msg": f"Файл модели не найден: {gguf_path}"}
     
     ctx = ctx_size or config.GGUF_CTX_SIZE
