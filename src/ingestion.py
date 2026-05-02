@@ -129,9 +129,12 @@ def describe_image_with_lmstudio(image_path, llm_settings=None):
                 model_path=gguf_path,
                 chat_format="qwen",  # Формат для Qwen multimodal
                 clip_model_path=mmproj_path,
-                n_ctx=2048,  # Меньший контекст для vision
+                n_ctx=512,  # Минимальный контекст для vision (экономия VRAM)
                 n_gpu_layers=-1,
                 verbose=False,
+                # Квантизация KV-cache и других параметров для экономии VRAM
+                type_k=2,  # GGML_TYPE_Q8_0 для key cache
+                type_v=2,  # GGML_TYPE_Q8_0 для value cache
             )
             
             prompt = """ВНИМАТЕЛЬНО проанализируй это изображение (слайд презентации или кадр видео). 
@@ -297,6 +300,16 @@ def process_audio_video(file_path, images_dir, is_video=False, progress_cb=None,
         STABLE_WAIT  = int(fps * 3.0)  # 3 сек без движений -> фиксируем результат
         CHECK_STEP   = max(1, int(fps * 1.0))
         COMPARE_SIZE = (320, 180)
+        SAVE_HEIGHT  = 720   # Сохраняем кадры в 720p для экономии VRAM
+        
+        def resize_to_720p(frame):
+            """Resize frame to 720p maintaining aspect ratio"""
+            h, w = frame.shape[:2]
+            if h <= SAVE_HEIGHT:
+                return frame  # Уже меньше 720p
+            scale = SAVE_HEIGHT / h
+            new_w = int(w * scale)
+            return cv2.resize(frame, (new_w, SAVE_HEIGHT), interpolation=cv2.INTER_AREA)
         
         total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
         duration_sec = total_frames / fps if fps > 0 else 0
@@ -326,7 +339,8 @@ def process_audio_video(file_path, images_dir, is_video=False, progress_cb=None,
                 
                 img_name = f"video_frame_{uuid.uuid4().hex[:8]}.jpg"
                 img_path = os.path.join(images_dir, img_name)
-                cv2.imwrite(img_path, frame)
+                frame_720p = resize_to_720p(frame)
+                cv2.imwrite(img_path, frame_720p)
                 frame_list.append((img_path, 0.0))
                 prev_saved_thumb = thumb
             else:
@@ -345,7 +359,8 @@ def process_audio_video(file_path, images_dir, is_video=False, progress_cb=None,
                             if saved_pct >= UPDATE_PCT:
                                 img_name = f"video_frame_{uuid.uuid4().hex[:8]}.jpg"
                                 img_path = os.path.join(images_dir, img_name)
-                                cv2.imwrite(img_path, frame)
+                                frame_720p = resize_to_720p(frame)
+                                cv2.imwrite(img_path, frame_720p)
                                 
                                 if saved_pct >= NEW_SLIDE_PCT:
                                     # Полностью новый слайд
