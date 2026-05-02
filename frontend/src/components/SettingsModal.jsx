@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Save, Globe, Key, Cpu, HardDrive, Server, RefreshCw, Play, Square, FolderOpen, ChevronDown, ChevronRight } from 'lucide-react';
+import { X, Save, Globe, Key, Cpu, HardDrive, Server, RefreshCw, FolderOpen, ChevronDown, ChevronRight } from 'lucide-react';
 import { cn } from '../lib/utils';
 
 export default function SettingsModal({ isOpen, onClose, settings, onSave }) {
@@ -10,21 +10,15 @@ export default function SettingsModal({ isOpen, onClose, settings, onSave }) {
     // GGUF state
     const [ggufModels, setGgufModels] = useState([]);
     const [ggufLoading, setGgufLoading] = useState(false);
-    const [ggufServerStatus, setGgufServerStatus] = useState({ running: false, info: {} });
-    const [ggufStarting, setGgufStarting] = useState(false);
+    const [ggufLoadedModels, setGgufLoadedModels] = useState([]);
     const [expandedDirs, setExpandedDirs] = useState({});
     const [ggufConfig, setGgufConfig] = useState({});
-    
-    // GGUF advanced settings
-    const [ggufCtxSize, setGgufCtxSize] = useState(4096);
-    const [ggufGpuLayers, setGgufGpuLayers] = useState(-1);
-    const [ggufThreads, setGgufThreads] = useState(0);
 
     useEffect(() => {
         if (isOpen) {
             setLocalSettings(settings);
             fetchGgufModels();
-            fetchGgufServerStatus();
+            fetchGgufLoadedModels();
             fetchGgufConfig();
         }
     }, [isOpen, settings]);
@@ -42,13 +36,13 @@ export default function SettingsModal({ isOpen, onClose, settings, onSave }) {
         }
     };
 
-    const fetchGgufServerStatus = async () => {
+    const fetchGgufLoadedModels = async () => {
         try {
-            const res = await fetch('/api/gguf-server/status');
+            const res = await fetch('/api/gguf-loaded');
             const data = await res.json();
-            setGgufServerStatus(data);
+            setGgufLoadedModels(data.loaded_models || []);
         } catch (err) {
-            console.error('Ошибка проверки статуса сервера:', err);
+            console.error('Ошибка загрузки списка моделей:', err);
         }
     };
 
@@ -57,67 +51,28 @@ export default function SettingsModal({ isOpen, onClose, settings, onSave }) {
             const res = await fetch('/api/gguf-config');
             const data = await res.json();
             setGgufConfig(data);
-            if (data.default_ctx_size) setGgufCtxSize(data.default_ctx_size);
-            if (data.default_gpu_layers !== undefined) setGgufGpuLayers(data.default_gpu_layers);
-            if (data.default_threads !== undefined) setGgufThreads(data.default_threads);
         } catch (err) {
             console.error('Ошибка загрузки конфига GGUF:', err);
         }
     };
 
-    const startServer = async (modelPath, mmprojPath) => {
-        setGgufStarting(true);
-        try {
-            const res = await fetch('/api/gguf-server/start', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    gguf_model_path: modelPath,
-                    gguf_mmproj_path: mmprojPath || null,
-                    ctx_size: ggufCtxSize,
-                    gpu_layers: ggufGpuLayers,
-                    threads: ggufThreads || null,
-                })
-            });
-            
-            if (!res.ok) {
-                const errData = await res.json();
-                alert('Ошибка запуска сервера: ' + (errData.detail || 'Неизвестная ошибка'));
-            } else {
-                const data = await res.json();
-                // Обновляем настройки на URL GGUF сервера
-                const newSettings = {
-                    ...localSettings,
-                    use_gguf: 'true',
-                    gguf_model_path: modelPath,
-                    gguf_mmproj_path: mmprojPath || '',
-                    llm_url: data.url,
-                    llm_api_key: 'not-needed',
-                    llm_model: data.info?.model_name || modelPath.split('/').pop(),
-                };
-                setLocalSettings(newSettings);
-                await fetchGgufServerStatus();
-            }
-        } catch (err) {
-            alert('Ошибка: ' + err.message);
-        } finally {
-            setGgufStarting(false);
-        }
+    const selectModel = (modelPath, mmprojPath) => {
+        const newSettings = {
+            ...localSettings,
+            use_gguf: 'true',
+            gguf_model_path: modelPath,
+            gguf_mmproj_path: mmprojPath || '',
+            llm_url: '', // Очищаем API URL
+        };
+        setLocalSettings(newSettings);
     };
 
-    const stopServer = async () => {
+    const unloadAllModels = async () => {
         try {
-            await fetch('/api/gguf-server/stop', { method: 'POST' });
-            const newSettings = {
-                ...localSettings,
-                use_gguf: '',
-                gguf_model_path: '',
-                gguf_mmproj_path: '',
-            };
-            setLocalSettings(newSettings);
-            await fetchGgufServerStatus();
+            await fetch('/api/gguf-unload', { method: 'POST' });
+            await fetchGgufLoadedModels();
         } catch (err) {
-            alert('Ошибка остановки: ' + err.message);
+            console.error('Ошибка выгрузки моделей:', err);
         }
     };
 
@@ -233,87 +188,47 @@ export default function SettingsModal({ isOpen, onClose, settings, onSave }) {
                         {/* GGUF Tab */}
                         {activeTab === 'gguf' && (
                             <div className="p-6 space-y-4">
-                                {/* Server Status */}
-                                <div className={cn(
-                                    "rounded-2xl border p-4 flex items-center justify-between",
-                                    ggufServerStatus.running
-                                        ? "bg-green-500/5 border-green-500/20"
-                                        : "bg-muted/20 border-border/30"
-                                )}>
-                                    <div className="flex items-center gap-3">
-                                        <Server size={18} className={ggufServerStatus.running ? "text-green-500" : "text-muted-foreground"} />
-                                        <div>
-                                            <p className="text-sm font-bold">
-                                                {ggufServerStatus.running ? "GGUF сервер запущен" : "GGUF сервер остановлен"}
-                                            </p>
-                                            {ggufServerStatus.running && ggufServerStatus.info?.model_name && (
-                                                <p className="text-[10px] text-muted-foreground font-mono mt-0.5">
-                                                    {ggufServerStatus.info.model_name}
+                                {/* Loaded Models Status */}
+                                {ggufLoadedModels.length > 0 && (
+                                    <div className="rounded-2xl border border-primary/20 bg-primary/5 p-4">
+                                        <div className="flex items-center justify-between mb-2">
+                                            <div className="flex items-center gap-2">
+                                                <Server size={16} className="text-primary" />
+                                                <p className="text-sm font-bold">Загружено в память</p>
+                                            </div>
+                                            <button
+                                                onClick={unloadAllModels}
+                                                className="px-2.5 py-1 bg-red-500/10 hover:bg-red-500/20 text-red-500 rounded-lg text-[10px] font-bold transition-all"
+                                            >
+                                                Выгрузить все
+                                            </button>
+                                        </div>
+                                        <div className="space-y-1">
+                                            {ggufLoadedModels.map((model, idx) => (
+                                                <p key={idx} className="text-[10px] text-muted-foreground font-mono">
+                                                    • {model}
                                                 </p>
-                                            )}
-                                            {ggufServerStatus.running && ggufServerStatus.info?.url && (
-                                                <p className="text-[10px] text-muted-foreground/60 font-mono">
-                                                    {ggufServerStatus.info.url}
-                                                </p>
-                                            )}
+                                            ))}
                                         </div>
                                     </div>
-                                    {ggufServerStatus.running && (
-                                        <button
-                                            onClick={stopServer}
-                                            className="px-3 py-1.5 bg-red-500/10 hover:bg-red-500/20 text-red-500 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all"
-                                        >
-                                            <Square size={12} /> Стоп
-                                        </button>
-                                    )}
-                                </div>
+                                )}
 
-                                {/* Advanced Settings */}
-                                <div className="space-y-3">
-                                    <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Параметры сервера</p>
-                                    <div className="grid grid-cols-3 gap-3">
-                                        <div>
-                                            <label className="text-[9px] text-muted-foreground/60 uppercase">Контекст</label>
-                                            <select
-                                                value={ggufCtxSize}
-                                                onChange={(e) => setGgufCtxSize(Number(e.target.value))}
-                                                className="w-full bg-muted/30 border border-border/50 rounded-lg px-2 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-primary/50"
-                                            >
-                                                <option value={2048}>2048</option>
-                                                <option value={4096}>4096</option>
-                                                <option value={8192}>8192</option>
-                                                <option value={16384}>16384</option>
-                                                <option value={32768}>32768</option>
-                                            </select>
-                                        </div>
-                                        <div>
-                                            <label className="text-[9px] text-muted-foreground/60 uppercase">GPU слои</label>
-                                            <select
-                                                value={ggufGpuLayers}
-                                                onChange={(e) => setGgufGpuLayers(Number(e.target.value))}
-                                                className="w-full bg-muted/30 border border-border/50 rounded-lg px-2 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-primary/50"
-                                            >
-                                                <option value={-1}>Все (-1)</option>
-                                                <option value={0}>Только CPU</option>
-                                                <option value={10}>10</option>
-                                                <option value={20}>20</option>
-                                                <option value={30}>30</option>
-                                                <option value={40}>40</option>
-                                            </select>
-                                        </div>
-                                        <div>
-                                            <label className="text-[9px] text-muted-foreground/60 uppercase">Потоки</label>
-                                            <input
-                                                type="number"
-                                                value={ggufThreads}
-                                                onChange={(e) => setGgufThreads(Number(e.target.value))}
-                                                min={0}
-                                                className="w-full bg-muted/30 border border-border/50 rounded-lg px-2 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-primary/50"
-                                                placeholder="0=авто"
-                                            />
-                                        </div>
+                                {/* Current Selection */}
+                                {localSettings.use_gguf === 'true' && localSettings.gguf_model_path && (
+                                    <div className="rounded-2xl border border-green-500/20 bg-green-500/5 p-4">
+                                        <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest mb-2">
+                                            Выбранная модель
+                                        </p>
+                                        <p className="text-xs font-medium text-green-600 dark:text-green-400 break-all">
+                                            {localSettings.gguf_model_path.split('/').pop()}
+                                        </p>
+                                        {localSettings.gguf_mmproj_path && (
+                                            <p className="text-[9px] text-muted-foreground mt-1">
+                                                + mmproj: {localSettings.gguf_mmproj_path.split('/').pop()}
+                                            </p>
+                                        )}
                                     </div>
-                                </div>
+                                )}
 
                                 {/* Model List */}
                                 <div className="space-y-2">
@@ -380,22 +295,22 @@ export default function SettingsModal({ isOpen, onClose, settings, onSave }) {
                                                                 {/* LLM Models */}
                                                                 {modelGroup.gguf_files.map((ggufFile) => {
                                                                     const fullPath = modelGroup.dir + '/' + ggufFile;
-                                                                    const isActive = ggufServerStatus.running && 
-                                                                        ggufServerStatus.info?.gguf_path === fullPath;
+                                                                    const isSelected = localSettings.use_gguf === 'true' && 
+                                                                        localSettings.gguf_model_path === fullPath;
                                                                     return (
                                                                         <div
                                                                             key={ggufFile}
                                                                             className={cn(
                                                                                 "flex items-center justify-between p-2.5 rounded-lg border transition-all",
-                                                                                isActive
+                                                                                isSelected
                                                                                     ? "bg-green-500/5 border-green-500/20"
                                                                                     : "bg-muted/10 border-border/20 hover:border-primary/30"
                                                                             )}
                                                                         >
                                                                             <div className="min-w-0 flex-1">
                                                                                 <p className="text-[11px] font-medium truncate">{ggufFile}</p>
-                                                                                {isActive && (
-                                                                                    <p className="text-[9px] text-green-500 font-bold mt-0.5">АКТИВНА</p>
+                                                                                {isSelected && (
+                                                                                    <p className="text-[9px] text-green-500 font-bold mt-0.5">ВЫБРАНА</p>
                                                                                 )}
                                                                             </div>
                                                                             <button
@@ -404,25 +319,16 @@ export default function SettingsModal({ isOpen, onClose, settings, onSave }) {
                                                                                     const mmproj = modelGroup.mmproj_files.length > 0
                                                                                         ? modelGroup.dir + '/' + modelGroup.mmproj_files[0]
                                                                                         : null;
-                                                                                    startServer(fullPath, mmproj);
+                                                                                    selectModel(fullPath, mmproj);
                                                                                 }}
-                                                                                disabled={ggufStarting || isActive}
                                                                                 className={cn(
-                                                                                    "px-2.5 py-1 rounded-lg text-[10px] font-bold flex items-center gap-1 transition-all",
-                                                                                    isActive
-                                                                                        ? "bg-green-500/10 text-green-500 cursor-default"
-                                                                                        : ggufStarting
-                                                                                            ? "bg-muted text-muted-foreground cursor-wait"
-                                                                                            : "bg-primary/10 text-primary hover:bg-primary hover:text-white"
+                                                                                    "px-2.5 py-1 rounded-lg text-[10px] font-bold transition-all",
+                                                                                    isSelected
+                                                                                        ? "bg-green-500/10 text-green-500"
+                                                                                        : "bg-primary/10 text-primary hover:bg-primary hover:text-white"
                                                                                 )}
                                                                             >
-                                                                                {isActive ? (
-                                                                                    <><Server size={10} /> Активна</>
-                                                                                ) : ggufStarting ? (
-                                                                                    <><RefreshCw size={10} className="animate-spin" /> Запуск...</>
-                                                                                ) : (
-                                                                                    <><Play size={10} /> Запустить</>
-                                                                                )}
+                                                                                {isSelected ? "Выбрана" : "Выбрать"}
                                                                             </button>
                                                                         </div>
                                                                     );
