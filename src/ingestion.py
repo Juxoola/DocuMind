@@ -354,10 +354,27 @@ def convert_pptx_to_pdf(pptx_path, pdf_path):
         return True
     except: return False
 
+def convert_docx_to_pdf(docx_path, pdf_path):
+    try:
+        import win32com.client; import pythoncom
+        pythoncom.CoInitialize()
+        word = win32com.client.Dispatch("Word.Application")
+        doc = word.Documents.Open(os.path.abspath(docx_path))
+        doc.SaveAs(os.path.abspath(pdf_path), 17) # 17 = wdExportFormatPDF
+        doc.Close(); word.Quit()
+        return True
+    except: return False
+
 def process_pptx(file_path, images_dir, llm_settings=None):
     nodes = []; file_name = os.path.basename(file_path)
-    pdf_path = file_path.rsplit('.', 1)[0] + ".pdf"
-    has_pdf = convert_pptx_to_pdf(file_path, pdf_path) if sys.platform == "win32" else False
+    pdf_path = file_path.rsplit('.', 1)[0] + ".temp.pdf"
+    if sys.platform == "win32":
+        if convert_pptx_to_pdf(file_path, pdf_path):
+            nodes = process_pdf(pdf_path, images_dir, llm_settings)
+            try: os.remove(pdf_path)
+            except: pass
+            return nodes
+    # Fallback to text-only
     prs = Presentation(file_path)
     for i, slide in enumerate(prs.slides):
         title = slide.shapes.title.text if slide.shapes.title else ""
@@ -366,7 +383,16 @@ def process_pptx(file_path, images_dir, llm_settings=None):
     return nodes
 
 def process_docx(file_path, images_dir, llm_settings=None):
-    import docx; nodes = []; file_name = os.path.basename(file_path)
+    nodes = []; file_name = os.path.basename(file_path)
+    pdf_path = file_path.rsplit('.', 1)[0] + ".temp.pdf"
+    if sys.platform == "win32":
+        if convert_docx_to_pdf(file_path, pdf_path):
+            nodes = process_pdf(pdf_path, images_dir, llm_settings)
+            try: os.remove(pdf_path)
+            except: pass
+            return nodes
+    # Fallback to text-only
+    import docx
     doc = docx.Document(file_path)
     full_text = [p.text for p in doc.paragraphs if p.text.strip()]
     if full_text: nodes.append(TextNode(text=f"Текст из DOCX {file_name}:\n" + "\n".join(full_text), metadata={"file_name": file_name}))
@@ -471,8 +497,16 @@ def ingest_file(file_path, notebook_id, progress_cb=None, llm_settings=None):
     elif ext == '.pdf': nodes = process_pdf(file_path, images_dir, llm_settings)
     elif ext == '.pptx': nodes = process_pptx(file_path, images_dir, llm_settings)
     elif ext == '.docx': nodes = process_docx(file_path, images_dir, llm_settings)
-    elif ext == '.txt':
-        with open(file_path, "r", encoding="utf-8") as f: nodes = [TextNode(text=f.read(), metadata={"file_name": os.path.basename(file_path)})]
+    elif ext in ['.txt', '.md', '.py', '.js', '.json', '.csv', '.html', '.css', '.xml', '.yaml', '.yml', '.sql', '.sh', '.bat']:
+        try:
+            with open(file_path, "r", encoding="utf-8") as f:
+                nodes = [TextNode(text=f.read(), metadata={"file_name": os.path.basename(file_path)})]
+        except:
+            # Если UTF-8 не помог, пробуем cp1251
+            try:
+                with open(file_path, "r", encoding="cp1251") as f:
+                    nodes = [TextNode(text=f.read(), metadata={"file_name": os.path.basename(file_path)})]
+            except: pass
     if nodes:
         splitter = SentenceSplitter(chunk_size=512, chunk_overlap=50)
         from llama_index.core import Document
