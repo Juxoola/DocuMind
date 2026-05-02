@@ -85,33 +85,7 @@ def get_image_base64(image_path):
 
 def describe_image_with_lmstudio(image_path, llm_settings=None, existing_llm=None):
     """Отправляет картинку в локальный LM Studio или использует прямой GGUF для получения описания."""
-    base64_img = get_image_base64(image_path)
-    
-    if llm_settings and llm_settings.get("use_gguf_direct"):
-        try:
-            from llama_cpp import Llama
-            import os
-            
-            if existing_llm:
-                llm = existing_llm
-            else:
-                gguf_path = llm_settings["gguf_model_path"]
-                mmproj_path = llm_settings.get("gguf_mmproj_path")
-                if not mmproj_path or not os.path.exists(mmproj_path):
-                    return "Изображение без описания (нет mmproj)."
-                
-                llm = Llama(
-                    model_path=os.path.normpath(gguf_path),
-                    chat_format="qwen",
-                    clip_model_path=os.path.normpath(mmproj_path),
-                    n_ctx=2048,
-                    n_gpu_layers=-1,
-                    verbose=False,
-                    type_k=2, type_v=2
-                )
-            
-            image_path_norm = os.path.normpath(image_path)
-            prompt = """ВНИМАТЕЛЬНО проанализируй это изображение (слайд презентации или кадр видео). 
+    prompt = """ВНИМАТЕЛЬНО проанализируй это изображение (слайд презентации или кадр видео). 
 Твоя задача — составить максимально подробное описание для поисковой системы.
 
 1. ТЕКСТ: Выпиши ВЕСЬ текст, который видишь, включая заголовки, подписи и мелкий шрифт.
@@ -120,7 +94,32 @@ def describe_image_with_lmstudio(image_path, llm_settings=None, existing_llm=Non
 4. СМЫСЛ: Кратко сформулируй главный тезис этого кадра.
 
 ЗАПРЕЩЕНО давать пустые или отказные ответы типа 'на слайде ничего нет' или 'уточните поиск'. Если слайд пуст, опиши хотя бы фон или логотипы. Пиши только по делу, на русском языке."""
+
+    # Режим прямого GGUF (через llama-cpp-python)
+    if llm_settings and llm_settings.get("use_gguf_direct"):
+        try:
+            from llama_cpp import Llama
             
+            if existing_llm:
+                llm = existing_llm
+            else:
+                gguf_path = config.resolve_model_path(llm_settings["gguf_model_path"])
+                mmproj_path = config.resolve_model_path(llm_settings.get("gguf_mmproj_path"))
+                if not mmproj_path or not os.path.exists(mmproj_path):
+                    return "Изображение без описания (нет mmproj)."
+                
+                llm = Llama(
+                    model_path=os.path.normpath(gguf_path),
+                    chat_format="qwen",
+                    clip_model_path=os.path.normpath(mmproj_path),
+                    n_ctx=4096,
+                    n_gpu_layers=-1,
+                    verbose=False,
+                    type_k=2, type_v=2
+                )
+            
+            image_path_norm = os.path.normpath(image_path)
+            llm.reset()
             response = llm.create_chat_completion(
                 messages=[{
                     "role": "user",
@@ -139,6 +138,8 @@ def describe_image_with_lmstudio(image_path, llm_settings=None, existing_llm=Non
             print(f"Ошибка GGUF Direct {image_path}: {e}")
             return "Изображение без описания."
     
+    # Режим через API (LM Studio / OpenAI)
+    base64_img = get_image_base64(image_path)
     api_url = (llm_settings.get("llm_url") if llm_settings else None) or config.LM_STUDIO_URL
     api_key = (llm_settings.get("llm_api_key") if llm_settings else None) or "lm-studio"
     model_name = (llm_settings.get("llm_model") if llm_settings else None) or "gpt-4o"
@@ -150,7 +151,7 @@ def describe_image_with_lmstudio(image_path, llm_settings=None, existing_llm=Non
         "messages": [{
             "role": "user",
             "content": [
-                {"type": "text", "text": "ВНИМАТЕЛЬНО проанализируй это изображение..."},
+                {"type": "text", "text": prompt},
                 {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_img}"}}
             ]
         }],
@@ -162,6 +163,7 @@ def describe_image_with_lmstudio(image_path, llm_settings=None, existing_llm=Non
         response.raise_for_status()
         return response.json()["choices"][0]["message"]["content"]
     except Exception as e:
+        print(f"Ошибка API при описании картинки {image_path}: {e}")
         return "Изображение без описания."
 
 def process_audio_video(file_path, images_dir, is_video=False, progress_cb=None, llm_settings=None):
@@ -277,17 +279,23 @@ def process_audio_video(file_path, images_dir, is_video=False, progress_cb=None,
         if use_direct:
             try:
                 from llama_cpp import Llama
+                g_path = config.resolve_model_path(llm_settings["gguf_model_path"])
+                m_path = config.resolve_model_path(llm_settings["gguf_mmproj_path"])
+                print(f"[GGUF Direct Vision] Загрузка модели: {os.path.basename(g_path)}")
                 shared_llm = Llama(
-                    model_path=os.path.normpath(llm_settings["gguf_model_path"]),
+                    model_path=g_path,
                     chat_format="qwen",
-                    clip_model_path=os.path.normpath(llm_settings["gguf_mmproj_path"]),
-                    n_ctx=2048, n_gpu_layers=-1, verbose=False, type_k=2, type_v=2
+                    clip_model_path=m_path,
+                    n_ctx=4096, n_gpu_layers=-1, verbose=False, type_k=2, type_v=2
                 )
             except Exception as e: print(f"GGUF init error: {e}")
 
         def _describe(args):
             img_path, t = args
-            return img_path, t, describe_image_with_lmstudio(img_path, llm_settings, shared_llm)
+            desc = describe_image_with_lmstudio(img_path, llm_settings, shared_llm)
+            # Вывод описания в консоль
+            print(f"      [Кадр {format_seconds(t)}] Описание: {desc[:150]}...")
+            return img_path, t, desc
 
         done = 0
         with ThreadPoolExecutor(max_workers=(1 if use_direct else 5)) as exe:

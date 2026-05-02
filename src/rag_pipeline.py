@@ -15,6 +15,20 @@ from transformers import BitsAndBytesConfig
 _client_cache = {}
 _model_cache = {}
 
+def preload_all_models():
+    """Предзагрузка всех тяжелых моделей для ускорения работы."""
+    print("[RAG] Предзагрузка моделей...")
+    init_settings()
+    # Загружаем реранкер, если он указан в конфиге
+    if config.RERANKER_MODEL_NAME:
+        # Эмуляция вызова для инициализации кэша
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        if "reranker" not in _model_cache:
+            print(f"  [RAG] Предзагрузка реранкера: {config.RERANKER_MODEL_NAME}")
+            from sentence_transformers import CrossEncoder
+            _model_cache["reranker"] = CrossEncoder(config.RERANKER_MODEL_NAME, device=device)
+    print("[RAG] Все модели загружены.")
+
 def init_settings(max_tokens=1024):
     global _model_cache
     device = "cuda" if torch.cuda.is_available() else "cpu"

@@ -13,7 +13,7 @@ import gc
 import stat
 
 from src.ingestion import ingest_file
-from src.rag_pipeline import build_index, retrieve_nodes, build_file_context, make_prompt, close_all_clients
+from src.rag_pipeline import build_index, retrieve_nodes, build_file_context, make_prompt, close_all_clients, preload_all_models
 from src.gguf_manager import scan_gguf_dirs
 from src.gguf_direct import get_gguf_llm, unload_all_models, get_loaded_models
 from fastapi.middleware.cors import CORSMiddleware
@@ -366,10 +366,14 @@ async def chat(request: ChatRequest):
 
             yield f"data: {json.dumps({'type': 'sources', 'sources': sources}, ensure_ascii=False)}\n\n"
 
+            full_response = ""
             for chunk in active_llm.stream_complete(prompt):
                 if chunk.delta:
-                    token_count += 1 # Грубая оценка
+                    token_count += 1 
+                    full_response += chunk.delta
                     yield f"data: {json.dumps({'type': 'chunk', 'text': chunk.delta}, ensure_ascii=False)}\n\n"
+            
+            print(f"\n[CHAT] Ответ модели:\n{full_response}\n")
 
             elapsed = time.time() - start_time
             yield f"data: {json.dumps({
@@ -396,4 +400,10 @@ async def shutdown_event():
 
 if __name__ == "__main__":
     import uvicorn
+    # Предзагрузка моделей перед запуском
+    try:
+        preload_all_models()
+    except Exception as e:
+        print(f"[ERROR] Ошибка предзагрузки моделей: {e}")
+        
     uvicorn.run("main:app", host=config.HOST, port=config.PORT, reload=True)
