@@ -101,6 +101,9 @@ def describe_image_with_lmstudio(image_path, llm_settings=None):
     """Отправляет картинку в локальный LM Studio для получения текстового описания."""
     base64_img = get_image_base64(image_path)
     
+    # DEBUG: Проверяем настройки
+    print(f"[DEBUG describe_image] llm_settings: {llm_settings}")
+    
     # Если используется GGUF Direct API
     if llm_settings and llm_settings.get("use_gguf_direct"):
         try:
