@@ -159,7 +159,7 @@ def start_gguf_server(
         "--model", gguf_path,
         "--host", config.GGUF_SERVER_HOST,
         "--port", str(config.GGUF_SERVER_PORT),
-        "--ctx_size", str(ctx),
+        "--n_ctx", str(ctx),
         "--n_gpu_layers", str(ngl),
     ]
     
@@ -167,7 +167,7 @@ def start_gguf_server(
         cmd.extend(["--n_threads", str(nthreads)])
     
     if mmproj_path and os.path.exists(mmproj_path):
-        cmd.extend(["--mmproj", mmproj_path])
+        cmd.extend(["--clip_model_path", mmproj_path])
     
     print(f"[GGUF] Запуск сервера: {' '.join(cmd)}")
     
