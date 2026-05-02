@@ -104,17 +104,33 @@ def describe_image_with_lmstudio(image_path, llm_settings=None):
     # Если используется GGUF Direct API
     if llm_settings and llm_settings.get("use_gguf_direct"):
         try:
-            from src.gguf_direct import get_gguf_llm
-            from llama_index.core.base.llms.types import ChatMessage, MessageRole
+            from llama_cpp import Llama
+            import os
             
-            llm = get_gguf_llm(
-                gguf_path=llm_settings["gguf_model_path"],
-                mmproj_path=llm_settings.get("gguf_mmproj_path"),
-                temperature=0.0,
-                max_tokens=500,
+            gguf_path = llm_settings["gguf_model_path"]
+            mmproj_path = llm_settings.get("gguf_mmproj_path")
+            
+            if not mmproj_path or not os.path.exists(mmproj_path):
+                print(f"[GGUF Direct] mmproj не найден, пропускаем vision для {image_path}")
+                return "Изображение без описания (нет mmproj)."
+            
+            # Нормализуем пути
+            gguf_path = os.path.normpath(gguf_path)
+            mmproj_path = os.path.normpath(mmproj_path)
+            image_path_norm = os.path.normpath(image_path)
+            
+            print(f"[GGUF Direct Vision] Загрузка модели с mmproj...")
+            
+            # Создаём Llama объект с clip_model_path
+            llm = Llama(
+                model_path=gguf_path,
+                chat_format="llava-1-5",  # Формат для multimodal
+                clip_model_path=mmproj_path,
+                n_ctx=2048,  # Меньший контекст для vision
+                n_gpu_layers=-1,
+                verbose=False,
             )
             
-            # Для multimodal моделей через llama-cpp-python
             prompt = """ВНИМАТЕЛЬНО проанализируй это изображение (слайд презентации или кадр видео). 
 Твоя задача — составить максимально подробное описание для поисковой системы.
 
@@ -125,19 +141,33 @@ def describe_image_with_lmstudio(image_path, llm_settings=None):
 
 ЗАПРЕЩЕНО давать пустые или отказные ответы типа 'на слайде ничего нет' или 'уточните поиск'. Если слайд пуст, опиши хотя бы фон или логотипы. Пиши только по делу, на русском языке."""
             
-            # Для llama-cpp-python с mmproj нужно передать путь к изображению
-            messages = [
-                ChatMessage(role=MessageRole.USER, content=[
-                    {"type": "text", "text": prompt},
-                    {"type": "image_url", "image_url": {"url": image_path}}
-                ])
-            ]
+            # Для llama-cpp-python multimodal используем create_chat_completion с image
+            response = llm.create_chat_completion(
+                messages=[
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": prompt},
+                            {"type": "image_url", "image_url": {"url": f"file://{image_path_norm}"}}
+                        ]
+                    }
+                ],
+                temperature=0.0,
+                max_tokens=500,
+            )
             
-            response = llm.chat(messages)
-            return response.message.content
+            result = response["choices"][0]["message"]["content"]
+            print(f"[GGUF Direct Vision] Описание получено: {len(result)} символов")
+            
+            # Освобождаем память
+            del llm
+            
+            return result
             
         except Exception as e:
-            print(f"Ошибка при описании картинки через GGUF Direct {image_path}: {e}")
+            import traceback
+            print(f"Ошибка при описании картинки через GGUF Direct {image_path}:")
+            traceback.print_exc()
             return "Изображение без описания."
     
     # Стандартный путь через OpenAI-совместимый API
