@@ -260,7 +260,7 @@ def ensure_720p_video(file_path, prog_cb=None):
         "-hwaccel", "cuda", "-hwaccel_output_format", "cuda", 
         "-i", file_path, 
         "-vf", "scale_cuda=-2:720", 
-        "-c:v", "hevc_nvenc", "-preset", "p1", 
+        "-c:v", "hevc_nvenc", "-preset", "p4", 
         "-rc", "vbr", "-cq", "28", "-b:v", "600k", "-maxrate:v", "1.2M", "-bufsize:v", "2M",
         "-pix_fmt", "yuv420p", "-tag:v", "hvc1",
         "-c:a", "aac", "-b:a", "128k", 
@@ -268,20 +268,29 @@ def ensure_720p_video(file_path, prog_cb=None):
         temp_path
     ]
     import subprocess
-    subprocess.run(cmd, capture_output=True)
-    if os.path.exists(temp_path):
-        # Удаляем оригинал и переименовываем в .mp4, чтобы расширение соответствовало контейнеру
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    
+    if result.returncode == 0 and os.path.exists(temp_path) and os.path.getsize(temp_path) > 1000:
+        # Удаляем оригинал и переименовываем в .mp4
         if os.path.exists(file_path):
-            os.remove(file_path)
+            try: os.remove(file_path)
+            except: pass
         
         new_path = os.path.splitext(file_path)[0] + ".mp4"
-        # Если файл с таким именем уже есть (например, старый mp4), удаляем его
         if os.path.exists(new_path) and new_path != temp_path:
-            os.remove(new_path)
+            try: os.remove(new_path)
+            except: pass
             
         os.rename(temp_path, new_path)
         file_path = new_path
         if prog_cb: prog_cb(9, "Видео оптимизировано")
+    else:
+        print(f"[FFmpeg Error] Не удалось оптимизировать видео. Код: {result.returncode}")
+        if result.stderr: print(f"Детали: {result.stderr[-500:]}")
+        if os.path.exists(temp_path):
+            try: os.remove(temp_path)
+            except: pass
+            
     return file_path
 
 def ensure_mp3_audio(file_path, prog_cb=None):
