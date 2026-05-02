@@ -50,6 +50,38 @@ except: pass
 import whisperx
 import config
 
+def get_native_image_base64(path):
+    try:
+        import cv2, base64
+        # Ресайз до 448px (родное для Qwen-VL) ускоряет инференс в разы без потери качества
+        img = cv2.imread(path)
+        img_res = cv2.resize(img, (448, 448))
+        _, buffer = cv2.imencode(".jpg", img_res, [int(cv2.IMWRITE_JPEG_QUALITY), 95])
+        return base64.b64encode(buffer).decode("utf-8")
+    except:
+        with open(path, "rb") as f: return base64.b64encode(f.read()).decode("utf-8")
+
+def vision_worker(images_subset, settings, prompt, out_queue):
+    try:
+        import gc, torch, config
+        from llama_cpp import Llama; from llama_cpp.llama_chat_format import Llava15ChatHandler
+        g_path = config.resolve_model_path(settings["gguf_model_path"])
+        m_path = config.resolve_model_path(settings["gguf_mmproj_path"])
+        local_llm = Llama(model_path=g_path, chat_handler=Llava15ChatHandler(clip_model_path=m_path), 
+                          n_ctx=8192, n_gpu_layers=-1, verbose=False, n_batch=2048, n_threads=4, flash_attn=True)
+        
+        for img_path, t in images_subset:
+            try:
+                res = local_llm.create_chat_completion(
+                    messages=[{"role":"user","content":[{"type":"text","text":prompt},{"type":"image_url","image_url":{"url":f"data:image/jpeg;base64,{get_native_image_base64(img_path)}"}}]}],
+                    temperature=0.2, max_tokens=512
+                )
+                out_queue.put((img_path, t, res["choices"][0]["message"]["content"]))
+            except Exception as e: out_queue.put((img_path, t, f"Ошибка инференса: {e}"))
+        del local_llm; gc.collect(); torch.cuda.empty_cache()
+    except Exception as e:
+        for img_path, t in images_subset: out_queue.put((img_path, t, f"Ошибка воркера: {e}"))
+
 def format_seconds(s):
     h = int(s // 3600); m = int((s % 3600) // 60); sec = int(s % 60)
     return f"{h}:{m:02d}:{sec:02d}" if h > 0 else f"{m}:{sec:02d}"
@@ -191,37 +223,6 @@ def process_audio_video(file_path, images_dir, is_video=False, progress_cb=None,
         n = len(frame_list)
         prog(65, f"Описание {n} кадров...")
         
-        def get_native_image_base64(path):
-            try:
-                # Ресайз до 448px (родное для Qwen-VL) ускоряет инференс в разы без потери качества
-                img = cv2.imread(path)
-                img_res = cv2.resize(img, (448, 448))
-                _, buffer = cv2.imencode(".jpg", img_res, [int(cv2.IMWRITE_JPEG_QUALITY), 95])
-                return base64.b64encode(buffer).decode("utf-8")
-            except: return get_image_base64(path)
-
-        # Функция-воркер для параллельного ИИ (Золотой Стандарт)
-        def vision_worker(images_subset, settings, prompt, out_queue):
-            try:
-                from llama_cpp import Llama; from llama_cpp.llama_chat_format import Llava15ChatHandler
-                g_path = config.resolve_model_path(settings["gguf_model_path"])
-                m_path = config.resolve_model_path(settings["gguf_mmproj_path"])
-                # 3 воркера + Flash Attention - идеальная загрузка 5080
-                local_llm = Llama(model_path=g_path, chat_handler=Llava15ChatHandler(clip_model_path=m_path), 
-                                  n_ctx=8192, n_gpu_layers=-1, verbose=False, n_batch=2048, n_threads=4, flash_attn=True)
-                
-                for img_path, t in images_subset:
-                    try:
-                        res = local_llm.create_chat_completion(
-                            messages=[{"role":"user","content":[{"type":"text","text":prompt},{"type":"image_url","image_url":{"url":f"data:image/jpeg;base64,{get_native_image_base64(img_path)}"}}]}],
-                            temperature=0.2, max_tokens=512
-                        )
-                        out_queue.put((img_path, t, res["choices"][0]["message"]["content"]))
-                    except: out_queue.put((img_path, t, "Ошибка анализа"))
-                del local_llm; gc.collect(); torch.cuda.empty_cache()
-            except Exception as e:
-                for img_path, t in images_subset: out_queue.put((img_path, t, f"Ошибка ИИ: {e}"))
-
         prompt = "Проанализируй это изображение (кадр из видео или слайд презентации) и составь его подробное описание на русском языке для системы поиска. ТЕКСТ, ГРАФИКА, ВИЗУАЛ, СМЫСЛ."
         
         if llm_settings and llm_settings.get("use_gguf_direct") and n > 5:
