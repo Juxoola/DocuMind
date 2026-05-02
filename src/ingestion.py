@@ -372,10 +372,49 @@ def process_docx(file_path, images_dir, llm_settings=None):
     if full_text: nodes.append(TextNode(text=f"Текст из DOCX {file_name}:\n" + "\n".join(full_text), metadata={"file_name": file_name}))
     return nodes
 
+def ensure_720p_video(file_path, prog_cb=None):
+    """Сжимает видео до 720p, если его разрешение выше."""
+    try:
+        import subprocess
+        from imageio_ffmpeg import get_ffmpeg_exe
+        
+        cap = cv2.VideoCapture(file_path)
+        h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        cap.release()
+        
+        if h <= 720: return file_path
+        
+        if prog_cb: prog_cb(7, f"Сжатие видео до 720p (было {h}p)...")
+        
+        ffmpeg = get_ffmpeg_exe()
+        temp_path = file_path + ".720p.mp4"
+        
+        # Сжимаем: высота 720, ширина пропорциональна (-2 означает кратно 2)
+        cmd = [
+            ffmpeg, "-y", "-i", file_path,
+            "-vf", "scale=-2:720",
+            "-c:v", "libx264", "-crf", "23", "-preset", "fast",
+            "-c:a", "aac", "-b:a", "128k", # Перекодируем звук в aac для совместимости
+            temp_path
+        ]
+        subprocess.run(cmd, capture_output=True)
+        
+        if os.path.exists(temp_path):
+            os.remove(file_path)
+            os.rename(temp_path, file_path)
+            if prog_cb: prog_cb(9, "Видео оптимизировано до 720p")
+            
+    except Exception as e:
+        print(f"Ошибка при сжатии видео: {e}")
+    return file_path
+
 def ingest_file(file_path, notebook_id, progress_cb=None, llm_settings=None):
     paths = config.get_notebook_paths(notebook_id)
     images_dir = paths["images"]; os.makedirs(images_dir, exist_ok=True)
     ext = os.path.splitext(file_path)[1].lower()
+    if ext in ['.mp4', '.avi', '.mkv']:
+        file_path = ensure_720p_video(file_path, progress_cb)
+    
     nodes = []
     if ext in ['.mp4', '.avi', '.mkv']: nodes = process_audio_video(file_path, images_dir, True, progress_cb, llm_settings)
     elif ext in ['.mp3', '.wav', '.m4a']: nodes = process_audio_video(file_path, images_dir, False, progress_cb, llm_settings)
