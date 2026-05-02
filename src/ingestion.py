@@ -186,11 +186,13 @@ def process_audio_video(file_path, images_dir, is_video=False, progress_cb=None,
     nodes = []
     file_name = os.path.basename(file_path)
 
-    prog(15, "Загрузка модели транскрибации...")
+    prog(15, "Загрузка модели транскрибации (small)...")
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    model = whisperx.load_model("medium", device, compute_type="int8")
+    print(f"[DEBUG] Загрузка WhisperX на {device}. Свободно VRAM: {torch.cuda.memory_reserved() // 1024**2}MB")
+    model = whisperx.load_model("small", device, compute_type="int8")
     
     prog(20, "Транскрибация речи...")
+    print("[DEBUG] Начало транскрибации...")
     audio = whisperx.load_audio(file_path)
     transcript_data = []
     try:
@@ -531,6 +533,7 @@ def ingest_file(file_path, notebook_id, progress_cb=None, llm_settings=None):
     ext = os.path.splitext(file_path)[1].lower()
     
     # Авто-оптимизация медиа
+    print(f"[DEBUG] Начало обработки файла: {file_path}")
     if ext in ['.mp4', '.avi', '.mkv']:
         file_path = ensure_720p_video(file_path, progress_cb)
     elif ext in ['.mp3', '.wav', '.m4a', '.flac']:
