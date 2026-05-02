@@ -175,8 +175,8 @@ def start_gguf_server(
         _server_process = subprocess.Popen(
             cmd,
             stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            # Не блокируем буфер — чтобы видеть логи
+            stderr=subprocess.PIPE,
+            text=True,
             bufsize=1,
         )
     except FileNotFoundError:
@@ -209,10 +209,13 @@ def start_gguf_server(
         
         # Проверяем, не упал ли процесс
         if _server_process.poll() is not None:
-            out = _server_process.stdout.read().decode('utf-8', errors='replace') if _server_process.stdout else ""
+            stdout_data = _server_process.stdout.read() if _server_process.stdout else ""
+            stderr_data = _server_process.stderr.read() if _server_process.stderr else ""
+            full_log = f"STDOUT:\n{stdout_data}\n\nSTDERR:\n{stderr_data}"
             _server_process = None
             _server_info = {}
-            return {"status": "error", "msg": f"Сервер упал при запуске. Лог:\n{out[-2000:]}"}
+            print(f"[GGUF] Полный лог ошибки:\n{full_log}")
+            return {"status": "error", "msg": f"Сервер упал при запуске. Лог:\n{full_log[-3000:]}"}
     
     _server_process = None
     _server_info = {}
