@@ -456,12 +456,12 @@ def ensure_720p_video(file_path, prog_cb=None):
         ffmpeg = get_ffmpeg_exe()
         temp_path = file_path + ".720p.mp4"
         
-        # Сжимаем: высота 720, ширина пропорциональна (-2 означает кратно 2)
+        # Сжимаем через GPU (h264_nvenc)
         cmd = [
-            ffmpeg, "-y", "-i", file_path,
+            ffmpeg, "-y", "-hwaccel", "cuda", "-i", file_path,
             "-vf", "scale=-2:720",
-            "-c:v", "libx264", "-crf", "23", "-preset", "fast",
-            "-c:a", "aac", "-b:a", "128k", # Перекодируем звук в aac для совместимости
+            "-c:v", "h264_nvenc", "-preset", "p4", "-tune", "hq", "-cq", "23",
+            "-c:a", "aac", "-b:a", "128k", 
             temp_path
         ]
         subprocess.run(cmd, capture_output=True)
