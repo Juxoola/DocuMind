@@ -50,6 +50,35 @@ except: pass
 import whisperx
 import config
 
+# Контекстный менеджер для подавления спама в консоли (llama-cpp, torch и т.д.)
+class suppress_stdout_stderr:
+    def __enter__(self):
+        self.out = os.dup(sys.stdout.fileno())
+        self.err = os.dup(sys.stderr.fileno())
+        self.null = os.open(os.devnull, os.O_WRONLY)
+        os.dup2(self.null, sys.stdout.fileno())
+        os.dup2(self.null, sys.stderr.fileno())
+
+    def __exit__(self, *args):
+        os.dup2(self.out, sys.stdout.fileno())
+        os.dup2(self.err, sys.stderr.fileno())
+        os.close(self.null); os.close(self.out); os.close(self.err)
+
+def cleanup_gpu():
+    """Принудительная очистка всей видеопамяти перед тяжелыми задачами."""
+    try:
+        from src.rag_pipeline import unload_rag_models
+        from src.gguf_direct import unload_all_models
+        unload_rag_models()
+        unload_all_models()
+        import gc, torch
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        print("[GPU] Память полностью очищена для анализа.")
+    except Exception as e:
+        print(f"[GPU] Ошибка при очистке: {e}")
+
 def get_native_image_base64(path):
     try:
         import cv2, base64
@@ -64,11 +93,18 @@ def get_native_image_base64(path):
 def vision_worker(images_subset, settings, prompt, out_queue):
     try:
         import gc, torch, config
-        from llama_cpp import Llama; from llama_cpp.llama_chat_format import Llava15ChatHandler
-        g_path = config.resolve_model_path(settings["gguf_model_path"])
-        m_path = config.resolve_model_path(settings["gguf_mmproj_path"])
-        local_llm = Llama(model_path=g_path, chat_handler=Llava15ChatHandler(clip_model_path=m_path), 
-                          n_ctx=8192, n_gpu_layers=-1, verbose=False, n_batch=2048, n_threads=4, flash_attn=True)
+        # Используем отдельную модель для зрения, если она указана, иначе основную
+        v_model = settings.get("vision_model_path") or settings.get("gguf_model_path")
+        v_mmproj = settings.get("vision_mmproj_path") or settings.get("gguf_mmproj_path")
+        
+        g_path = config.resolve_model_path(v_model)
+        m_path = config.resolve_model_path(v_mmproj)
+        
+        # Подавляем шум при загрузке модели
+        with suppress_stdout_stderr():
+            from llama_cpp import Llama; from llama_cpp.llama_chat_format import Llava15ChatHandler
+            local_llm = Llama(model_path=g_path, chat_handler=Llava15ChatHandler(clip_model_path=m_path), 
+                              n_ctx=4096, n_gpu_layers=-1, verbose=False, n_batch=1024, n_threads=4, flash_attn=True)
         
         for img_path, t in images_subset:
             try:
@@ -221,7 +257,10 @@ def process_audio_video(file_path, images_dir, is_video=False, progress_cb=None,
 
         # 3. ОПИСАНИЕ КАДРОВ
         n = len(frame_list)
-        prog(65, f"Описание {n} кадров...")
+        if n > 0:
+            prog(65, f"Описание {n} кадров...")
+            # ПРИНУДИТЕЛЬНАЯ ОЧИСТКА GPU ПЕРЕД ИИ
+            cleanup_gpu()
         
         prompt = "Проанализируй это изображение (кадр из видео или слайд презентации) и составь его подробное описание на русском языке для системы поиска. ТЕКСТ, ГРАФИКА, ВИЗУАЛ, СМЫСЛ."
         

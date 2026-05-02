@@ -162,6 +162,8 @@ async def upload_file(
     use_gguf: Optional[str] = None,
     gguf_model_path: Optional[str] = None,
     gguf_mmproj_path: Optional[str] = None,
+    vision_model_path: Optional[str] = None,
+    vision_mmproj_path: Optional[str] = None,
 ):
     paths = config.get_notebook_paths(notebook_id)
     os.makedirs(paths["data"], exist_ok=True)
@@ -195,6 +197,8 @@ async def upload_file(
         "use_gguf_direct": use_gguf_direct,
         "gguf_model_path": gguf_model_path if use_gguf_direct else None,
         "gguf_mmproj_path": gguf_mmproj_path if use_gguf_direct else None,
+        "vision_model_path": vision_model_path,
+        "vision_mmproj_path": vision_mmproj_path,
     }
 
     def process_task():

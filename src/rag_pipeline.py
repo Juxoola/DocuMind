@@ -15,6 +15,18 @@ from transformers import BitsAndBytesConfig
 _client_cache = {}
 _model_cache = {}
 
+def unload_rag_models():
+    """Полная выгрузка всех моделей RAG из видеопамяти."""
+    global _model_cache
+    if _model_cache:
+        print("[RAG] Выгрузка всех моделей (Embedding, Reranker)...")
+        _model_cache.clear()
+        import gc
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        print("[RAG] Память очищена.")
+
 def preload_all_models():
     """Предзагрузка всех тяжелых моделей для ускорения работы."""
     print("[RAG] Предзагрузка моделей...")

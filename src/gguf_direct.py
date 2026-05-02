@@ -105,9 +105,13 @@ def unload_all_models():
     """Выгружает все загруженные модели из памяти."""
     global _model_cache
     count = len(_model_cache)
-    _model_cache.clear()
     if count > 0:
-        print(f"[GGUF Direct] Выгружено моделей: {count}")
+        _model_cache.clear()
+        import gc, torch
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        print(f"[GGUF Direct] Выгружено моделей: {count}, память очищена.")
 
 
 def get_loaded_models() -> list:
