@@ -298,8 +298,8 @@ def process_audio_video(file_path, images_dir, is_video=False, progress_cb=None,
                     model_path=g_path,
                     chat_handler=chat_handler,
                     n_ctx=8192, n_gpu_layers=-1, verbose=False,
-                    n_batch=2048, # Увеличено для скорости
-                    n_parallel=2  # Обработка 2 кадров параллельно
+                    n_batch=1024, # Стабильное ускорение
+                    n_parallel=1
                 )
             except Exception as e: print(f"GGUF init error: {e}")
 
@@ -310,7 +310,7 @@ def process_audio_video(file_path, images_dir, is_video=False, progress_cb=None,
             return img_path, t, desc
 
         done = 0
-        with ThreadPoolExecutor(max_workers=(2 if use_direct else 5)) as exe:
+        with ThreadPoolExecutor(max_workers=(1 if use_direct else 5)) as exe:
             futs = {exe.submit(_describe, item): item for item in frame_list}
             for fut in as_completed(futs):
                 img_path, t, desc = fut.result()
