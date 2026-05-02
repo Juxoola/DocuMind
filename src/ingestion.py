@@ -122,7 +122,7 @@ def process_audio_video(file_path, images_dir, is_video=False, progress_cb=None,
 
     # 2. АНАЛИЗ ВИДЕО
     if is_video:
-        prog(62, "Извлечение ключевых кадров (CUDA Accelerated)...")
+        prog(62, "Анализ видео (GPU Accelerated)...")
         cap = cv2.VideoCapture(file_path)
         try:
             fps = cap.get(cv2.CAP_PROP_FPS) or 25
@@ -132,24 +132,29 @@ def process_audio_video(file_path, images_dir, is_video=False, progress_cb=None,
 
         from imageio_ffmpeg import get_ffmpeg_exe
         ffmpeg = get_ffmpeg_exe()
+        
+        # Параметры из вашего оригинала
         PIXEL_THR = 15; UPDATE_PCT = 0.002; NEW_SLIDE_PCT = 0.04; MOTION_PCT = 0.002
         STABLE_WAIT_SEC = 3.0; CHECK_STEP_SEC = 1.0; COMPARE_SIZE = (320, 180)
         
-        # Оптимальная команда: Декодирование на GPU, Ресайз на CPU (для скорости пайпа)
-        cmd = [ffmpeg, "-hide_banner", "-loglevel", "error", "-hwaccel", "cuda", "-i", file_path, 
-               "-vf", f"fps=1/{CHECK_STEP_SEC},scale={COMPARE_SIZE[0]}:{COMPARE_SIZE[1]}", 
-               "-f", "image2pipe", "-vcodec", "rawvideo", "-pix_fmt", "bgr24", "pipe:1"]
+        # ОПТИМИЗАЦИЯ: scale_cuda на GPU + вывод в gray (в 3 раза меньше данных в pipe)
+        cmd = [ffmpeg, "-hide_banner", "-loglevel", "error", "-hwaccel", "cuda", "-hwaccel_output_format", "cuda", "-i", file_path, 
+               "-vf", f"fps=1/{CHECK_STEP_SEC},scale_cuda={COMPARE_SIZE[0]}:{COMPARE_SIZE[1]}:format=yuv420p", 
+               "-f", "image2pipe", "-vcodec", "rawvideo", "-pix_fmt", "gray", "pipe:1"]
         
-        import subprocess
         process = subprocess.Popen(cmd, stdout=subprocess.PIPE, bufsize=10**8)
         frame_list = []
         try:
             prev_saved_thumb = None; last_seen_thumb = None; stable_since_sec = 0; current_sec = 0
-            chunk_size = COMPARE_SIZE[0] * COMPARE_SIZE[1] * 3
+            # Теперь 1 байт на пиксель (gray) вместо 3 (bgr)
+            chunk_size = COMPARE_SIZE[0] * COMPARE_SIZE[1]
             while True:
                 raw_frame = process.stdout.read(chunk_size)
                 if not raw_frame or len(raw_frame) != chunk_size: break
-                thumb = np.frombuffer(raw_frame, dtype='uint8').reshape((COMPARE_SIZE[1], COMPARE_SIZE[0], 3))
+                
+                # Обработка в ч/б режиме (быстрее и эффективнее для вашей логики)
+                thumb = np.frombuffer(raw_frame, dtype='uint8').reshape((COMPARE_SIZE[1], COMPARE_SIZE[0]))
+                
                 if int(current_sec) % 10 == 0:
                     prog(62 + int((current_sec / duration_sec) * 3) if duration_sec > 0 else 65, f"Анализ видео: {format_seconds(current_sec)} / {format_seconds(duration_sec)}")
                 
