@@ -186,10 +186,10 @@ def process_audio_video(file_path, images_dir, is_video=False, progress_cb=None,
     nodes = []
     file_name = os.path.basename(file_path)
 
-    prog(15, "Загрузка модели транскрибации (small)...")
+    prog(15, "Загрузка модели транскрибации (medium)...")
     device = "cuda" if torch.cuda.is_available() else "cpu"
     print(f"[DEBUG] Загрузка WhisperX на {device}. Свободно VRAM: {torch.cuda.memory_reserved() // 1024**2}MB")
-    model = whisperx.load_model("small", device, compute_type="int8")
+    model = whisperx.load_model("medium", device, compute_type="int8")
     
     prog(20, "Транскрибация речи...")
     print("[DEBUG] Начало транскрибации...")
