@@ -137,9 +137,9 @@ def process_audio_video(file_path, images_dir, is_video=False, progress_cb=None,
         PIXEL_THR = 15; UPDATE_PCT = 0.002; NEW_SLIDE_PCT = 0.04; MOTION_PCT = 0.002
         STABLE_WAIT_SEC = 3.0; CHECK_STEP_SEC = 1.0; COMPARE_SIZE = (320, 180)
         
-        # ОПТИМИЗАЦИЯ: scale_cuda на GPU + вывод в gray (в 3 раза меньше данных в pipe)
+        # ОПТИМИЗАЦИЯ: scale_cuda на GPU + hwdownload для передачи в RAM + gray
         cmd = [ffmpeg, "-hide_banner", "-loglevel", "error", "-hwaccel", "cuda", "-hwaccel_output_format", "cuda", "-i", file_path, 
-               "-vf", f"fps=1/{CHECK_STEP_SEC},scale_cuda={COMPARE_SIZE[0]}:{COMPARE_SIZE[1]}:format=yuv420p", 
+               "-vf", f"fps=1/{CHECK_STEP_SEC},scale_cuda={COMPARE_SIZE[0]}:{COMPARE_SIZE[1]}:format=yuv420p,hwdownload,format=gray", 
                "-f", "image2pipe", "-vcodec", "rawvideo", "-pix_fmt", "gray", "pipe:1"]
         
         process = subprocess.Popen(cmd, stdout=subprocess.PIPE, bufsize=10**8)
