@@ -1,19 +1,39 @@
+# --- Llama CPP with CUDA 13.0 (Specific Wheel for Python 3.13) ---
+https://github.com/JamePeng/llama-cpp-python/releases/download/v0.3.37-cu130-Basic-win-20260502/llama_cpp_python-0.3.37+cu130.basic-cp313-cp313-win_amd64.whl
+
+# --- Core RAG & LLM ---
+llama-index-core
+llama-index-llms-llama-cpp
+llama-index-embeddings-huggingface
+llama-index-readers-file
+llama-index-postprocessor-cohere-rerank
+
+# --- Speech & Audio ---
+torch
+torchvision
+torchaudio
+whisperx
+
+# --- Backend & API ---
 fastapi
 uvicorn
-llama-index
-llama-index-llms-openai
-llama-index-vector-stores-chroma
-llama-index-embeddings-huggingface
-unstructured
+requests
+pydantic
+pydantic-settings
+python-dotenv
+
+# --- Image & Video Processing ---
 opencv-python
-whisperx
+numpy
 imageio-ffmpeg
-nvidia-cublas-cu12
-nvidia-cudnn-cu12
-chromadb
-pillow
-python-multipart
-PyMuPDF
+
+# --- Document Processing ---
+pymupdf
 python-pptx
 python-docx
-llama-cpp-python[server]
+pywin32
+
+# --- Utils ---
+watchfiles
+gc-utils
+uuid
