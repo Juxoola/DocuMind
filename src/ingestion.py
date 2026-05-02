@@ -259,9 +259,9 @@ def ensure_720p_video(file_path, prog_cb=None):
         "-hwaccel", "cuda", "-hwaccel_output_format", "cuda", 
         "-i", file_path, 
         "-vf", "scale_cuda=-2:720", 
-        "-c:v", "h264_nvenc", "-preset", "p1", 
-        "-rc", "vbr", "-cq", "28", "-b:v", "2M", "-maxrate:v", "4M", "-bufsize:v", "8M",
-        "-pix_fmt", "yuv420p", 
+        "-c:v", "hevc_nvenc", "-preset", "p1", 
+        "-rc", "vbr", "-cq", "28", "-b:v", "600k", "-maxrate:v", "1.2M", "-bufsize:v", "2M",
+        "-pix_fmt", "yuv420p", "-tag:v", "hvc1",
         "-c:a", "aac", "-b:a", "128k", 
         "-movflags", "+faststart",
         temp_path
