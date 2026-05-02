@@ -372,11 +372,11 @@ def ensure_720p_video(file_path, prog_cb=None):
         with open(list_path, "w") as f:
             for p in parts: f.write(f"file '{os.path.abspath(p)}'\n")
         
-        # Финальная сборка: видео из кусков + аудио из оригинала
+        # Финальная сборка: видео из кусков + аудио из оригинала (МГНОВЕННОЕ КОПИРОВАНИЕ)
         merge_cmd = [
             ffmpeg, "-y", "-f", "concat", "-safe", "0", "-i", list_path,
-            "-i", file_path, "-map", "0:v", "-map", "1:a?", # Маппим видео из склейки и звук из оригинала
-            "-c", "copy", "-c:a", "aac", "-b:a", "128k", "-movflags", "+faststart", temp_final
+            "-i", file_path, "-map", "0:v", "-map", "1:a?", 
+            "-c", "copy", "-movflags", "+faststart", temp_final
         ]
         subprocess.run(merge_cmd, capture_output=True)
         
