@@ -177,6 +177,8 @@ def describe_image_with_lmstudio(image_path, llm_settings=None, existing_llm=Non
 
 def process_audio_video(file_path, images_dir, is_video=False, progress_cb=None, llm_settings=None):
     file_name = os.path.basename(file_path)
+    transcript_data = []
+    file_name = os.path.basename(file_path)
     def prog(pct, msg):
         print(f"  [{pct}%] {msg}")
         if progress_cb: progress_cb(pct, msg)
@@ -236,6 +238,8 @@ def save_high_res_frame(video_path, time_sec, output_path):
 
 def process_audio_video(file_path, images_dir, is_video=False, progress_cb=None, llm_settings=None):
     file_name = os.path.basename(file_path)
+    transcript_data = []
+    file_name = os.path.basename(file_path)
     def prog(pct, msg):
         print(f"  [{pct}%] {msg}")
         if progress_cb: progress_cb(pct, msg)
@@ -263,7 +267,7 @@ def process_audio_video(file_path, images_dir, is_video=False, progress_cb=None,
             ffmpeg, "-hide_banner", "-loglevel", "error",
             "-hwaccel", "cuda", "-hwaccel_output_format", "cuda",
             "-i", file_path,
-            "-vf", f"fps=1/{CHECK_STEP_SEC},scale_cuda={COMPARE_SIZE[0]}:{COMPARE_SIZE[1]},hwdownload,format=bgr24",
+            "-vf", f"fps=1/{CHECK_STEP_SEC},scale_cuda={COMPARE_SIZE[0]}:{COMPARE_SIZE[1]},hwdownload,format=nv12,format=bgr24",
             "-f", "image2pipe", "-vcodec", "rawvideo", "-pix_fmt", "bgr24", "pipe:1"
         ]
         
