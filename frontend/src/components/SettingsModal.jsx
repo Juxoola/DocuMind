@@ -65,6 +65,9 @@ export default function SettingsModal({ isOpen, onClose, settings, onSave }) {
             llm_url: '', // Очищаем API URL
         };
         setLocalSettings(newSettings);
+        // Автосохранение при выборе модели
+        onSave(newSettings);
+        localStorage.setItem('llm_settings', JSON.stringify(newSettings));
     };
 
     const unloadAllModels = async () => {
