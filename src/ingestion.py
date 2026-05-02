@@ -215,69 +215,110 @@ def process_audio_video(file_path, images_dir, is_video=False, progress_cb=None,
                 chunk_text = ""
     prog(60, "Транскрибация завершена")
 
+def save_high_res_frame(video_path, time_sec, output_path):
+    """Извлекает один качественный кадр через FFmpeg."""
+    try:
+        from imageio_ffmpeg import get_ffmpeg_exe
+        ffmpeg = get_ffmpeg_exe()
+        cmd = [
+            ffmpeg, "-y", "-hwaccel", "cuda",
+            "-ss", str(time_sec),
+            "-i", video_path,
+            "-vframes", "1",
+            "-vf", "scale=-2:720",
+            "-q:v", "2",
+            output_path
+        ]
+        import subprocess
+        subprocess.run(cmd, capture_output=True)
+    except: pass
+
+def process_audio_video(file_path, images_dir, is_video=False, progress_cb=None, llm_settings=None):
     if is_video:
-        prog(62, "Извлечение ключевых кадров...")
+        prog(62, "Извлечение ключевых кадров (CUDA Accelerated)...")
         frame_data = []
+        
         cap = cv2.VideoCapture(file_path)
         fps = cap.get(cv2.CAP_PROP_FPS) or 25
-        
-        # Настройки детекции
-        PIXEL_THR = 15; UPDATE_PCT = 0.002; NEW_SLIDE_PCT = 0.04; MOTION_PCT = 0.002
-        STABLE_WAIT = int(fps * 3.0); CHECK_STEP = max(1, int(fps * 1.0))
-        COMPARE_SIZE = (320, 180); SAVE_HEIGHT = 720
-        
-        def resize_to_720p(f):
-            h, w = f.shape[:2]
-            if h <= SAVE_HEIGHT: return f
-            scale = SAVE_HEIGHT / h
-            return cv2.resize(f, (int(w * scale), SAVE_HEIGHT), interpolation=cv2.INTER_AREA)
-        
         total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
         duration_sec = total_frames / fps if fps > 0 else 0
-        prev_saved_thumb = None; last_seen_thumb = None; stable_since = 0; frame_count = 0
-        frame_list = []
+        cap.release()
+
+        from imageio_ffmpeg import get_ffmpeg_exe
+        ffmpeg = get_ffmpeg_exe()
         
-        while frame_count < total_frames:
-            cap.set(cv2.CAP_PROP_POS_FRAMES, frame_count)
-            ret, frame = cap.read()
-            if not ret: break
+        # Настройки логики (те же, что были)
+        PIXEL_THR = 15; UPDATE_PCT = 0.002; NEW_SLIDE_PCT = 0.04; MOTION_PCT = 0.002
+        STABLE_WAIT_SEC = 3.0; CHECK_STEP_SEC = 1.0
+        COMPARE_SIZE = (320, 180)
+        
+        # Запускаем FFmpeg Pipe для получения превью 1 раз в секунду
+        cmd = [
+            ffmpeg, "-hide_banner", "-loglevel", "error",
+            "-hwaccel", "cuda",
+            "-i", file_path,
+            "-vf", f"fps=1/{CHECK_STEP_SEC},scale={COMPARE_SIZE[0]}:{COMPARE_SIZE[1]}",
+            "-f", "image2pipe", "-vcodec", "rawvideo", "-pix_fmt", "bgr24", "pipe:1"
+        ]
+        
+        import subprocess
+        process = subprocess.Popen(cmd, stdout=subprocess.PIPE, bufsize=10**8)
+        
+        prev_saved_thumb = None; last_seen_thumb = None; stable_since_sec = 0; current_sec = 0
+        frame_list = []
+        chunk_size = COMPARE_SIZE[0] * COMPARE_SIZE[1] * 3
+
+        while True:
+            raw_frame = process.stdout.read(chunk_size)
+            if not raw_frame or len(raw_frame) != chunk_size: break
             
-            # Прогресс каждые 10 проверок или в конце
-            if (frame_count // CHECK_STEP) % 10 == 0:
-                prog(62 + int((frame_count / total_frames) * 3), 
-                     f"Извлечение кадров: {format_seconds(frame_count/fps)} / {format_seconds(duration_sec)}")
+            thumb = np.frombuffer(raw_frame, dtype='uint8').reshape((COMPARE_SIZE[1], COMPARE_SIZE[0], 3))
             
+            # Прогресс
+            if int(current_sec) % 10 == 0:
+                prog(62 + int((current_sec / duration_sec) * 3) if duration_sec > 0 else 65, 
+                     f"Анализ видео: {format_seconds(current_sec)} / {format_seconds(duration_sec)}")
             
-            thumb = cv2.resize(frame, COMPARE_SIZE)
             if last_seen_thumb is None:
-                last_seen_thumb = thumb; stable_since = frame_count
+                last_seen_thumb = thumb; stable_since_sec = current_sec
                 img_path = os.path.join(images_dir, f"video_frame_{uuid.uuid4().hex[:8]}.jpg")
-                cv2.imwrite(img_path, resize_to_720p(frame))
-                frame_list.append((img_path, 0.0))
+                save_high_res_frame(file_path, current_sec, img_path)
+                frame_list.append((img_path, current_sec))
                 prev_saved_thumb = thumb
             else:
                 diff_motion = cv2.absdiff(thumb, last_seen_thumb)
                 motion_pct = float(np.sum(diff_motion > PIXEL_THR)) / diff_motion.size
-                if motion_pct >= MOTION_PCT: stable_since = frame_count
+                
+                if motion_pct >= MOTION_PCT:
+                    stable_since_sec = current_sec
                 else:
-                    if frame_count - stable_since >= STABLE_WAIT:
+                    if current_sec - stable_since_sec >= STABLE_WAIT_SEC:
                         if prev_saved_thumb is not None:
                             diff_saved = cv2.absdiff(thumb, prev_saved_thumb)
                             saved_pct = float(np.sum(diff_saved > PIXEL_THR)) / diff_saved.size
+                            
                             if saved_pct >= UPDATE_PCT:
                                 img_path = os.path.join(images_dir, f"video_frame_{uuid.uuid4().hex[:8]}.jpg")
-                                cv2.imwrite(img_path, resize_to_720p(frame))
-                                if saved_pct >= NEW_SLIDE_PCT: frame_list.append((img_path, frame_count / fps))
+                                save_high_res_frame(file_path, current_sec, img_path)
+                                
+                                if saved_pct >= NEW_SLIDE_PCT:
+                                    frame_list.append((img_path, current_sec))
                                 else:
-                                    old_path = frame_list[-1][0]
-                                    if os.path.exists(old_path):
-                                        try: os.remove(old_path)
-                                        except: pass
-                                    frame_list[-1] = (img_path, frame_count / fps)
+                                    # Обновляем последний кадр (плавное изменение)
+                                    if frame_list:
+                                        old_path = frame_list[-1][0]
+                                        if os.path.exists(old_path):
+                                            try: os.remove(old_path)
+                                            except: pass
+                                        frame_list[-1] = (img_path, current_sec)
                                 prev_saved_thumb = thumb
-                        stable_since = frame_count
-            last_seen_thumb = thumb; frame_count += CHECK_STEP
-        cap.release()
+                        stable_since_sec = current_sec
+            
+            last_seen_thumb = thumb
+            current_sec += CHECK_STEP_SEC
+            
+        process.stdout.close()
+        process.wait()
 
         # Описание кадров
         n = len(frame_list)
