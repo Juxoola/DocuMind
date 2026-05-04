@@ -171,6 +171,7 @@ async def upload_file(
     vision_batch_size: Optional[int] = 2048,
     vision_flash_attn: Optional[str] = "true",
     vision_max_tokens: Optional[int] = 512,
+    vision_concurrency: Optional[int] = 1,
 ):
     paths = config.get_notebook_paths(notebook_id)
     os.makedirs(paths["data"], exist_ok=True)
@@ -213,6 +214,7 @@ async def upload_file(
         "vision_batch_size": vision_batch_size,
         "vision_flash_attn": vision_flash_attn,
         "vision_max_tokens": vision_max_tokens,
+        "vision_concurrency": vision_concurrency,
     }
 
     def process_task():

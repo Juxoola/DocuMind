@@ -1,3 +1,8 @@
+notebooks/
+scratch/
+*.json
+*.mp4
+temp/
 __pycache__/
 *.py[cod]
 *$py.class

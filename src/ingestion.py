@@ -256,17 +256,48 @@ def process_audio_video(file_path, images_dir, is_video=False, progress_cb=None,
                 v_th = int(llm_settings.get("vision_threads") or 8)
                 v_b = int(llm_settings.get("vision_batch_size") or 2048)
                 v_fa = llm_settings.get("vision_flash_attn") == "true"
+                v_conc = int(llm_settings.get("vision_concurrency") or 1)
                 with suppress_stdout_stderr():
-                    shared_llm = Llama(model_path=g_path, chat_handler=Llava15ChatHandler(clip_model_path=m_path, verbose=False), 
-                                       n_ctx=v_ctx, n_gpu_layers=v_gl, verbose=False, n_batch=v_b, n_threads=v_th, flash_attn=v_fa)
+                    shared_llm = Llama(
+                        model_path=g_path, 
+                        chat_handler=Llava15ChatHandler(clip_model_path=m_path, verbose=False), 
+                        n_ctx=v_ctx, n_gpu_layers=v_gl, verbose=False, n_batch=v_b, n_threads=v_th, 
+                        flash_attn=v_fa,
+                        n_parallel=v_conc # Поддержка параллельных запросов
+                    )
             except: pass
 
+        from concurrent.futures import ThreadPoolExecutor
+        concurrency = int(llm_settings.get("vision_concurrency") or 1) if llm_settings else 1
+        
         done = 0
-        for path, t in frame_list:
+        results_map = {}
+        
+        # Функция для параллельной обработки одного кадра
+        def process_frame(idx):
+            path, t = frame_list[idx]
             desc = describe_image_with_lmstudio(path, llm_settings, shared_llm)
+            return (idx, path, t, desc)
+
+        prog(65, f"Описание {n} кадров (параллельно: {concurrency})...")
+        
+        with ThreadPoolExecutor(max_workers=concurrency) as executor:
+            # Запускаем все задачи
+            from concurrent.futures import as_completed
+            futures = {executor.submit(process_frame, i): i for i in range(n)}
+            
+            # Обрабатываем результаты по мере их готовности для обновления прогресса
+            for future in as_completed(futures):
+                idx, path, t, desc = future.result()
+                results_map[idx] = (path, t, desc)
+                done += 1
+                prog(65 + int(done/n*22) if n else 87, f"Описание: {done}/{n}")
+            
+        # Теперь собираем результаты в правильном порядке
+        for i in range(n):
+            path, t, desc = results_map[i]
             nodes.append(TextNode(text=f"Кадр {file_name} [{format_seconds(t)}]: {desc}", metadata={"file_name":file_name, "image_path":path, "time":t}))
             frame_data.append({"time":t, "image_path":path, "description":desc})
-            done += 1; prog(65 + int(done/n*22) if n else 87, f"Описание: {done}/{n}")
             
         if shared_llm:
             del shared_llm
