@@ -50,6 +50,12 @@ except: pass
 import whisperx
 import config
 
+try:
+    import llama_cpp
+    def dummy_log_callback(level, message, user_data): pass
+    llama_cpp.llama_log_set(dummy_log_callback, None)
+except: pass
+
 # Контекстный менеджер для подавления спама в консоли (llama-cpp, torch и т.д.)
 class suppress_stdout_stderr:
     def __enter__(self):
