@@ -90,6 +90,11 @@ def get_image_base64(image_path):
 
 def describe_image_with_lmstudio(image_path, llm_settings=None, existing_llm=None):
     prompt = "Опиши ТОЛЬКО основное содержимое экрана (слайд, доску, рисунки, схемы, формулы, рукописный текст или код). ПОЛНОСТЬЮ ИГНОРИРУЙ интерфейс браузера, видеозвонка, чат, панель задач Windows и спикеров. Напиши кратко суть того, что написано или нарисовано на самой презентации или доске, на русском языке."
+    
+    def _clean_think_tags(text):
+        import re
+        return re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL).strip()
+
     if llm_settings and llm_settings.get("use_gguf_direct") and existing_llm:
         try:
             v_temp = float(llm_settings.get("vision_temperature") or 0.2)
@@ -99,7 +104,8 @@ def describe_image_with_lmstudio(image_path, llm_settings=None, existing_llm=Non
                     messages=[{"role":"user","content":[{"type":"text","text":prompt},{"type":"image_url","image_url":{"url":f"data:image/jpeg;base64,{get_image_base64(image_path)}"}}]}],
                     temperature=v_temp, max_tokens=v_max
                 )
-            return res["choices"][0]["message"]["content"]
+            ans = res["choices"][0]["message"]["content"]
+            return _clean_think_tags(ans)
         except Exception as e: return f"Ошибка GGUF: {e}"
     
     api_url = (llm_settings.get("llm_url") if llm_settings else None) or config.LM_STUDIO_URL
@@ -108,7 +114,8 @@ def describe_image_with_lmstudio(image_path, llm_settings=None, existing_llm=Non
     try:
         r = requests.post(f"{api_url.rstrip('/')}/chat/completions", headers={"Authorization":f"Bearer {api_key}"}, 
                           json={"model":model_name, "messages":[{"role":"user","content":[{"type":"text","text":prompt},{"type":"image_url","image_url":{"url":f"data:image/jpeg;base64,{get_image_base64(image_path)}"}}]}], "temperature":0.2}, timeout=30)
-        return r.json()["choices"][0]["message"]["content"]
+        ans = r.json()["choices"][0]["message"]["content"]
+        return _clean_think_tags(ans)
     except: return "Изображение без описания."
 
 def save_high_res_frame(video_path, time_sec, output_path):
