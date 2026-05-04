@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Send, Trash2, Sparkles, Clock, Zap, Cpu, FileText, Settings as SettingsIcon, HardDrive } from 'lucide-react';
+import { Send, Trash2, Sparkles, Clock, Zap, Cpu, FileText, Settings as SettingsIcon, HardDrive, Square } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
@@ -51,8 +51,10 @@ export default function ChatArea({ notebook, selectedSources, onOpenSource, llmS
   const [stats, setStats] = useState(null);
   const [maxTokens, setMaxTokens] = useState(1024);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [thinkingMode, setThinkingMode] = useState(false);
   const [hoveredSource, setHoveredSource] = useState(null);
   const [tooltipCoords, setTooltipCoords] = useState({ x: 0, y: 0 });
+  const [abortController, setAbortController] = useState(null);
   const tooltipTimeoutRef = useRef(null);
   const messagesEndRef = useRef(null);
   const textareaRef = useRef(null);
@@ -85,16 +87,21 @@ export default function ChatArea({ notebook, selectedSources, onOpenSource, llmS
 
     const aiMsgIndex = messages.length + 1;
     setMessages(prev => [...prev, { role: 'ai', content: '', loading: true }]);
+    
+    const controller = new AbortController();
+    setAbortController(controller);
 
     try {
       const response = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        signal: controller.signal,
         body: JSON.stringify({
           query: input,
           allowed_files: selectedSources,
           max_tokens: maxTokens,
           notebook_id: notebook.id,
+          thinking_mode: thinkingMode,
           ...llmSettings
         })
       });
@@ -135,23 +142,33 @@ export default function ChatArea({ notebook, selectedSources, onOpenSource, llmS
         }
       }
     } catch (err) {
-      updateAiMessage(aiMsgIndex, '⚠️ Ошибка связи с сервером.', []);
+      if (err.name === 'AbortError') {
+        updateAiMessage(aiMsgIndex, '*(Генерация остановлена)*', []);
+      } else {
+        updateAiMessage(aiMsgIndex, '⚠️ Ошибка связи с сервером.', []);
+      }
     } finally {
       setIsLoading(false);
+      setAbortController(null);
     }
   };
 
   const updateAiMessage = (index, content, sources) => {
     setMessages(prev => {
+      // Защита от краша при очистке чата во время стриминга
+      if (index >= prev.length + 2) return prev;
       const newMessages = [...prev];
-      newMessages[index] = { role: 'ai', content, sources, loading: false };
+      if (!newMessages[index]) return prev;
+      newMessages[index] = { ...newMessages[index], content, sources, loading: false };
       return newMessages;
     });
   };
 
   const clearChat = () => {
+    if (abortController) abortController.abort();
     setMessages([{ role: 'ai', content: 'Чат очищен. Какой новый вопрос?' }]);
     setStats(null);
+    setIsLoading(false);
   };
 
   const renderMessageContent = (msg) => {
@@ -189,6 +206,20 @@ export default function ChatArea({ notebook, selectedSources, onOpenSource, llmS
         }
         return match;
       });
+
+      // 4. Потоковые рассуждения (think)
+      if (processed.includes('<think>')) {
+        let parts = processed.split('<think>');
+        let beforeThink = parts[0];
+        let thinkContent = parts[1];
+        if (thinkContent.includes('</think>')) {
+            let thinkParts = thinkContent.split('</think>');
+            processed = `${beforeThink}<details class="mb-4 rounded-xl border border-purple-500/20 bg-purple-500/5 overflow-hidden"><summary class="cursor-pointer px-4 py-2 text-[11px] font-bold text-purple-500 hover:bg-purple-500/10 transition-colors select-none">✨ Рассуждения</summary><div class="p-4 text-xs text-muted-foreground/80 italic border-t border-purple-500/10 whitespace-pre-wrap">${thinkParts[0]}</div></details>\n${thinkParts.slice(1).join('</think>')}`;
+        } else {
+            // Тег открыт, но еще не закрыт (стриминг)
+            processed = `${beforeThink}<div class="mb-4 rounded-xl border border-purple-500/20 bg-purple-500/5 overflow-hidden"><div class="px-4 py-2 text-[11px] font-bold text-purple-500 flex items-center gap-2"><span class="animate-pulse">✨ Модель рассуждает...</span></div><div class="p-4 text-xs text-muted-foreground/80 italic border-t border-purple-500/10 whitespace-pre-wrap">${thinkContent}</div></div>`;
+        }
+      }
 
       return processed;
     };
@@ -320,6 +351,16 @@ export default function ChatArea({ notebook, selectedSources, onOpenSource, llmS
               </button>
             ))}
           </div>
+          <button
+            onClick={() => setThinkingMode(!thinkingMode)}
+            className={cn(
+              "px-3 py-1.5 text-[10px] font-bold rounded-lg transition-all flex items-center gap-1.5",
+              thinkingMode ? "bg-purple-500/10 text-purple-500 border border-purple-500/20 shadow-sm" : "bg-muted text-muted-foreground hover:text-foreground border border-transparent"
+            )}
+          >
+            <Sparkles size={12} />
+            {thinkingMode ? "Думает" : "Без рассуждений"}
+          </button>
           <button 
             onClick={() => setIsSettingsOpen(true)}
             className="p-2 hover:bg-muted rounded-lg text-muted-foreground transition-colors"
@@ -375,16 +416,27 @@ export default function ChatArea({ notebook, selectedSources, onOpenSource, llmS
               className="flex-1 bg-transparent border-none outline-none resize-none py-3 text-sm focus:ring-0 focus:outline-none overflow-y-auto"
               rows={1}
             />
-            <button 
-              onClick={handleSend}
-              disabled={!input.trim() || isLoading}
-              className={cn(
-                "p-3 rounded-xl transition-all",
-                input.trim() && !isLoading ? "bg-primary text-white shadow-lg shadow-primary/20" : "bg-muted text-muted-foreground"
-              )}
-            >
-              <Send size={18} />
-            </button>
+            {isLoading ? (
+              <button 
+                onClick={() => abortController?.abort()}
+                className="p-3 bg-red-500 hover:bg-red-600 text-white rounded-xl transition-all shadow-lg shadow-red-500/20"
+                title="Остановить генерацию"
+              >
+                <Square size={18} className="fill-current" />
+              </button>
+            ) : (
+              <button 
+                onClick={handleSend}
+                disabled={!input.trim()}
+                className={cn(
+                  "p-3 rounded-xl transition-all",
+                  input.trim() ? "bg-primary text-white shadow-lg shadow-primary/20" : "bg-muted text-muted-foreground"
+                )}
+                title="Отправить (Enter)"
+              >
+                <Send size={18} />
+              </button>
+            )}
           </div>
         </div>
 

@@ -370,6 +370,7 @@ class ChatRequest(BaseModel):
     allowed_files: List[str]
     max_tokens: int = 1024
     notebook_id: str
+    thinking_mode: bool = False
     llm_url: Optional[str] = None
     llm_api_key: Optional[str] = "lm-studio"
     llm_model: Optional[str] = "gpt-4o"
@@ -445,7 +446,7 @@ async def chat(request: ChatRequest):
                 max_tokens=request.max_tokens
             )
             sources, context_str = build_file_context(nodes, request.notebook_id)
-            prompt = make_prompt(request.query, context_str)
+            prompt = make_prompt(request.query, context_str, thinking_mode=request.thinking_mode)
 
             yield f"data: {json.dumps({'type': 'sources', 'sources': sources}, ensure_ascii=False)}\n\n"
 

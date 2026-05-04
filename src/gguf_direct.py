@@ -55,6 +55,9 @@ def get_gguf_llm(
     if cache_key in _model_cache:
         print(f"[GGUF Direct] Используем кэшированную модель: {os.path.basename(gguf_path)}")
         return _model_cache[cache_key]
+        
+    # Если запрашивается НОВАЯ модель, выгружаем старые, чтобы освободить VRAM
+    unload_all_models()
     
     if not os.path.exists(gguf_path):
         raise FileNotFoundError(f"GGUF модель не найдена: {gguf_path}")

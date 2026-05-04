@@ -143,7 +143,8 @@ def retrieve_nodes(query: str, notebook_id: str, allowed_files=None, max_tokens=
         file_filter = MetadataFilters(
             filters=[MetadataFilter(key="file_name", value=fname, operator=FilterOperator.EQ)]
         )
-        retriever = index.as_retriever(similarity_top_k=5, filters=file_filter)
+        # Расширяем воронку поиска: берем топ-20 вместо 5, чтобы реранкер мог выбрать из большего числа вариантов
+        retriever = index.as_retriever(similarity_top_k=20, filters=file_filter)
         try:
             nodes = retriever.retrieve(query)
             all_nodes.extend(nodes)
@@ -219,12 +220,21 @@ def build_file_context(nodes, notebook_id: str):
     context_str = "\n\n" + ("=" * 40 + "\n\n").join(context_parts)
     return sources, context_str
 
-def make_prompt(query: str, context_str: str) -> str:
+def make_prompt(query: str, context_str: str, thinking_mode: bool = False) -> str:
+    thinking_rule = ""
+    if thinking_mode:
+        thinking_rule = (
+            "ВАЖНОЕ ПРАВИЛО РАССУЖДЕНИЙ:\n"
+            "Сначала напиши свои подробные пошаговые рассуждения внутри тегов <think> и </think>.\n"
+            "Только после закрытия тега </think> давай окончательный ответ пользователю.\n\n"
+        )
+        
     return (
         "Ты — умный и точный AI-помощник. ОТВЕЧАЙ СТРОГО НА РУССКОМ ЯЗЫКЕ.\n"
         "Используй Markdown для форматирования.\n\n"
+        f"{thinking_rule}"
         "ПРАВИЛА ОТВЕТА:\n"
-        "1. Всегда отвечай на вопрос СРАЗУ, в самом начале ответа.\n"
+        "1. Всегда отвечай на вопрос СРАЗУ, в самом начале ответа (после тегов think, если они есть).\n"
         "2. Если вопрос содержит варианты ответа (тест) — СНАЧАЛА напиши правильный вариант (букву и текст).\n"
         "3. После прямого ответа приведи подробное объяснение на основе источников.\n\n"
         "ВАЖНОЕ ПРАВИЛО ЦИТИРОВАНИЯ (КРИТИЧЕСКИ ДЛЯ СИСТЕМЫ):\n"
