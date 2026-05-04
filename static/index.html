@@ -420,7 +420,7 @@
                                 } else if (ev.type === 'done') {
                                     pFill.style.width = '100%';
                                     pPct.textContent = '100%';
-                                    pMsg.textContent = 'Готово!';
+                                    pMsg.textContent = ev.elapsed ? 'Готово! Время: ' + ev.elapsed : 'Готово!';
                                 } else if (ev.type === 'error') {
                                     pFill.style.background = '#ef4444';
                                     pMsg.textContent = 'Ошибка: ' + ev.msg;
@@ -436,7 +436,7 @@
             setTimeout(() => {
                 pCont.style.display = 'none';
                 pFill.style.background = 'var(--accent)'; // reset
-            }, 2000);
+            }, 5000);
             
             await loadFiles();
         }

@@ -22,6 +22,9 @@ def get_gguf_llm(
     gpu_layers: Optional[int] = None,
     temperature: float = 0.1,
     max_tokens: int = 1024,
+    n_threads: Optional[int] = None,
+    n_batch: Optional[int] = None,
+    flash_attn: bool = False,
 ) -> LlamaCPP:
     """
     Загружает GGUF модель через прямой API llama-cpp-python.
@@ -59,6 +62,9 @@ def get_gguf_llm(
     model_kwargs = {
         "n_gpu_layers": ngl,
         "n_ctx": ctx,
+        "n_threads": n_threads if n_threads is not None else config.GGUF_THREADS,
+        "n_batch": n_batch if n_batch is not None else 2048,
+        "flash_attn": flash_attn,
     }
     
     # Добавляем mmproj если указан

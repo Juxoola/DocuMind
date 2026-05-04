@@ -79,6 +79,21 @@ export default function SettingsModal({ isOpen, onClose, settings, onSave }) {
         }
     };
 
+    
+    const updateSearchDirs = async (dirs) => {
+        try {
+            await fetch('/api/update-model-dirs', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ dirs })
+            });
+            fetchGgufConfig();
+            fetchGgufModels();
+        } catch (err) {
+            console.error('Ошибка обновления директорий:', err);
+        }
+    };
+
     const toggleDir = (dirPath) => {
         setExpandedDirs(prev => ({ ...prev, [dirPath]: !prev[dirPath] }));
     };
@@ -217,18 +232,102 @@ export default function SettingsModal({ isOpen, onClose, settings, onSave }) {
                                 )}
 
                                 {/* Current Selection */}
-                                {localSettings.use_gguf === 'true' && localSettings.gguf_model_path && (
-                                    <div className="rounded-2xl border border-green-500/20 bg-green-500/5 p-4">
-                                        <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest mb-2">
-                                            Выбранная модель
-                                        </p>
-                                        <p className="text-xs font-medium text-green-600 dark:text-green-400 break-all">
-                                            {localSettings.gguf_model_path.split('/').pop()}
-                                        </p>
-                                        {localSettings.gguf_mmproj_path && (
-                                            <p className="text-[9px] text-muted-foreground mt-1">
-                                                + mmproj: {localSettings.gguf_mmproj_path.split('/').pop()}
+                                {localSettings.use_gguf === 'true' && (
+                                    <div className="space-y-3">
+                                        {localSettings.gguf_model_path && (
+                                        <div className="rounded-2xl border border-green-500/20 bg-green-500/5 p-4">
+                                            <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest mb-2" title="Основная модель используется для ответов на вопросы и работы с текстом">
+                                                Выбранная основная модель ℹ️
                                             </p>
+                                            <p className="text-xs font-medium text-green-600 dark:text-green-400 break-all">
+                                                {localSettings.gguf_model_path.split('/').pop()}
+                                            </p>
+                                            {localSettings.gguf_mmproj_path && (
+                                                <p className="text-[9px] text-muted-foreground mt-1">
+                                                    + mmproj: {localSettings.gguf_mmproj_path.split('/').pop()}
+                                                </p>
+                                            )}
+                                            <div className="grid grid-cols-2 gap-3 mt-3">
+                                                <label className="flex flex-col gap-1 text-[10px] text-muted-foreground" title="Температура (0.0 - 2.0). Чем выше, тем более креативный ответ.">
+                                                    Температура ℹ️
+                                                    <input type="number" step="0.1" value={localSettings.gguf_temperature || 0.1} onChange={e => setLocalSettings({...localSettings, gguf_temperature: parseFloat(e.target.value)})} className="bg-background border border-border rounded px-2 py-1 text-foreground" />
+                                                </label>
+                                                <label className="flex flex-col gap-1 text-[10px] text-muted-foreground" title="Размер контекста (токены). Сколько текста модель может 'помнить'.">
+                                                    Контекст ℹ️
+                                                    <input type="number" step="1024" value={localSettings.gguf_ctx_size || 8192} onChange={e => setLocalSettings({...localSettings, gguf_ctx_size: parseInt(e.target.value)})} className="bg-background border border-border rounded px-2 py-1 text-foreground" />
+                                                </label>
+                                                <label className="flex flex-col gap-1 text-[10px] text-muted-foreground" title="Количество GPU слоев (-1 означает загрузить всё в видеокарту).">
+                                                    GPU Слои ℹ️
+                                                    <input type="number" step="1" value={localSettings.gguf_gpu_layers !== undefined ? localSettings.gguf_gpu_layers : -1} onChange={e => setLocalSettings({...localSettings, gguf_gpu_layers: parseInt(e.target.value)})} className="bg-background border border-border rounded px-2 py-1 text-foreground" />
+                                                </label>
+                                                <label className="flex flex-col gap-1 text-[10px] text-muted-foreground" title="Потоки процессора. Обычно 8 достаточно.">
+                                                    CPU Потоки ℹ️
+                                                    <input type="number" step="1" value={localSettings.gguf_threads || 8} onChange={e => setLocalSettings({...localSettings, gguf_threads: parseInt(e.target.value)})} className="bg-background border border-border rounded px-2 py-1 text-foreground" />
+                                                </label>
+                                                <label className="flex flex-col gap-1 text-[10px] text-muted-foreground" title="Размер батча (влияет на скорость обработки длинного текста).">
+                                                    Batch Size ℹ️
+                                                    <input type="number" step="256" value={localSettings.gguf_batch_size || 2048} onChange={e => setLocalSettings({...localSettings, gguf_batch_size: parseInt(e.target.value)})} className="bg-background border border-border rounded px-2 py-1 text-foreground" />
+                                                </label>
+                                                <label className="flex flex-col gap-1 text-[10px] text-muted-foreground" title="Использовать Flash Attention для ускорения.">
+                                                    Flash Attention ℹ️
+                                                    <select value={localSettings.gguf_flash_attn || 'false'} onChange={e => setLocalSettings({...localSettings, gguf_flash_attn: e.target.value})} className="bg-background border border-border rounded px-2 py-1 text-foreground">
+                                                        <option value="true">Вкл</option>
+                                                        <option value="false">Выкл</option>
+                                                    </select>
+                                                </label>
+                                            </div>
+                                        </div>
+                                        )}
+                                        {localSettings.vision_model_path && (
+                                        <div className="rounded-2xl border border-purple-500/20 bg-purple-500/5 p-4">
+                                            <div className="flex justify-between items-start">
+                                                <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest mb-2" title="Vision модель загружается только при анализе видео/фото для создания описаний.">
+                                                    Vision модель (для описаний) ℹ️
+                                                </p>
+                                                <button onClick={() => setLocalSettings({...localSettings, vision_model_path: '', vision_mmproj_path: ''})} className="text-red-500 hover:text-red-400 text-[10px]">Удалить</button>
+                                            </div>
+                                            <p className="text-xs font-medium text-purple-600 dark:text-purple-400 break-all">
+                                                {localSettings.vision_model_path.split('/').pop()}
+                                            </p>
+                                            {localSettings.vision_mmproj_path && (
+                                                <p className="text-[9px] text-muted-foreground mt-1">
+                                                    + mmproj: {localSettings.vision_mmproj_path.split('/').pop()}
+                                                </p>
+                                            )}
+                                            <div className="grid grid-cols-2 gap-3 mt-3">
+                                                <label className="flex flex-col gap-1 text-[10px] text-muted-foreground" title="Температура для генерации описаний картинок.">
+                                                    Температура ℹ️
+                                                    <input type="number" step="0.1" value={localSettings.vision_temperature || 0.2} onChange={e => setLocalSettings({...localSettings, vision_temperature: parseFloat(e.target.value)})} className="bg-background border border-border rounded px-2 py-1 text-foreground" />
+                                                </label>
+                                                <label className="flex flex-col gap-1 text-[10px] text-muted-foreground" title="Контекст для обработки картинок (обычно 4096 или 8192)">
+                                                    Контекст ℹ️
+                                                    <input type="number" step="1024" value={localSettings.vision_ctx_size || 8192} onChange={e => setLocalSettings({...localSettings, vision_ctx_size: parseInt(e.target.value)})} className="bg-background border border-border rounded px-2 py-1 text-foreground" />
+                                                </label>
+                                                <label className="flex flex-col gap-1 text-[10px] text-muted-foreground" title="Количество GPU слоев (-1 означает загрузить всё в видеокарту).">
+                                                    GPU Слои ℹ️
+                                                    <input type="number" step="1" value={localSettings.vision_gpu_layers !== undefined ? localSettings.vision_gpu_layers : -1} onChange={e => setLocalSettings({...localSettings, vision_gpu_layers: parseInt(e.target.value)})} className="bg-background border border-border rounded px-2 py-1 text-foreground" />
+                                                </label>
+                                                <label className="flex flex-col gap-1 text-[10px] text-muted-foreground" title="Потоки процессора. Обычно 8 достаточно.">
+                                                    CPU Потоки ℹ️
+                                                    <input type="number" step="1" value={localSettings.vision_threads || 8} onChange={e => setLocalSettings({...localSettings, vision_threads: parseInt(e.target.value)})} className="bg-background border border-border rounded px-2 py-1 text-foreground" />
+                                                </label>
+                                                <label className="flex flex-col gap-1 text-[10px] text-muted-foreground" title="Размер батча (влияет на скорость обработки длинного текста).">
+                                                    Batch Size ℹ️
+                                                    <input type="number" step="256" value={localSettings.vision_batch_size || 2048} onChange={e => setLocalSettings({...localSettings, vision_batch_size: parseInt(e.target.value)})} className="bg-background border border-border rounded px-2 py-1 text-foreground" />
+                                                </label>
+                                                <label className="flex flex-col gap-1 text-[10px] text-muted-foreground" title="Использовать Flash Attention для ускорения.">
+                                                    Flash Attention ℹ️
+                                                    <select value={localSettings.vision_flash_attn || 'true'} onChange={e => setLocalSettings({...localSettings, vision_flash_attn: e.target.value})} className="bg-background border border-border rounded px-2 py-1 text-foreground">
+                                                        <option value="true">Вкл</option>
+                                                        <option value="false">Выкл</option>
+                                                    </select>
+                                                </label>
+                                                <label className="flex flex-col gap-1 text-[10px] text-muted-foreground col-span-2" title="Максимальное количество токенов в ответе.">
+                                                    Max Tokens ℹ️
+                                                    <input type="number" step="64" value={localSettings.vision_max_tokens || 512} onChange={e => setLocalSettings({...localSettings, vision_max_tokens: parseInt(e.target.value)})} className="bg-background border border-border rounded px-2 py-1 text-foreground" />
+                                                </label>
+                                            </div>
+                                        </div>
                                         )}
                                     </div>
                                 )}
@@ -248,10 +347,11 @@ export default function SettingsModal({ isOpen, onClose, settings, onSave }) {
                                         </button>
                                     </div>
                                     
-                                    {ggufConfig.search_dirs && (
-                                        <p className="text-[9px] text-muted-foreground/50 font-mono">
-                                            Директории поиска: {ggufConfig.search_dirs}
-                                        </p>
+                                    {ggufConfig.search_dirs !== undefined && (
+                                        <div className="flex items-center gap-2 mt-2 mb-2">
+                                            <input type="text" value={ggufConfig.search_dirs} onChange={e => setGgufConfig({...ggufConfig, search_dirs: e.target.value})} className="flex-1 bg-background border border-border rounded px-2 py-1 text-[10px] text-foreground font-mono" placeholder="C:/models, D:/llms" />
+                                            <button onClick={() => updateSearchDirs(ggufConfig.search_dirs)} className="px-2 py-1 bg-primary/20 hover:bg-primary/40 text-primary rounded text-[10px]">Сохранить</button>
+                                        </div>
                                     )}
 
                                     {ggufModels.length === 0 && !ggufLoading && (
@@ -316,23 +416,26 @@ export default function SettingsModal({ isOpen, onClose, settings, onSave }) {
                                                                                     <p className="text-[9px] text-green-500 font-bold mt-0.5">ВЫБРАНА</p>
                                                                                 )}
                                                                             </div>
-                                                                            <button
-                                                                                onClick={() => {
-                                                                                    // Находим mmproj в этой же директории
-                                                                                    const mmproj = modelGroup.mmproj_files.length > 0
-                                                                                        ? modelGroup.dir + '/' + modelGroup.mmproj_files[0]
-                                                                                        : null;
-                                                                                    selectModel(fullPath, mmproj);
-                                                                                }}
-                                                                                className={cn(
-                                                                                    "px-2.5 py-1 rounded-lg text-[10px] font-bold transition-all",
-                                                                                    isSelected
-                                                                                        ? "bg-green-500/10 text-green-500"
-                                                                                        : "bg-primary/10 text-primary hover:bg-primary hover:text-white"
-                                                                                )}
-                                                                            >
-                                                                                {isSelected ? "Выбрана" : "Выбрать"}
-                                                                            </button>
+                                                                            <div className="flex gap-2">
+                                                                                <button
+                                                                                    onClick={() => {
+                                                                                        const mmproj = modelGroup.mmproj_files.length > 0 ? modelGroup.dir + '/' + modelGroup.mmproj_files[0] : null;
+                                                                                        selectModel(fullPath, mmproj);
+                                                                                    }}
+                                                                                    className={cn("px-2.5 py-1 rounded-lg text-[10px] font-bold transition-all", isSelected ? "bg-green-500/10 text-green-500" : "bg-primary/10 text-primary hover:bg-primary hover:text-white")}
+                                                                                >
+                                                                                    {isSelected ? "Основа" : "Выбрать"}
+                                                                                </button>
+                                                                                <button
+                                                                                    onClick={() => {
+                                                                                        const mmproj = modelGroup.mmproj_files.length > 0 ? modelGroup.dir + '/' + modelGroup.mmproj_files[0] : null;
+                                                                                        setLocalSettings({...localSettings, vision_model_path: fullPath, vision_mmproj_path: mmproj || '', use_gguf: 'true'});
+                                                                                    }}
+                                                                                    className={cn("px-2.5 py-1 rounded-lg text-[10px] font-bold transition-all", localSettings.vision_model_path === fullPath ? "bg-purple-500/10 text-purple-500" : "bg-primary/10 text-primary hover:bg-primary hover:text-white")}
+                                                                                >
+                                                                                    {localSettings.vision_model_path === fullPath ? "Vision" : "+ Vision"}
+                                                                                </button>
+                                                                            </div>
                                                                         </div>
                                                                     );
                                                                 })}
