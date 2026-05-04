@@ -11,6 +11,12 @@ from llama_index.llms.llama_cpp.llama_utils import completion_to_prompt, message
 
 import config
 
+try:
+    import llama_cpp
+    def dummy_log_callback(level, message, user_data): pass
+    llama_cpp.llama_log_set(dummy_log_callback, None)
+except: pass
+
 # Глобальный кэш загруженных моделей
 _model_cache: Dict[str, LlamaCPP] = {}
 
