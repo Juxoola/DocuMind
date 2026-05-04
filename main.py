@@ -164,6 +164,13 @@ async def upload_file(
     gguf_mmproj_path: Optional[str] = None,
     vision_model_path: Optional[str] = None,
     vision_mmproj_path: Optional[str] = None,
+    vision_temperature: Optional[float] = 0.2,
+    vision_ctx_size: Optional[int] = 8192,
+    vision_gpu_layers: Optional[int] = -1,
+    vision_threads: Optional[int] = 8,
+    vision_batch_size: Optional[int] = 2048,
+    vision_flash_attn: Optional[str] = "true",
+    vision_max_tokens: Optional[int] = 512,
 ):
     paths = config.get_notebook_paths(notebook_id)
     os.makedirs(paths["data"], exist_ok=True)
@@ -199,9 +206,18 @@ async def upload_file(
         "gguf_mmproj_path": gguf_mmproj_path if use_gguf_direct else None,
         "vision_model_path": vision_model_path,
         "vision_mmproj_path": vision_mmproj_path,
+        "vision_temperature": vision_temperature,
+        "vision_ctx_size": vision_ctx_size,
+        "vision_gpu_layers": vision_gpu_layers,
+        "vision_threads": vision_threads,
+        "vision_batch_size": vision_batch_size,
+        "vision_flash_attn": vision_flash_attn,
+        "vision_max_tokens": vision_max_tokens,
     }
 
     def process_task():
+        import time
+        start_time = time.time()
         try:
             def prog(pct, msg):
                 q.put({"type": "progress", "pct": pct, "msg": msg})
@@ -212,7 +228,13 @@ async def upload_file(
             prog(90, "Построение индекса (ChromaDB)...")
             build_index(nodes, notebook_id)
             
-            q.put({"type": "done", "filename": file.filename})
+            elapsed = time.time() - start_time
+            mins = int(elapsed // 60)
+            secs = int(elapsed % 60)
+            time_str = f"{mins}м {secs}с" if mins > 0 else f"{secs}с"
+            print(f"[INGESTION] Файл '{file.filename}' успешно добавлен в базу. Затрачено времени: {time_str}")
+            
+            q.put({"type": "done", "filename": file.filename, "elapsed": time_str, "elapsed_sec": elapsed})
         except Exception as e:
             import traceback
             traceback.print_exc()
@@ -355,6 +377,12 @@ class ChatRequest(BaseModel):
     use_gguf: Optional[str] = None
     gguf_model_path: Optional[str] = None
     gguf_mmproj_path: Optional[str] = None
+    gguf_temperature: Optional[float] = 0.1
+    gguf_ctx_size: Optional[int] = 8192
+    gguf_gpu_layers: Optional[int] = -1
+    gguf_threads: Optional[int] = 8
+    gguf_batch_size: Optional[int] = 2048
+    gguf_flash_attn: Optional[str] = "false"
 
 @app.post("/api/chat")
 async def chat(request: ChatRequest):
@@ -370,7 +398,12 @@ async def chat(request: ChatRequest):
             active_llm = get_gguf_llm(
                 gguf_path=request.gguf_model_path,
                 mmproj_path=request.gguf_mmproj_path if request.gguf_mmproj_path else None,
-                temperature=0.1,
+                temperature=request.gguf_temperature,
+                ctx_size=request.gguf_ctx_size,
+                gpu_layers=request.gguf_gpu_layers,
+                n_threads=request.gguf_threads,
+                n_batch=request.gguf_batch_size,
+                flash_attn=True if request.gguf_flash_attn == "true" else False,
                 max_tokens=request.max_tokens,
             )
             config.save_last_model(request.gguf_model_path, request.gguf_mmproj_path)
@@ -422,8 +455,7 @@ async def chat(request: ChatRequest):
                     token_count += 1 
                     full_response += chunk.delta
                     yield f"data: {json.dumps({'type': 'chunk', 'text': chunk.delta}, ensure_ascii=False)}\n\n"
-            
-            print(f"\n[CHAT] Ответ модели:\n{full_response}\n")
+            # print(f"\n[CHAT] Ответ модели:\n{full_response}\n")
 
             elapsed = time.time() - start_time
             yield f"data: {json.dumps({
@@ -447,4 +479,6 @@ async def chat(request: ChatRequest):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("main:app", host=config.HOST, port=config.PORT, reload=True)
+    # Отключаем логирование каждого HTTP-запроса (access_log=False)
+    # и оставляем только предупреждения и ошибки (log_level="warning")
+    uvicorn.run("main:app", host=config.HOST, port=config.PORT, reload=True, access_log=False, log_level="warning")

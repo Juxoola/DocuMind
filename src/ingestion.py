@@ -79,44 +79,7 @@ def cleanup_gpu():
     except Exception as e:
         print(f"[GPU] Ошибка при очистке: {e}")
 
-def get_native_image_base64(path):
-    try:
-        import cv2, base64
-        # Ресайз до 448px (родное для Qwen-VL) ускоряет инференс в разы без потери качества
-        img = cv2.imread(path)
-        img_res = cv2.resize(img, (448, 448))
-        _, buffer = cv2.imencode(".jpg", img_res, [int(cv2.IMWRITE_JPEG_QUALITY), 95])
-        return base64.b64encode(buffer).decode("utf-8")
-    except:
-        with open(path, "rb") as f: return base64.b64encode(f.read()).decode("utf-8")
 
-def vision_worker(images_subset, settings, prompt, out_queue):
-    try:
-        import gc, torch, config
-        # Используем отдельную модель для зрения, если она указана, иначе основную
-        v_model = settings.get("vision_model_path") or settings.get("gguf_model_path")
-        v_mmproj = settings.get("vision_mmproj_path") or settings.get("gguf_mmproj_path")
-        
-        g_path = config.resolve_model_path(v_model)
-        m_path = config.resolve_model_path(v_mmproj)
-        
-        # Подавляем шум при загрузке модели
-        with suppress_stdout_stderr():
-            from llama_cpp import Llama; from llama_cpp.llama_chat_format import Llava15ChatHandler
-            local_llm = Llama(model_path=g_path, chat_handler=Llava15ChatHandler(clip_model_path=m_path), 
-                              n_ctx=4096, n_gpu_layers=-1, verbose=False, n_batch=1024, n_threads=4, flash_attn=True)
-        
-        for img_path, t in images_subset:
-            try:
-                res = local_llm.create_chat_completion(
-                    messages=[{"role":"user","content":[{"type":"text","text":prompt},{"type":"image_url","image_url":{"url":f"data:image/jpeg;base64,{get_native_image_base64(img_path)}"}}]}],
-                    temperature=0.2, max_tokens=512
-                )
-                out_queue.put((img_path, t, res["choices"][0]["message"]["content"]))
-            except Exception as e: out_queue.put((img_path, t, f"Ошибка инференса: {e}"))
-        del local_llm; gc.collect(); torch.cuda.empty_cache()
-    except Exception as e:
-        for img_path, t in images_subset: out_queue.put((img_path, t, f"Ошибка воркера: {e}"))
 
 def format_seconds(s):
     h = int(s // 3600); m = int((s % 3600) // 60); sec = int(s % 60)
@@ -126,13 +89,16 @@ def get_image_base64(image_path):
     with open(image_path, "rb") as image_file: return base64.b64encode(image_file.read()).decode("utf-8")
 
 def describe_image_with_lmstudio(image_path, llm_settings=None, existing_llm=None):
-    prompt = "Проанализируй это изображение (кадр из видео или слайд презентации) и составь его подробное описание на русском языке для системы поиска. ТЕКСТ, ГРАФИКА, ВИЗУАЛ, СМЫСЛ."
+    prompt = "Опиши ТОЛЬКО основное содержимое экрана (слайд, доску, рисунки, схемы, формулы, рукописный текст или код). ПОЛНОСТЬЮ ИГНОРИРУЙ интерфейс браузера, видеозвонка, чат, панель задач Windows и спикеров. Напиши кратко суть того, что написано или нарисовано на самой презентации или доске, на русском языке."
     if llm_settings and llm_settings.get("use_gguf_direct") and existing_llm:
         try:
-            res = existing_llm.create_chat_completion(
-                messages=[{"role":"user","content":[{"type":"text","text":prompt},{"type":"image_url","image_url":{"url":f"data:image/jpeg;base64,{get_image_base64(image_path)}"}}]}],
-                temperature=0.2, max_tokens=512
-            )
+            v_temp = float(llm_settings.get("vision_temperature") or 0.2)
+            v_max = int(llm_settings.get("vision_max_tokens") or 512)
+            with suppress_stdout_stderr():
+                res = existing_llm.create_chat_completion(
+                    messages=[{"role":"user","content":[{"type":"text","text":prompt},{"type":"image_url","image_url":{"url":f"data:image/jpeg;base64,{get_image_base64(image_path)}"}}]}],
+                    temperature=v_temp, max_tokens=v_max
+                )
             return res["choices"][0]["message"]["content"]
         except Exception as e: return f"Ошибка GGUF: {e}"
     
@@ -262,50 +228,38 @@ def process_audio_video(file_path, images_dir, is_video=False, progress_cb=None,
             # ПРИНУДИТЕЛЬНАЯ ОЧИСТКА GPU ПЕРЕД ИИ
             cleanup_gpu()
         
-        prompt = "Проанализируй это изображение (кадр из видео или слайд презентации) и составь его подробное описание на русском языке для системы поиска. ТЕКСТ, ГРАФИКА, ВИЗУАЛ, СМЫСЛ."
+        # Убран неиспользуемый промпт, он задается внутри describe_image_with_lmstudio
         
-        if llm_settings and llm_settings.get("use_gguf_direct") and n > 5:
-            import multiprocessing as mp
-            ctx = mp.get_context('spawn')
-            num_workers = min(3, n) # 3 воркера - доказанный идеал для скорости/качества
-            chunks = [frame_list[i::num_workers] for i in range(num_workers)]
-            queue = ctx.Queue()
-            processes = []
-            
-            for i in range(num_workers):
-                p = ctx.Process(target=vision_worker, args=(chunks[i], llm_settings, prompt, queue))
-                p.start(); processes.append(p)
-            
-            done = 0
-            while done < n:
-                try:
-                    img_path, t, desc = queue.get(timeout=600)
-                    nodes.append(TextNode(text=f"Кадр {file_name} [{format_seconds(t)}]: {desc}", metadata={"file_name":file_name, "image_path":img_path, "time":t}))
-                    frame_data.append({"time":t, "image_path":img_path, "description":desc})
-                    done += 1; prog(65 + int(done/n*22), f"Описание: {done}/{n} (Золотой Стандарт ИИ)")
-                except: break
-            
-            for p in processes: p.join()
-        else:
-            # Обычный режим (мало кадров)
-            shared_llm = None
-            if llm_settings and llm_settings.get("use_gguf_direct"):
-                try:
-                    from llama_cpp import Llama; from llama_cpp.llama_chat_format import Llava15ChatHandler
-                    g_path = config.resolve_model_path(llm_settings["gguf_model_path"])
-                    m_path = config.resolve_model_path(llm_settings["gguf_mmproj_path"])
-                    shared_llm = Llama(model_path=g_path, chat_handler=Llava15ChatHandler(clip_model_path=m_path), 
-                                       n_ctx=8192, n_gpu_layers=-1, verbose=False, n_batch=2048, n_threads=8, flash_attn=True)
-                except: pass
+        shared_llm = None
+        if llm_settings and llm_settings.get("use_gguf_direct"):
+            try:
+                from llama_cpp import Llama; from llama_cpp.llama_chat_format import Llava15ChatHandler
+                v_model = llm_settings.get("vision_model_path") or llm_settings.get("gguf_model_path")
+                v_mmproj = llm_settings.get("vision_mmproj_path") or llm_settings.get("gguf_mmproj_path")
+                g_path = config.resolve_model_path(v_model)
+                m_path = config.resolve_model_path(v_mmproj)
+                v_ctx = int(llm_settings.get("vision_ctx_size") or 8192)
+                v_gl = int(llm_settings.get("vision_gpu_layers") or -1)
+                v_th = int(llm_settings.get("vision_threads") or 8)
+                v_b = int(llm_settings.get("vision_batch_size") or 2048)
+                v_fa = llm_settings.get("vision_flash_attn") == "true"
+                with suppress_stdout_stderr():
+                    shared_llm = Llama(model_path=g_path, chat_handler=Llava15ChatHandler(clip_model_path=m_path, verbose=False), 
+                                       n_ctx=v_ctx, n_gpu_layers=v_gl, verbose=False, n_batch=v_b, n_threads=v_th, flash_attn=v_fa)
+            except: pass
 
-            done = 0
-            with ThreadPoolExecutor(max_workers=(1 if shared_llm else 5)) as exe:
-                futs = {exe.submit(describe_image_with_lmstudio, path, llm_settings, shared_llm): (path, t) for path, t in frame_list}
-                for fut in as_completed(futs):
-                    path, t = futs[fut]; desc = fut.result()
-                    nodes.append(TextNode(text=f"Кадр {file_name} [{format_seconds(t)}]: {desc}", metadata={"file_name":file_name, "image_path":path, "time":t}))
-                    frame_data.append({"time":t, "image_path":path, "description":desc})
-                    done += 1; prog(65 + int(done/n*22) if n else 87, f"Описание: {done}/{n}")
+        done = 0
+        for path, t in frame_list:
+            desc = describe_image_with_lmstudio(path, llm_settings, shared_llm)
+            nodes.append(TextNode(text=f"Кадр {file_name} [{format_seconds(t)}]: {desc}", metadata={"file_name":file_name, "image_path":path, "time":t}))
+            frame_data.append({"time":t, "image_path":path, "description":desc})
+            done += 1; prog(65 + int(done/n*22) if n else 87, f"Описание: {done}/{n}")
+            
+        if shared_llm:
+            del shared_llm
+            gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
 
     metadata_json = {"file_name": file_name, "is_video": is_video, "transcript": transcript_data, "frames": frame_data}
     with open(os.path.join(os.path.dirname(file_path), f"{file_name}.json"), "w", encoding="utf-8") as f:
