@@ -127,7 +127,7 @@ def describe_image_with_lmstudio(image_path, llm_settings=None, existing_llm=Non
 def save_high_res_frame(video_path, time_sec, output_path):
     try:
         from imageio_ffmpeg import get_ffmpeg_exe
-        cmd = [get_ffmpeg_exe(), "-y", "-hwaccel", "cuda", "-ss", str(time_sec), "-i", video_path, "-vframes", "1", "-vf", "scale=-2:720", "-q:v", "2", output_path]
+        cmd = [get_ffmpeg_exe(), "-y", "-hwaccel", "cuda", "-ss", str(time_sec), "-i", video_path, "-vframes", "1", "-vf", "scale=-2:448", "-q:v", "4", output_path]
         import subprocess
         subprocess.run(cmd, capture_output=True)
     except: pass
@@ -263,6 +263,7 @@ def process_audio_video(file_path, images_dir, is_video=False, progress_cb=None,
                         chat_handler=Llava15ChatHandler(clip_model_path=m_path, verbose=False), 
                         n_ctx=v_ctx, n_gpu_layers=v_gl, verbose=False, n_batch=v_b, n_threads=v_th, 
                         flash_attn=v_fa,
+                        type_k=8, type_v=8,
                         n_parallel=v_conc # Поддержка параллельных запросов
                     )
             except: pass

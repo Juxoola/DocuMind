@@ -74,6 +74,8 @@ def get_gguf_llm(
         "n_threads": n_threads if n_threads is not None else config.GGUF_THREADS,
         "n_batch": n_batch if n_batch is not None else 2048,
         "flash_attn": flash_attn,
+        "type_k": 8, # GGML_TYPE_Q8_0 (сжатие кэша до 8 бит)
+        "type_v": 8, # GGML_TYPE_Q8_0
     }
     
     # Добавляем mmproj если указан
