@@ -114,6 +114,7 @@ def describe_image_with_lmstudio(image_path, llm_settings=None, existing_llm=Non
             return _clean_think_tags(ans)
         except Exception as e: return f"Ошибка GGUF: {e}"
     
+
     api_url = (llm_settings.get("llm_url") if llm_settings else None) or config.LM_STUDIO_URL
     api_key = (llm_settings.get("llm_api_key") if llm_settings else None) or "lm-studio"
     model_name = (llm_settings.get("llm_model") if llm_settings else None) or "gpt-4o"
@@ -127,7 +128,7 @@ def describe_image_with_lmstudio(image_path, llm_settings=None, existing_llm=Non
 def save_high_res_frame(video_path, time_sec, output_path):
     try:
         from imageio_ffmpeg import get_ffmpeg_exe
-        cmd = [get_ffmpeg_exe(), "-y", "-hwaccel", "cuda", "-ss", str(time_sec), "-i", video_path, "-vframes", "1", "-vf", "scale=-2:448", "-q:v", "4", output_path]
+        cmd = [get_ffmpeg_exe(), "-y", "-hwaccel", "cuda", "-ss", str(time_sec), "-i", video_path, "-vframes", "1", "-vf", "scale=-2:720", "-q:v", "4", output_path]
         import subprocess
         subprocess.run(cmd, capture_output=True)
     except: pass
@@ -162,7 +163,7 @@ def process_audio_video(file_path, images_dir, is_video=False, progress_cb=None,
         for i, seg in enumerate(transcript_data):
             if not chunk_text: chunk_start = seg["start"]
             chunk_text += f"[{seg['start']:.1f}s] {seg['text']} "
-            if (seg["end"] - chunk_start > 30) or (i == len(transcript_data) - 1):
+            if (seg["end"] - chunk_start > 60) or (i == len(transcript_data) - 1):
                 nodes.append(TextNode(text=f"Транскрипт {file_name}:\n{chunk_text.strip()}", metadata={"file_name":file_name, "start":chunk_start}))
                 chunk_text = ""
     prog(60, "Транскрибация завершена")
@@ -267,6 +268,7 @@ def process_audio_video(file_path, images_dir, is_video=False, progress_cb=None,
                         n_parallel=v_conc # Поддержка параллельных запросов
                     )
             except: pass
+            
 
         from concurrent.futures import ThreadPoolExecutor
         concurrency = int(llm_settings.get("vision_concurrency") or 1) if llm_settings else 1
@@ -472,4 +474,4 @@ def ingest_file(file_path, notebook_id, progress_cb=None, llm_settings=None):
         with open(file_path, 'r', encoding='utf-8') as f: text = f.read()
     except:
         with open(file_path, 'r', encoding='cp1251') as f: text = f.read()
-    return SentenceSplitter(chunk_size=1024).get_nodes_from_documents([TextNode(text=text, metadata={"file_name":os.path.basename(file_path)})])
+    return SentenceSplitter(chunk_size=512).get_nodes_from_documents([TextNode(text=text, metadata={"file_name":os.path.basename(file_path)})])

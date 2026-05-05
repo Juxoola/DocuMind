@@ -26,7 +26,13 @@ LM_STUDIO_URL = os.getenv("LM_STUDIO_URL", "http://localhost:1234/v1")
 EMBEDDING_MODEL_NAME = os.getenv("EMBEDDING_MODEL_NAME", "Qwen/Qwen3-Embedding-0.6B")
 RERANKER_MODEL_NAME = os.getenv("RERANKER_MODEL_NAME", "Qwen/Qwen3-Reranker-0.6B")
 # Квантование: 'fp16', 'int8' или '4bit'
-QUANTIZATION = os.getenv("QUANTIZATION", "int8")
+QUANTIZATION = os.getenv("QUANTIZATION", "4bit")
+
+# Настройки воронки RAG
+RAG_TOP_K_PER_FILE = int(os.getenv("RAG_TOP_K_PER_FILE", 5))
+RAG_RERANK_POOL = int(os.getenv("RAG_RERANK_POOL", 30))
+RAG_FINAL_TOP_N = int(os.getenv("RAG_FINAL_TOP_N", 10))
+USE_RERANKER = os.getenv("USE_RERANKER", "true").lower() == "true"
 
 # ── Настройки локальных GGUF моделей ──
 
@@ -47,7 +53,10 @@ GGUF_CTX_SIZE = int(os.getenv("GGUF_CTX_SIZE", 4096))
 # GPU слоёв (-1 = все на GPU, 0 = только CPU)
 GGUF_GPU_LAYERS = int(os.getenv("GGUF_GPU_LAYERS", -1))
 
+# ── Сохранение настроек ──
+
 LAST_MODELS_FILE = os.path.join(BASE_DIR, "last_models.json")
+RAG_CONFIG_FILE = os.path.join(BASE_DIR, "rag_config.json")
 
 def save_last_model(gguf_path, mmproj_path):
     try:
@@ -62,6 +71,41 @@ def load_last_model():
                 return json.load(f)
     except: pass
     return {"gguf": None, "mmproj": None}
+
+def save_rag_config():
+    config_data = {
+        "embedding_model": EMBEDDING_MODEL_NAME,
+        "reranker_model": RERANKER_MODEL_NAME,
+        "quantization": QUANTIZATION,
+        "top_k_per_file": RAG_TOP_K_PER_FILE,
+        "rerank_pool": RAG_RERANK_POOL,
+        "final_top_n": RAG_FINAL_TOP_N,
+        "use_reranker": USE_RERANKER,
+        "gguf_search_dirs": GGUF_SEARCH_DIRS
+    }
+    try:
+        with open(RAG_CONFIG_FILE, "w", encoding="utf-8") as f:
+            json.dump(config_data, f, indent=2, ensure_ascii=False)
+    except: pass
+
+def load_rag_config():
+    global EMBEDDING_MODEL_NAME, RERANKER_MODEL_NAME, QUANTIZATION, RAG_TOP_K_PER_FILE, RAG_RERANK_POOL, RAG_FINAL_TOP_N, USE_RERANKER, GGUF_SEARCH_DIRS
+    try:
+        if os.path.exists(RAG_CONFIG_FILE):
+            with open(RAG_CONFIG_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                EMBEDDING_MODEL_NAME = data.get("embedding_model", EMBEDDING_MODEL_NAME)
+                RERANKER_MODEL_NAME = data.get("reranker_model", RERANKER_MODEL_NAME)
+                QUANTIZATION = data.get("quantization", QUANTIZATION)
+                RAG_TOP_K_PER_FILE = data.get("top_k_per_file", RAG_TOP_K_PER_FILE)
+                RAG_RERANK_POOL = data.get("rerank_pool", RAG_RERANK_POOL)
+                RAG_FINAL_TOP_N = data.get("final_top_n", RAG_FINAL_TOP_N)
+                USE_RERANKER = data.get("use_reranker", USE_RERANKER)
+                GGUF_SEARCH_DIRS = data.get("gguf_search_dirs", GGUF_SEARCH_DIRS)
+    except: pass
+
+# Загружаем настройки при старте
+load_rag_config()
 
 def resolve_model_path(path_or_filename: str) -> str:
     """

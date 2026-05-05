@@ -363,7 +363,45 @@ class UpdateModelDirsRequest(BaseModel):
 async def update_model_dirs(req: UpdateModelDirsRequest):
     """Обновляет директории поиска моделей в реальном времени."""
     config.GGUF_SEARCH_DIRS = req.dirs
+    config.save_rag_config() # Сохраняем на диск
     return {"status": "ok", "new_dirs": config.GGUF_SEARCH_DIRS}
+
+# ── RAG Configuration ──
+
+@app.get("/api/rag-config")
+async def get_rag_config():
+    return {
+        "embedding_model": config.EMBEDDING_MODEL_NAME,
+        "reranker_model": config.RERANKER_MODEL_NAME,
+        "quantization": config.QUANTIZATION,
+        "top_k_per_file": config.RAG_TOP_K_PER_FILE,
+        "rerank_pool": config.RAG_RERANK_POOL,
+        "final_top_n": config.RAG_FINAL_TOP_N,
+        "use_reranker": config.USE_RERANKER
+    }
+
+class UpdateRagConfigRequest(BaseModel):
+    embedding_model: str
+    reranker_model: str
+    quantization: str
+    top_k_per_file: int
+    rerank_pool: int
+    final_top_n: int
+    use_reranker: bool
+
+@app.post("/api/update-rag-config")
+async def update_rag_config(req: UpdateRagConfigRequest):
+    from src.rag_pipeline import unload_rag_models
+    config.EMBEDDING_MODEL_NAME = req.embedding_model
+    config.RERANKER_MODEL_NAME = req.reranker_model
+    config.QUANTIZATION = req.quantization
+    config.RAG_TOP_K_PER_FILE = req.top_k_per_file
+    config.RAG_RERANK_POOL = req.rerank_pool
+    config.RAG_FINAL_TOP_N = req.final_top_n
+    config.USE_RERANKER = req.use_reranker
+    config.save_rag_config() # Сохраняем на диск
+    unload_rag_models() # Выгружаем старые модели, чтобы новые загрузились при следующем запросе
+    return {"status": "ok"}
 
 # ── Chat ──
 
@@ -376,6 +414,15 @@ class ChatRequest(BaseModel):
     llm_url: Optional[str] = None
     llm_api_key: Optional[str] = "lm-studio"
     llm_model: Optional[str] = "gpt-4o"
+    image_base64: Optional[str] = None # Новое поле для фото
+    
+    # Расширенные параметры
+    gguf_kv_quant: Optional[int] = 2 # 2=Q4_K, 8=Q8_0
+    presence_penalty: Optional[float] = 0.0
+    frequency_penalty: Optional[float] = 0.0
+    repeat_penalty: Optional[float] = 1.1
+    top_p: Optional[float] = 0.9
+    min_p: Optional[float] = 0.05
     # GGUF параметры
     use_gguf: Optional[str] = None
     gguf_model_path: Optional[str] = None
@@ -408,11 +455,108 @@ async def chat(request: ChatRequest):
                 n_batch=request.gguf_batch_size,
                 flash_attn=True if request.gguf_flash_attn == "true" else False,
                 max_tokens=request.max_tokens,
+                type_k=request.gguf_kv_quant,
+                type_v=request.gguf_kv_quant
             )
             config.save_last_model(request.gguf_model_path, request.gguf_mmproj_path)
+            
+            # RAG: Получаем релевантные чанки
+            from src.rag_pipeline import retrieve_nodes, build_file_context
+            
+            query_for_rag = request.query
+            if not query_for_rag.strip() and request.image_base64:
+                print("DEBUG: Текст запроса пуст, извлекаем задание из изображения...")
+                vision_messages = [
+                    {"role": "user", "content": [
+                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{request.image_base64}"}},
+                        {"type": "text", "text": "Твоя задача — выполнить точный OCR (распознавание текста) с изображения. Перепиши ВЕСЬ текст вопроса и вариантов ответа, который видишь на картинке. Не добавляй никаких пояснений, только сам текст задания."}
+                    ]}
+                ]
+                try:
+                    res = active_llm.create_chat_completion(messages=vision_messages, stream=False, max_tokens=150)
+                    extracted_query = res["choices"][0]["message"]["content"].strip()
+                    
+                    # Очистка от "болтливости" модели (если она начала объяснять, что делает)
+                    if "The user wants" in extracted_query or "Image Analysis" in extracted_query:
+                        import re
+                        # Ищем последнюю строку в кавычках или после двоеточия
+                        lines = [l.strip() for l in extracted_query.split("\n") if l.strip()]
+                        for line in reversed(lines):
+                            if ":" in line and not line.startswith("http"):
+                                extracted_query = line.split(":", 1)[1].strip().strip('"')
+                                break
+                            elif '"' in line:
+                                matches = re.findall(r'"([^"]*)"', line)
+                                if matches:
+                                    extracted_query = matches[-1]
+                                    break
+                        else:
+                            # Если ничего не нашли, берем последнюю осмысленную строку
+                            extracted_query = lines[-1].strip().strip('"')
+
+                    print(f"DEBUG: Извлеченное задание: {extracted_query}")
+                    query_for_rag = extracted_query
+                except Exception as ve:
+                    print(f"DEBUG: Ошибка при извлечении текста из фото: {ve}")
+            
+            # Если запрос все еще пуст, используем дефолтный промпт для RAG
+            if not query_for_rag or not query_for_rag.strip():
+                query_for_rag = "Опиши содержимое изображения и найди связанные инструкции в документах"
+            
+            nodes = retrieve_nodes(query_for_rag, request.notebook_id, request.allowed_files)
+            sources, context = build_file_context(nodes, request.notebook_id)
+            
+            # Формируем полный промпт с контекстом
+            full_prompt = f"Ниже приведен контекст из документов, используй его для ответа.\n\nКОНТЕКСТ:\n{context}\n\nВОПРОС: {query_for_rag if query_for_rag else 'Ответь на вопрос по изображению'}"
+            print(f"DEBUG: RAG нашел {len(nodes)} фрагментов. Контекст подготовлен.")
+            
+            # Подготовка сообщений для мультимодальности
+            messages = [{"role": "system", "content": "You are a helpful AI assistant."}]
+            
+            user_content = [{"type": "text", "text": full_prompt}]
+            if request.image_base64:
+                print(f"DEBUG: К запросу прикреплено изображение (Base64 length: {len(request.image_base64)})")
+                user_content.append({
+                    "type": "image_url",
+                    "image_url": {"url": f"data:image/jpeg;base64,{request.image_base64}"}
+                })
+            
+            messages.append({"role": "user", "content": user_content})
+
+            def generate():
+                try:
+                    print("DEBUG: Запуск генерации...")
+                    # Отправляем источники фронтенду первым делом
+                    yield f"data: {json.dumps({'type': 'sources', 'sources': sources}, ensure_ascii=False)}\n\n"
+
+                    first_token = True
+                    for chunk in active_llm.create_chat_completion(
+                        messages=messages,
+                        stream=True,
+                        temperature=request.gguf_temperature,
+                        # presence_penalty=request.presence_penalty, # Убрано из-за несовместимости версий
+                        # frequency_penalty=request.frequency_penalty,
+                        repeat_penalty=request.repeat_penalty,
+                        top_p=request.top_p,
+                        min_p=request.min_p,
+                    ):
+                        if "choices" in chunk and len(chunk["choices"]) > 0:
+                            delta = chunk["choices"][0].get("delta", {})
+                            if "content" in delta:
+                                if first_token:
+                                    print("DEBUG: Получен первый токен от модели!")
+                                    first_token = False
+                                yield f"data: {json.dumps({'type': 'chunk', 'text': delta['content']}, ensure_ascii=False)}\n\n"
+                    yield "data: [DONE]\n\n"
+                    print("DEBUG: Генерация успешно завершена.")
+                except Exception as e:
+                    yield f"data: {json.dumps({'type': 'error', 'text': str(e)}, ensure_ascii=False)}\n\n"
+                    yield "data: [DONE]\n\n"
+            
+            return StreamingResponse(generate(), media_type="text/event-stream")
         except Exception as e:
+            error_msg = str(e)
             async def error_gen():
-                error_msg = f"Ошибка загрузки GGUF модели: {str(e)}"
                 yield f"data: {json.dumps({'type': 'error', 'text': error_msg}, ensure_ascii=False)}\n\n"
                 yield "data: [DONE]\n\n"
             return StreamingResponse(error_gen(), media_type="text/event-stream")

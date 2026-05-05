@@ -56,7 +56,7 @@ def preload_all_models():
                     model_path=g_path,
                     chat_format="chatml",
                     clip_model_path=m_path,
-                    n_ctx=4096, n_gpu_layers=-1, verbose=False, type_k=2, type_v=2
+                    n_ctx=2048, n_gpu_layers=-1, verbose=False, type_k=2, type_v=2
                 )
             
     print("[RAG] Все модели загружены.")
@@ -69,16 +69,18 @@ def init_settings(max_tokens=1024):
         print(f"Инициализация эмбеддингов: {device.upper()} (Quant: {config.QUANTIZATION})")
         model_kwargs = {"trust_remote_code": True}
         
+        model_kwargs["attn_implementation"] = "sdpa"
+        
         if config.QUANTIZATION == "4bit":
             model_kwargs["quantization_config"] = BitsAndBytesConfig(
                 load_in_4bit=True, 
-                bnb_4bit_compute_dtype=torch.float16,
+                bnb_4bit_compute_dtype=torch.bfloat16,
                 bnb_4bit_quant_type="nf4"
             )
         elif config.QUANTIZATION == "int8":
             model_kwargs["quantization_config"] = BitsAndBytesConfig(load_in_8bit=True)
         else:
-            model_kwargs["torch_dtype"] = torch.float16
+            model_kwargs["torch_dtype"] = torch.bfloat16
 
         _model_cache["embed_model"] = HuggingFaceEmbedding(
             model_name=config.EMBEDDING_MODEL_NAME,
@@ -143,30 +145,37 @@ def retrieve_nodes(query: str, notebook_id: str, allowed_files=None, max_tokens=
         file_filter = MetadataFilters(
             filters=[MetadataFilter(key="file_name", value=fname, operator=FilterOperator.EQ)]
         )
-        # Расширяем воронку поиска: берем топ-20 вместо 5, чтобы реранкер мог выбрать из большего числа вариантов
-        retriever = index.as_retriever(similarity_top_k=20, filters=file_filter)
+        # Оптимизация: берем топ-K на файл (баланс точности и памяти)
+        retriever = index.as_retriever(similarity_top_k=config.RAG_TOP_K_PER_FILE, filters=file_filter)
         try:
             nodes = retriever.retrieve(query)
             all_nodes.extend(nodes)
         except Exception as e:
             print(f"Ошибка при поиске в {fname}: {e}")
 
-    # Переранжирование (Reranking) для максимальной точности
-    if all_nodes:
-        print(f"  [RAG] Начальное количество чанков: {len(all_nodes)}")
+    # Переранжирование (Reranking)
+    if all_nodes and config.USE_RERANKER:
+        # Ограничиваем общее число чанков для реранкера, чтобы избежать OOM
+        if len(all_nodes) > config.RAG_RERANK_POOL:
+            all_nodes.sort(key=lambda x: x.score if hasattr(x, 'score') and x.score else 0, reverse=True)
+            all_nodes = all_nodes[:config.RAG_RERANK_POOL]
+            
+        print(f"  [RAG] Чанков для реранкинга: {len(all_nodes)}")
         
         if "reranker" not in _model_cache:
             print(f"  [RAG] Загрузка реранкера: {config.RERANKER_MODEL_NAME} ({config.QUANTIZATION})")
             rerank_kwargs = {"trust_remote_code": True}
+            rerank_kwargs["attn_implementation"] = "sdpa"
             if config.QUANTIZATION == "4bit":
                 rerank_kwargs["quantization_config"] = BitsAndBytesConfig(
                     load_in_4bit=True, 
-                    bnb_4bit_compute_dtype=torch.float16
+                    bnb_4bit_compute_dtype=torch.bfloat16,
+                    bnb_4bit_quant_type="nf4"
                 )
             elif config.QUANTIZATION == "int8":
                 rerank_kwargs["quantization_config"] = BitsAndBytesConfig(load_in_8bit=True)
             else:
-                rerank_kwargs["torch_dtype"] = torch.float16
+                rerank_kwargs["torch_dtype"] = torch.bfloat16
 
             from sentence_transformers import CrossEncoder
             _model_cache["reranker"] = CrossEncoder(config.RERANKER_MODEL_NAME, device=device, model_kwargs=rerank_kwargs)
@@ -182,7 +191,7 @@ def retrieve_nodes(query: str, notebook_id: str, allowed_files=None, max_tokens=
             node.score = float(score)
             
         all_nodes.sort(key=lambda x: x.score, reverse=True)
-        all_nodes = all_nodes[:15]
+        all_nodes = all_nodes[:config.RAG_FINAL_TOP_N] # Финальный топ-N для контекста
         print(f"  [RAG] После переранжирования: {len(all_nodes)}")
 
     return all_nodes

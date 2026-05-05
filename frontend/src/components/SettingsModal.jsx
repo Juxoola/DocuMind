@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Save, Globe, Key, Cpu, HardDrive, Server, RefreshCw, FolderOpen, ChevronDown, ChevronRight } from 'lucide-react';
+import { X, Save, Globe, Key, Cpu, HardDrive, Server, RefreshCw, FolderOpen, ChevronDown, ChevronRight, Zap, Filter, MessageSquare, Database, Search } from 'lucide-react';
 import { cn } from '../lib/utils';
 
 export default function SettingsModal({ isOpen, onClose, settings, onSave }) {
@@ -12,7 +12,23 @@ export default function SettingsModal({ isOpen, onClose, settings, onSave }) {
     const [ggufLoading, setGgufLoading] = useState(false);
     const [ggufLoadedModels, setGgufLoadedModels] = useState([]);
     const [expandedDirs, setExpandedDirs] = useState({});
-    const [ggufConfig, setGgufConfig] = useState({});
+    const [ggufConfig, setGgufConfig] = useState({
+        gguf_kv_quant: 2,
+        presence_penalty: 0.0,
+        frequency_penalty: 0.0,
+        repeat_penalty: 1.1,
+        top_p: 0.9,
+        min_p: 0.05
+    });
+    const [ragConfig, setRagConfig] = useState({
+        embedding_model: '',
+        reranker_model: '',
+        quantization: '4bit',
+        top_k_per_file: 5,
+        rerank_pool: 30,
+        final_top_n: 10,
+        use_reranker: true
+    });
 
     useEffect(() => {
         if (isOpen) {
@@ -20,8 +36,31 @@ export default function SettingsModal({ isOpen, onClose, settings, onSave }) {
             fetchGgufModels();
             fetchGgufLoadedModels();
             fetchGgufConfig();
+            fetchRagConfig();
         }
     }, [isOpen, settings]);
+
+    const fetchRagConfig = async () => {
+        try {
+            const res = await fetch('/api/rag-config');
+            const data = await res.json();
+            setRagConfig(data);
+        } catch (err) {
+            console.error('Ошибка загрузки RAG конфига:', err);
+        }
+    };
+
+    const updateRagConfig = async () => {
+        try {
+            await fetch('/api/update-rag-config', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(ragConfig)
+            });
+        } catch (err) {
+            console.error('Ошибка обновления RAG конфига:', err);
+        }
+    };
 
     const fetchGgufModels = async () => {
         setGgufLoading(true);
@@ -154,6 +193,17 @@ export default function SettingsModal({ isOpen, onClose, settings, onSave }) {
                         >
                             <HardDrive size={14} /> Локальные GGUF
                         </button>
+                        <button
+                            onClick={() => setActiveTab('rag')}
+                            className={cn(
+                                "flex-1 px-4 py-3 text-sm font-bold transition-all flex items-center justify-center gap-2",
+                                activeTab === 'rag'
+                                    ? "text-primary border-b-2 border-primary bg-primary/5"
+                                    : "text-muted-foreground hover:text-foreground"
+                            )}
+                        >
+                            <RefreshCw size={14} /> Поиск и RAG
+                        </button>
                     </div>
 
                     {/* Content */}
@@ -276,6 +326,44 @@ export default function SettingsModal({ isOpen, onClose, settings, onSave }) {
                                                     </select>
                                                 </label>
                                             </div>
+
+                                            {/* Тонкие настройки для Основной модели */}
+                                            <div className="mt-4 pt-4 border-t border-border/20 space-y-4">
+                                                <p className="text-[9px] font-bold text-muted-foreground uppercase tracking-widest flex items-center gap-1.5">
+                                                    <Cpu size={10} /> Тонкие настройки генерации
+                                                </p>
+                                                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                                                    <label className="flex flex-col gap-1 text-[10px] text-muted-foreground" title="Сжатие памяти кэша. Экономит VRAM (видеопамять), позволяя использовать более длинный контекст.">
+                                                        KV Cache Quant ℹ️
+                                                        <select 
+                                                            value={localSettings.gguf_kv_quant || 2}
+                                                            onChange={(e) => setLocalSettings({...localSettings, gguf_kv_quant: parseInt(e.target.value)})}
+                                                            className="bg-background border border-border rounded px-2 py-1 text-foreground"
+                                                        >
+                                                            <option value={1}>F16</option>
+                                                            <option value={8}>Q8_0</option>
+                                                            <option value={12}>Q5_K</option>
+                                                            <option value={2}>Q4_K</option>
+                                                        </select>
+                                                    </label>
+                                                    <label className="flex flex-col gap-1 text-[10px] text-muted-foreground" title="Штраф за повторения. Помогает модели не зацикливаться на одних и тех же словах.">
+                                                        Repeat Pen. ℹ️
+                                                        <input type="number" step="0.1" value={localSettings.repeat_penalty || 1.1} onChange={e => setLocalSettings({...localSettings, repeat_penalty: parseFloat(e.target.value)})} className="bg-background border border-border rounded px-2 py-1 text-foreground" />
+                                                    </label>
+                                                    <label className="flex flex-col gap-1 text-[10px] text-muted-foreground" title="Штраф за упоминание уже использованных тем. Делает ответы более разнообразными.">
+                                                        Presence Pen. ℹ️
+                                                        <input type="number" step="0.1" value={localSettings.presence_penalty || 0.0} onChange={e => setLocalSettings({...localSettings, presence_penalty: parseFloat(e.target.value)})} className="bg-background border border-border rounded px-2 py-1 text-foreground" />
+                                                    </label>
+                                                    <label className="flex flex-col gap-1 text-[10px] text-muted-foreground" title="Вероятностная фильтрация (Nucleus sampling). 0.9 - стандарт.">
+                                                        Top-P ℹ️
+                                                        <input type="number" step="0.05" value={localSettings.top_p || 0.9} onChange={e => setLocalSettings({...localSettings, top_p: parseFloat(e.target.value)})} className="bg-background border border-border rounded px-2 py-1 text-foreground" />
+                                                    </label>
+                                                    <label className="flex flex-col gap-1 text-[10px] text-muted-foreground" title="Минимальный порог вероятности. Отсеивает маловероятные 'мусорные' токены.">
+                                                        Min-P ℹ️
+                                                        <input type="number" step="0.01" value={localSettings.min_p || 0.05} onChange={e => setLocalSettings({...localSettings, min_p: parseFloat(e.target.value)})} className="bg-background border border-border rounded px-2 py-1 text-foreground" />
+                                                    </label>
+                                                </div>
+                                            </div>
                                         </div>
                                         )}
                                         {localSettings.vision_model_path && (
@@ -330,6 +418,44 @@ export default function SettingsModal({ isOpen, onClose, settings, onSave }) {
                                                     Max Tokens ℹ️
                                                     <input type="number" step="64" value={localSettings.vision_max_tokens || 512} onChange={e => setLocalSettings({...localSettings, vision_max_tokens: parseInt(e.target.value)})} className="bg-background border border-border rounded px-2 py-1 text-foreground" />
                                                 </label>
+                                            </div>
+
+                                            {/* Добавленные тонкие настройки внутри блока модели */}
+                                            <div className="mt-4 pt-4 border-t border-border/20 space-y-4">
+                                                <p className="text-[9px] font-bold text-muted-foreground uppercase tracking-widest flex items-center gap-1.5">
+                                                    <Cpu size={10} /> Тонкие настройки генерации
+                                                </p>
+                                                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                                                    <label className="flex flex-col gap-1 text-[10px] text-muted-foreground" title="Сжатие памяти кэша для Vision модели. Помогает при анализе длинных видео.">
+                                                        KV Cache Quant ℹ️
+                                                        <select 
+                                                            value={localSettings.gguf_kv_quant || 2}
+                                                            onChange={(e) => setLocalSettings({...localSettings, gguf_kv_quant: parseInt(e.target.value)})}
+                                                            className="bg-background border border-border rounded px-2 py-1 text-foreground"
+                                                        >
+                                                            <option value={1}>F16</option>
+                                                            <option value={8}>Q8_0</option>
+                                                            <option value={12}>Q5_K</option>
+                                                            <option value={2}>Q4_K</option>
+                                                        </select>
+                                                    </label>
+                                                    <label className="flex flex-col gap-1 text-[10px] text-muted-foreground" title="Штраф за повторения для Vision модели.">
+                                                        Repeat Pen. ℹ️
+                                                        <input type="number" step="0.1" value={localSettings.repeat_penalty || 1.1} onChange={e => setLocalSettings({...localSettings, repeat_penalty: parseFloat(e.target.value)})} className="bg-background border border-border rounded px-2 py-1 text-foreground" />
+                                                    </label>
+                                                    <label className="flex flex-col gap-1 text-[10px] text-muted-foreground" title="Штраф за упоминание тем для Vision модели.">
+                                                        Presence Pen. ℹ️
+                                                        <input type="number" step="0.1" value={localSettings.presence_penalty || 0.0} onChange={e => setLocalSettings({...localSettings, presence_penalty: parseFloat(e.target.value)})} className="bg-background border border-border rounded px-2 py-1 text-foreground" />
+                                                    </label>
+                                                    <label className="flex flex-col gap-1 text-[10px] text-muted-foreground" title="Вероятностная фильтрация для Vision модели.">
+                                                        Top-P ℹ️
+                                                        <input type="number" step="0.05" value={localSettings.top_p || 0.9} onChange={e => setLocalSettings({...localSettings, top_p: parseFloat(e.target.value)})} className="bg-background border border-border rounded px-2 py-1 text-foreground" />
+                                                    </label>
+                                                    <label className="flex flex-col gap-1 text-[10px] text-muted-foreground" title="Минимальный порог вероятности для Vision модели.">
+                                                        Min-P ℹ️
+                                                        <input type="number" step="0.01" value={localSettings.min_p || 0.05} onChange={e => setLocalSettings({...localSettings, min_p: parseFloat(e.target.value)})} className="bg-background border border-border rounded px-2 py-1 text-foreground" />
+                                                    </label>
+                                                </div>
                                             </div>
                                         </div>
                                         )}
@@ -465,6 +591,123 @@ export default function SettingsModal({ isOpen, onClose, settings, onSave }) {
                                 </div>
                             </div>
                         )}
+
+                        {/* RAG Tab */}
+                        {activeTab === 'rag' && (
+                            <div className="p-6 space-y-6">
+                                <div className="flex items-center justify-between p-4 rounded-2xl bg-muted/30 border border-border/50">
+                                    <div className="space-y-1">
+                                        <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest flex items-center gap-2">
+                                            <Zap size={12} className={ragConfig.use_reranker ? "text-amber-500" : ""} /> Использовать реранкер
+                                        </label>
+                                        <p className="text-[10px] text-muted-foreground/60">Повышает точность, но требует больше VRAM</p>
+                                    </div>
+                                    <button 
+                                        onClick={() => setRagConfig({...ragConfig, use_reranker: !ragConfig.use_reranker})}
+                                        className={cn(
+                                            "w-10 h-6 rounded-full transition-all relative",
+                                            ragConfig.use_reranker ? "bg-primary" : "bg-muted-foreground/30"
+                                        )}
+                                    >
+                                        <div className={cn(
+                                            "absolute top-1 w-4 h-4 rounded-full bg-white transition-all",
+                                            ragConfig.use_reranker ? "left-5" : "left-1"
+                                        )} />
+                                    </button>
+                                </div>
+
+                                <div className="space-y-2">
+                                    <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest flex items-center gap-2">
+                                        <Globe size={12} /> Embedding Model (HuggingFace)
+                                    </label>
+                                    <input 
+                                        type="text"
+                                        value={ragConfig.embedding_model}
+                                        onChange={(e) => setRagConfig({...ragConfig, embedding_model: e.target.value})}
+                                        className="w-full bg-muted/30 border border-border/50 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all"
+                                    />
+                                    <p className="text-[10px] text-muted-foreground/60 italic">Например: Qwen/Qwen3-Embedding-0.6B</p>
+                                </div>
+
+                                <div className="space-y-2">
+                                    <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest flex items-center gap-2">
+                                        <RefreshCw size={12} /> Reranker Model (HuggingFace)
+                                    </label>
+                                    <input 
+                                        type="text"
+                                        value={ragConfig.reranker_model}
+                                        onChange={(e) => setRagConfig({...ragConfig, reranker_model: e.target.value})}
+                                        className="w-full bg-muted/30 border border-border/50 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all"
+                                    />
+                                    <p className="text-[10px] text-muted-foreground/60 italic">Например: Qwen/Qwen3-Reranker-0.6B</p>
+                                </div>
+
+                                <div className="space-y-2">
+                                    <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest flex items-center gap-2">
+                                        <Cpu size={12} /> Quantization (BitsAndBytes)
+                                    </label>
+                                    <select 
+                                        value={ragConfig.quantization}
+                                        onChange={(e) => setRagConfig({...ragConfig, quantization: e.target.value})}
+                                        className="w-full bg-muted/30 border border-border/50 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all"
+                                    >
+                                        <option value="4bit">4-bit (NF4) - Рекомендуется</option>
+                                        <option value="int8">8-bit (INT8)</option>
+                                        <option value="fp16">Full (FP16/BF16)</option>
+                                    </select>
+                                </div>
+
+                                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                    <div className="space-y-2">
+                                        <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest flex items-center gap-2">
+                                            <Filter size={12} /> Top-K на файл
+                                        </label>
+                                        <input 
+                                            type="number"
+                                            value={ragConfig.top_k_per_file}
+                                            onChange={(e) => setRagConfig({...ragConfig, top_k_per_file: parseInt(e.target.value)})}
+                                            className="w-full bg-muted/30 border border-border/50 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all"
+                                        />
+                                    </div>
+
+                                    <div className="space-y-2">
+                                        <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest flex items-center gap-2">
+                                            <Zap size={12} /> Пул реранкера
+                                        </label>
+                                        <input 
+                                            type="number"
+                                            value={ragConfig.rerank_pool}
+                                            onChange={(e) => setRagConfig({...ragConfig, rerank_pool: parseInt(e.target.value)})}
+                                            className="w-full bg-muted/30 border border-border/50 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all"
+                                        />
+                                    </div>
+
+                                    <div className="space-y-2">
+                                        <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest flex items-center gap-2">
+                                            <MessageSquare size={12} /> Итоговый топ
+                                        </label>
+                                        <input 
+                                            type="number"
+                                            value={ragConfig.final_top_n}
+                                            onChange={(e) => setRagConfig({...ragConfig, final_top_n: parseInt(e.target.value)})}
+                                            className="w-full bg-muted/30 border border-border/50 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all"
+                                        />
+                                    </div>
+                                </div>
+
+                                <div className="p-4 rounded-2xl bg-blue-500/10 border border-blue-500/20">
+                                    <p className="text-[10px] text-blue-600 dark:text-blue-400 leading-relaxed">
+                                        <b>Воронка поиска:</b> Сначала берется по <b>{ragConfig.top_k_per_file}</b> фрагментов из каждого файла. Затем из них выбираются лучшие <b>{ragConfig.rerank_pool}</b> и отправляются реранкеру. В итоге модель получает <b>{ragConfig.final_top_n}</b> самых точных совпадений.
+                                    </p>
+                                </div>
+
+                                <div className="p-4 rounded-2xl bg-amber-500/10 border border-amber-500/20">
+                                    <p className="text-[10px] text-amber-600 dark:text-amber-400 leading-relaxed">
+                                        <b>Примечание:</b> Смена моделей RAG потребует их загрузки из интернета при первом использовании. Тип квантования влияет на потребление VRAM и точность поиска.
+                                    </p>
+                                </div>
+                            </div>
+                        )}
                     </div>
 
                     {/* Footer */}
@@ -478,6 +721,7 @@ export default function SettingsModal({ isOpen, onClose, settings, onSave }) {
                         <button 
                             onClick={() => {
                                 onSave(localSettings);
+                                if (activeTab === 'rag') updateRagConfig();
                                 onClose();
                             }}
                             className="flex-1 px-4 py-3 rounded-xl bg-primary text-white font-bold text-sm shadow-lg shadow-primary/20 hover:scale-[1.02] active:scale-95 transition-all flex items-center justify-center gap-2"
