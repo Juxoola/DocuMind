@@ -194,6 +194,45 @@
             border-left: 4px solid var(--accent) !important;
             transition: all 0.3s ease;
         }
+
+        /* ── Thinking Block ── */
+        .thinking-block {
+            width: 100%;
+            margin-bottom: 10px;
+            border-radius: 10px;
+            overflow: hidden;
+            border: 1px solid rgba(99, 102, 241, 0.25);
+            background: rgba(99, 102, 241, 0.05);
+        }
+        .thinking-header {
+            display: flex; align-items: center; gap: 8px;
+            padding: 8px 14px; cursor: pointer;
+            font-size: 0.8rem; font-weight: 600;
+            color: var(--accent2); user-select: none;
+            transition: background 0.2s;
+        }
+        .thinking-header:hover { background: rgba(99,102,241,0.1); }
+        .thinking-header svg { flex-shrink: 0; transition: transform 0.25s; }
+        .thinking-block.open .thinking-header svg { transform: rotate(90deg); }
+        .thinking-body {
+            display: none;
+            padding: 10px 16px 14px;
+            font-size: 0.82rem;
+            color: var(--muted);
+            line-height: 1.65;
+            white-space: pre-wrap;
+            border-top: 1px solid rgba(99,102,241,0.15);
+            max-height: 360px;
+            overflow-y: auto;
+        }
+        .thinking-block.open .thinking-body { display: block; }
+        .thinking-pulse {
+            display: inline-block; width: 6px; height: 6px;
+            border-radius: 50%; background: var(--accent2);
+            margin-left: 6px;
+            animation: pulse 1s ease-in-out infinite;
+        }
+        @keyframes pulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:.4;transform:scale(.7)} }
     </style>
 </head>
 <body>
@@ -535,16 +574,46 @@
             $('sendBtn').disabled = true;
             $('chatStats').style.display = 'none';
 
+            // Контейнер сообщения: thinking-block (вставим потом) + ai bubble
+            const wrapper = document.createElement('div');
+            wrapper.style.cssText = 'display:flex;flex-direction:column;gap:0;align-self:flex-start;max-width:90%;width:100%';
+            $('messages').appendChild(wrapper);
+
             const aiDiv = document.createElement('div');
             aiDiv.className = 'msg ai';
             aiDiv.innerHTML = '<div class="spin"></div>';
-            $('messages').appendChild(aiDiv);
-            $('messages').scrollTop = 1e9;
 
             let sources = [];
             let fullText = '';
 
+            // --- thinking state ---
+            let thinkBlock = null;   // DOM-элемент .thinking-block
+            let thinkBody  = null;   // DOM-элемент .thinking-body
+            let thinkBuf   = '';     // накопленный текст рассуждений
+            let thinkingActive = false;
+
+            function ensureThinkBlock() {
+                if (thinkBlock) return;
+                thinkBlock = document.createElement('div');
+                thinkBlock.className = 'thinking-block open';
+                thinkBlock.innerHTML = `
+                    <div class="thinking-header" onclick="this.parentElement.classList.toggle('open')">
+                        <svg width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg>
+                        <span>Рассуждения модели</span>
+                        <span class="thinking-pulse" id="thinkPulse"></span>
+                    </div>
+                    <div class="thinking-body"></div>
+                `;
+                thinkBody = thinkBlock.querySelector('.thinking-body');
+                wrapper.appendChild(thinkBlock);
+            }
+
+            wrapper.appendChild(aiDiv);
+            $('messages').scrollTop = 1e9;
+
             try {
+                // Собираем параметры из настроек (если они есть в window)
+                const chatParams = window._chatParams || {};
                 const resp = await fetch('/api/chat', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
@@ -552,7 +621,8 @@
                         query: q,
                         allowed_files: checked,
                         max_tokens: currentMaxTokens,
-                        notebook_id: currentNotebook
+                        notebook_id: currentNotebook,
+                        ...chatParams
                     })
                 });
 
@@ -574,7 +644,28 @@
                             const ev = JSON.parse(payload);
                             if (ev.type === 'sources') {
                                 sources = ev.sources;
+                            } else if (ev.type === 'thinking_start') {
+                                // Начало рассуждений — создаём блок, убираем спиннер
+                                thinkingActive = true;
+                                ensureThinkBlock();
+                                aiDiv.innerHTML = '';
+                            } else if (ev.type === 'thinking_chunk') {
+                                // Стримим текст рассуждений
+                                thinkBuf += ev.text;
+                                if (thinkBody) {
+                                    thinkBody.textContent = thinkBuf;
+                                    thinkBody.scrollTop = thinkBody.scrollHeight;
+                                }
+                                $('messages').scrollTop = 1e9;
+                            } else if (ev.type === 'thinking_done') {
+                                // Рассуждения завершены — скрываем пульс, сворачиваем блок
+                                thinkingActive = false;
+                                const pulse = thinkBlock && thinkBlock.querySelector('.thinking-pulse');
+                                if (pulse) pulse.remove();
+                                if (thinkBlock) thinkBlock.classList.remove('open'); // свернуть
+                                aiDiv.innerHTML = '<div class="spin"></div>';
                             } else if (ev.type === 'chunk') {
+                                if (aiDiv.querySelector('.spin')) aiDiv.innerHTML = '';
                                 fullText += ev.text;
                                 aiDiv.innerHTML = marked.parse(fullText);
                                 $('messages').scrollTop = 1e9;

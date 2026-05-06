@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Send, Trash2, Sparkles, Clock, Zap, Cpu, FileText, Settings as SettingsIcon, HardDrive, Square, Image as ImageIcon, Plus, X as XIcon } from 'lucide-react';
+import { Send, Trash2, Sparkles, Clock, Zap, Cpu, FileText, Settings as SettingsIcon, HardDrive, Square, Image as ImageIcon, Plus, X as XIcon, ChevronRight } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
@@ -11,6 +11,73 @@ import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { atomDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import { cn } from '../lib/utils';
 import SettingsModal from './SettingsModal';
+
+// ── Collapsible Thinking Block ────────────────────────────────────────────────
+const ThinkingBlock = ({ content, isStreaming }) => {
+  const [open, setOpen] = useState(true);
+  const bodyRef = useRef(null);
+
+  // Автоскролл тела пока стримится
+  useEffect(() => {
+    if (isStreaming && bodyRef.current) {
+      bodyRef.current.scrollTop = bodyRef.current.scrollHeight;
+    }
+  }, [content, isStreaming]);
+
+  // Автосворачивание когда стриминг завершён
+  useEffect(() => {
+    if (!isStreaming && content) {
+      setOpen(false);
+    }
+  }, [isStreaming]);
+
+  if (!content) return null;
+
+  return (
+    <div className="mb-3 rounded-xl border border-purple-500/20 bg-purple-500/5 overflow-hidden">
+      <button
+        onClick={() => setOpen(o => !o)}
+        className="w-full flex items-center gap-2 px-4 py-2 text-left hover:bg-purple-500/10 transition-colors"
+      >
+        <ChevronRight
+          size={12}
+          className={cn("text-purple-400 transition-transform duration-200 flex-shrink-0", open && "rotate-90")}
+        />
+        <span className="text-[11px] font-bold text-purple-400 flex-1">
+          {isStreaming ? '✨ Модель рассуждает...' : '✨ Рассуждения модели'}
+        </span>
+        {isStreaming && (
+          <span className="flex gap-0.5">
+            {[0, 0.15, 0.3].map((d, i) => (
+              <span
+                key={i}
+                className="w-1 h-1 rounded-full bg-purple-400"
+                style={{ animation: `pulse 1s ease-in-out ${d}s infinite` }}
+              />
+            ))}
+          </span>
+        )}
+      </button>
+      <AnimatePresence initial={false}>
+        {open && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.2 }}
+          >
+            <div
+              ref={bodyRef}
+              className="px-4 pb-4 pt-1 text-[11px] text-muted-foreground/80 italic border-t border-purple-500/10 whitespace-pre-wrap max-h-72 overflow-y-auto leading-relaxed"
+            >
+              {content}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+};
 
 const Citation = ({ n, sources, onClick, onHover, onLeave }) => {
   const src = sources?.[n - 1];
@@ -49,7 +116,7 @@ export default function ChatArea({ notebook, selectedSources, onOpenSource, llmS
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [stats, setStats] = useState(null);
-  const [maxTokens, setMaxTokens] = useState(1024);
+  const [maxTokens, setMaxTokens] = useState(4096);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [thinkingMode, setThinkingMode] = useState(false);
   const [hoveredSource, setHoveredSource] = useState(null);
@@ -148,7 +215,7 @@ export default function ChatArea({ notebook, selectedSources, onOpenSource, llmS
     setStats(null);
 
     const aiMsgIndex = messages.length + 1;
-    setMessages(prev => [...prev, { role: 'ai', content: '', loading: true }]);
+    setMessages(prev => [...prev, { role: 'ai', content: '', thinkingContent: '', thinkingDone: false, loading: true }]);
     
     const controller = new AbortController();
     setAbortController(controller);
@@ -196,6 +263,30 @@ export default function ChatArea({ notebook, selectedSources, onOpenSource, llmS
             const data = JSON.parse(payload);
             if (data.type === 'sources') {
               sources = data.sources;
+            } else if (data.type === 'thinking_start') {
+              // Начало рассуждений — убираем loading-спиннер, инициируем thinking
+              setMessages(prev => {
+                const next = [...prev];
+                if (next[aiMsgIndex]) next[aiMsgIndex] = { ...next[aiMsgIndex], loading: false, thinkingContent: '', thinkingDone: false };
+                return next;
+              });
+            } else if (data.type === 'thinking_chunk') {
+              // Стримим рассуждения
+              setMessages(prev => {
+                const next = [...prev];
+                if (next[aiMsgIndex]) next[aiMsgIndex] = {
+                  ...next[aiMsgIndex],
+                  thinkingContent: (next[aiMsgIndex].thinkingContent || '') + data.text
+                };
+                return next;
+              });
+            } else if (data.type === 'thinking_done') {
+              // Рассуждения завершены
+              setMessages(prev => {
+                const next = [...prev];
+                if (next[aiMsgIndex]) next[aiMsgIndex] = { ...next[aiMsgIndex], thinkingDone: true };
+                return next;
+              });
             } else if (data.type === 'chunk') {
               fullContent += data.text;
               updateAiMessage(aiMsgIndex, fullContent, sources);
@@ -261,16 +352,27 @@ export default function ChatArea({ notebook, selectedSources, onOpenSource, llmS
         }).join('');
       });
 
-      if (processed.includes('<think>')) {
-        let parts = processed.split('<think>');
-        let beforeThink = parts[0];
-        let thinkContent = parts[1];
-        if (thinkContent.includes('</think>')) {
-            let thinkParts = thinkContent.split('</think>');
-            processed = `${beforeThink}<details class="mb-4 rounded-xl border border-purple-500/20 bg-purple-500/5 overflow-hidden"><summary class="cursor-pointer px-4 py-2 text-[11px] font-bold text-purple-500 hover:bg-purple-500/10 transition-colors select-none">✨ Рассуждения</summary><div class="p-4 text-xs text-muted-foreground/80 italic border-t border-purple-500/10 whitespace-pre-wrap">${thinkParts[0]}</div></details>\n${thinkParts.slice(1).join('</think>')}`;
-        } else {
-            processed = `${beforeThink}<div class="mb-4 rounded-xl border border-purple-500/20 bg-purple-500/5 overflow-hidden"><div class="px-4 py-2 text-[11px] font-bold text-purple-500 flex items-center gap-2"><span class="animate-pulse">✨ Модель рассуждает...</span></div><div class="p-4 text-xs text-muted-foreground/80 italic border-t border-purple-500/10 whitespace-pre-wrap">${thinkContent}</div></div>`;
+      // Обработка всех форматов thinking-тегов:
+      // <think>...</think>       — Qwen/DeepSeek
+      // <|think|>...</|think|>  — старый вариант (Gemma 4 ошибочный)
+      // <channel|>...<|channel> — Gemma 4 (настоящий формат)
+      const thinkFormats = [
+        { open: '<|channel>', close: '<channel|>' },   // Gemma 4
+        { open: '<think>',    close: '</think>' },     // Qwen/DeepSeek
+        { open: '<|think|>',  close: '<|/think|>' },  // запасной
+      ];
+      for (const { open, close } of thinkFormats) {
+        if (!processed.includes(open)) continue;
+        const parts = processed.split(open);
+        const beforeThink = parts[0];
+        const thinkContent = parts[1];
+        if (thinkContent && thinkContent.includes(close)) {
+          const thinkParts = thinkContent.split(close);
+          processed = `${beforeThink}<details class="mb-4 rounded-xl border border-purple-500/20 bg-purple-500/5 overflow-hidden"><summary class="cursor-pointer px-4 py-2 text-[11px] font-bold text-purple-500 hover:bg-purple-500/10 transition-colors select-none">✨ Рассуждения</summary><div class="p-4 text-xs text-muted-foreground/80 italic border-t border-purple-500/10 whitespace-pre-wrap">${thinkParts[0]}</div></details>\n${thinkParts.slice(1).join(close)}`;
+        } else if (thinkContent) {
+          processed = `${beforeThink}<div class="mb-4 rounded-xl border border-purple-500/20 bg-purple-500/5 overflow-hidden"><div class="px-4 py-2 text-[11px] font-bold text-purple-500 flex items-center gap-2"><span class="animate-pulse">✨ Модель рассуждает...</span></div><div class="p-4 text-xs text-muted-foreground/80 italic border-t border-purple-500/10 whitespace-pre-wrap">${thinkContent}</div></div>`;
         }
+        break; // обработали — выходим
       }
       return processed;
     };
@@ -281,6 +383,14 @@ export default function ChatArea({ notebook, selectedSources, onOpenSource, llmS
           <div className="mb-2 rounded-lg overflow-hidden border border-border/40 max-w-sm">
             <img src={msg.image} alt="User upload" className="w-full h-auto object-cover" />
           </div>
+        )}
+
+        {/* Блок рассуждений — рендерится отдельно, до ответа */}
+        {msg.thinkingContent && (
+          <ThinkingBlock
+            content={msg.thinkingContent}
+            isStreaming={!msg.thinkingDone}
+          />
         )}
         <div className="prose prose-invert prose-sm max-w-none">
           <ReactMarkdown 
@@ -416,7 +526,7 @@ export default function ChatArea({ notebook, selectedSources, onOpenSource, llmS
         </div>
         <div className="flex items-center gap-4">
           <div className="flex bg-muted p-1 rounded-lg">
-            {[512, 1024, 2048].map(tokens => (
+            {[2048, 4096, 8192].map(tokens => (
               <button 
                 key={tokens}
                 onClick={() => setMaxTokens(tokens)}
@@ -425,7 +535,7 @@ export default function ChatArea({ notebook, selectedSources, onOpenSource, llmS
                   maxTokens === tokens ? "bg-background text-primary shadow-sm" : "text-muted-foreground hover:text-foreground"
                 )}
               >
-                {tokens === 512 ? 'Короткий' : tokens === 1024 ? 'Средний' : 'Длинный'}
+                {tokens === 2048 ? 'Короткий' : tokens === 4096 ? 'Средний' : 'Длинный'}
               </button>
             ))}
           </div>
@@ -551,14 +661,28 @@ export default function ChatArea({ notebook, selectedSources, onOpenSource, llmS
         {/* Stats */}
         <AnimatePresence>
           {stats && (
-            <motion.div 
-              initial={{ opacity: 0, y: 10 }}
+            <motion.div
+              initial={{ opacity: 0, y: 6 }}
               animate={{ opacity: 1, y: 0 }}
-              className="flex items-center justify-center gap-6 mt-4 text-[10px] text-muted-foreground/60 font-medium"
+              exit={{ opacity: 0 }}
+              className="flex items-center justify-center gap-2 mt-3 flex-wrap"
             >
-              <div className="flex items-center gap-1.5"><Clock size={12}/> {stats.elapsed_sec}s</div>
-              <div className="flex items-center gap-1.5"><Zap size={12}/> {stats.total_tokens} tokens</div>
-              <div className="flex items-center gap-1.5"><Cpu size={12}/> {stats.tokens_per_sec} t/s</div>
+              <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-muted/30 border border-border/30 text-[10px] font-medium text-muted-foreground">
+                <Clock size={10} className="text-blue-400" />
+                <span className="text-blue-400">{stats.elapsed_sec}с</span>
+              </div>
+              <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-muted/30 border border-border/30 text-[10px] font-medium text-muted-foreground">
+                <FileText size={10} className="text-emerald-400" />
+                <span className="text-emerald-400">~{stats.total_tokens}</span>
+                <span>токенов</span>
+              </div>
+              <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-muted/30 border border-border/30 text-[10px] font-medium text-muted-foreground">
+                <Zap size={10} className={stats.tokens_per_sec >= 20 ? "text-yellow-400" : stats.tokens_per_sec >= 10 ? "text-orange-400" : "text-red-400"} />
+                <span className={stats.tokens_per_sec >= 20 ? "text-yellow-400" : stats.tokens_per_sec >= 10 ? "text-orange-400" : "text-red-400"}>
+                  {stats.tokens_per_sec}
+                </span>
+                <span>т/с</span>
+              </div>
             </motion.div>
           )}
         </AnimatePresence>

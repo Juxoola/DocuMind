@@ -13,9 +13,12 @@ import gc
 import stat
 
 from src.ingestion import ingest_file
-from src.rag_pipeline import build_index, retrieve_nodes, build_file_context, make_prompt, close_all_clients, preload_all_models
+from src.rag_pipeline import build_index, retrieve_nodes, build_file_context, make_prompt, make_messages, close_all_clients, preload_all_models
 from src.gguf_manager import scan_gguf_dirs
-from src.gguf_direct import get_gguf_llm, unload_all_models, get_loaded_models
+from src.gguf_direct import (
+    get_gguf_llm, unload_all_models, get_loaded_models,
+    detect_model_family, stream_gguf_chat
+)
 from fastapi.middleware.cors import CORSMiddleware
 from llama_index.core import Settings
 from contextlib import asynccontextmanager
@@ -456,7 +459,8 @@ async def chat(request: ChatRequest):
                 flash_attn=True if request.gguf_flash_attn == "true" else False,
                 max_tokens=request.max_tokens,
                 type_k=request.gguf_kv_quant,
-                type_v=request.gguf_kv_quant
+                type_v=request.gguf_kv_quant,
+                enable_thinking=request.thinking_mode
             )
             config.save_last_model(request.gguf_model_path, request.gguf_mmproj_path)
             
@@ -506,49 +510,114 @@ async def chat(request: ChatRequest):
             nodes = retrieve_nodes(query_for_rag, request.notebook_id, request.allowed_files)
             sources, context = build_file_context(nodes, request.notebook_id)
             
-            # Формируем полный промпт с контекстом
-            full_prompt = f"Ниже приведен контекст из документов, используй его для ответа.\n\nКОНТЕКСТ:\n{context}\n\nВОПРОС: {query_for_rag if query_for_rag else 'Ответь на вопрос по изображению'}"
+            # Формируем системный промпт с RAG контекстом
+            sys_prompt = (
+                "Ты — умный и точный AI-помощник. ОТВЕЧАЙ СТРОГО НА РУССКОМ ЯЗЫКЕ.\n"
+                "Используй Markdown для форматирования.\n\n"
+                "ПРАВИЛА ОТВЕТА:\n"
+                "1. Всегда отвечай на вопрос СРАЗУ.\n"
+                "2. Если вопрос содержит варианты ответа (тест) — СНАЧАЛА напиши правильный вариант.\n"
+                "3. После прямого ответа приведи подробное объяснение на основе источников.\n\n"
+                "ПРАВИЛО ЦИТИРОВАНИЯ:\n"
+                "- Каждое утверждение ДОЛЖНО завершаться ссылкой [N].\n"
+                "- Если ответа нет в источниках — скажи \"В документах этого нет\".\n\n"
+                f"Доступные источники:\n{context}"
+            )
+            user_text = query_for_rag if query_for_rag else "Ответь на вопрос по изображению"
             print(f"DEBUG: RAG нашел {len(nodes)} фрагментов. Контекст подготовлен.")
-            
-            # Подготовка сообщений для мультимодальности
-            messages = [{"role": "system", "content": "You are a helpful AI assistant."}]
-            
-            user_content = [{"type": "text", "text": full_prompt}]
-            if request.image_base64:
-                print(f"DEBUG: К запросу прикреплено изображение (Base64 length: {len(request.image_base64)})")
-                user_content.append({
-                    "type": "image_url",
-                    "image_url": {"url": f"data:image/jpeg;base64,{request.image_base64}"}
-                })
-            
-            messages.append({"role": "user", "content": user_content})
+
+            # Определяем семейство модели — для логирования
+            model_family = detect_model_family(request.gguf_model_path)
+            messages_for_chat = [
+                {"role": "system", "content": sys_prompt},
+                {"role": "user",   "content": user_text},
+            ]
+            print(f"DEBUG: Семейство модели: {model_family} | thinking: {request.thinking_mode}")
 
             def generate():
                 try:
+                    import time as _time
+                    _gen_start = _time.time()
+                    _token_count = 0
+                    _answer_chars = 0
                     print("DEBUG: Запуск генерации...")
-                    # Отправляем источники фронтенду первым делом
                     yield f"data: {json.dumps({'type': 'sources', 'sources': sources}, ensure_ascii=False)}\n\n"
 
-                    first_token = True
-                    for chunk in active_llm.create_chat_completion(
-                        messages=messages,
-                        stream=True,
+                    if model_family == "gemma4":
+                        OPEN_TAG  = "<|channel>"  # Gemma 4: \u043c\u044b\u0448\u043b\u0435\u043d\u0438\u0435 \u043d\u0430\u0447\u0438\u043d\u0430\u0435\u0442\u0441\u044f
+                        CLOSE_TAG = "<channel|>"  # Gemma 4: \u043c\u044b\u0448\u043b\u0435\u043d\u0438\u0435 \u0437\u0430\u043a\u0430\u043d\u0447\u0438\u0432\u0430\u0435\u0442\u0441\u044f
+                    else:
+                        OPEN_TAG  = "<think>"
+                        CLOSE_TAG = "</think>"
+                    thinking_models = ("qwen", "deepseek", "generic")  # gemma4: think_detect
+
+                    if request.thinking_mode and model_family in thinking_models:
+                        phase = "thinking"
+                        yield f"data: {json.dumps({'type': 'thinking_start'}, ensure_ascii=False)}\n\n"
+                    else:
+                        phase = "think_detect"
+                    buf = ""
+
+                    for delta in stream_gguf_chat(
+                        llm=active_llm,
+                        messages=messages_for_chat,
+                        enable_thinking=request.thinking_mode,
+                        max_tokens=request.max_tokens,
                         temperature=request.gguf_temperature,
-                        # presence_penalty=request.presence_penalty, # Убрано из-за несовместимости версий
-                        # frequency_penalty=request.frequency_penalty,
                         repeat_penalty=request.repeat_penalty,
                         top_p=request.top_p,
                         min_p=request.min_p,
                     ):
-                        if "choices" in chunk and len(chunk["choices"]) > 0:
-                            delta = chunk["choices"][0].get("delta", {})
-                            if "content" in delta:
-                                if first_token:
-                                    print("DEBUG: Получен первый токен от модели!")
-                                    first_token = False
-                                yield f"data: {json.dumps({'type': 'chunk', 'text': delta['content']}, ensure_ascii=False)}\n\n"
+                        if not delta:
+                            continue
+                        _token_count += 1
+                        _answer_chars += len(delta)
+                        buf += delta
+
+                        if phase == "think_detect":
+                            if OPEN_TAG in buf:
+                                buf = buf[buf.index(OPEN_TAG) + len(OPEN_TAG):]
+                                yield f"data: {json.dumps({'type': 'thinking_start'}, ensure_ascii=False)}\n\n"
+                                phase = "thinking"
+                            elif len(buf) > len(OPEN_TAG) + 4:
+                                phase = "answer"
+                                yield f"data: {json.dumps({'type': 'chunk', 'text': buf}, ensure_ascii=False)}\n\n"
+                                buf = ""
+
+                        if phase == "thinking":
+                            if CLOSE_TAG in buf:
+                                think_part, _, rest = buf.partition(CLOSE_TAG)
+                                if think_part:
+                                    yield f"data: {json.dumps({'type': 'thinking_chunk', 'text': think_part}, ensure_ascii=False)}\n\n"
+                                yield f"data: {json.dumps({'type': 'thinking_done'}, ensure_ascii=False)}\n\n"
+                                phase = "answer"
+                                buf = rest.lstrip("\n")  # убираем переводы строки между </think> и ответом
+                                if buf:
+                                    yield f"data: {json.dumps({'type': 'chunk', 'text': buf}, ensure_ascii=False)}\n\n"
+                                    buf = ""
+                            else:
+                                safe = buf[:-len(CLOSE_TAG)] if len(buf) > len(CLOSE_TAG) else ""
+                                if safe:
+                                    yield f"data: {json.dumps({'type': 'thinking_chunk', 'text': safe}, ensure_ascii=False)}\n\n"
+                                    buf = buf[len(safe):]
+
+                        elif phase == "answer":
+                            yield f"data: {json.dumps({'type': 'chunk', 'text': buf}, ensure_ascii=False)}\n\n"
+                            buf = ""
+
+                    # Дочищаем буфер
+                    if buf and phase == "thinking":
+                        yield f"data: {json.dumps({'type': 'thinking_chunk', 'text': buf}, ensure_ascii=False)}\n\n"
+                        yield f"data: {json.dumps({'type': 'thinking_done'}, ensure_ascii=False)}\n\n"
+                    elif buf and phase == "answer":
+                        yield f"data: {json.dumps({'type': 'chunk', 'text': buf}, ensure_ascii=False)}\n\n"
+
+                    _elapsed = _time.time() - _gen_start
+                    # Приближенное кол-во токенов через длину (÷4 англ/÷2 рус)
+                    _est_tokens = max(_token_count, _answer_chars // 3)
+                    yield f"data: {json.dumps({'type': 'stats', 'elapsed_sec': round(_elapsed, 2), 'total_tokens': _est_tokens, 'tokens_per_sec': round(_est_tokens / _elapsed, 1) if _elapsed > 0 else 0}, ensure_ascii=False)}\n\n"
                     yield "data: [DONE]\n\n"
-                    print("DEBUG: Генерация успешно завершена.")
+                    print(f"DEBUG: Генерация завершена. {_est_tokens} tok, {round(_elapsed,1)}s, {round(_est_tokens/_elapsed,1) if _elapsed>0 else 0} tok/s")
                 except Exception as e:
                     yield f"data: {json.dumps({'type': 'error', 'text': str(e)}, ensure_ascii=False)}\n\n"
                     yield "data: [DONE]\n\n"
@@ -592,16 +661,94 @@ async def chat(request: ChatRequest):
                 max_tokens=request.max_tokens
             )
             sources, context_str = build_file_context(nodes, request.notebook_id)
-            prompt = make_prompt(request.query, context_str, thinking_mode=request.thinking_mode)
-
+            
             yield f"data: {json.dumps({'type': 'sources', 'sources': sources}, ensure_ascii=False)}\n\n"
 
             full_response = ""
-            for chunk in active_llm.stream_complete(prompt):
-                if chunk.delta:
-                    token_count += 1 
-                    full_response += chunk.delta
-                    yield f"data: {json.dumps({'type': 'chunk', 'text': chunk.delta}, ensure_ascii=False)}\n\n"
+            
+            if request.use_gguf == "true":
+                messages_for_chat = make_messages(request.query, context_str)
+                model_family = detect_model_family(request.gguf_model_path)
+                print(f"[GGUF Chat] Семейство: {model_family} | thinking: {request.thinking_mode}")
+
+                if model_family == "gemma4":
+                    OPEN_TAG  = "<|channel>"  # Gemma 4: \u043c\u044b\u0448\u043b\u0435\u043d\u0438\u0435 \u043d\u0430\u0447\u0438\u043d\u0430\u0435\u0442\u0441\u044f
+                    CLOSE_TAG = "<channel|>"  # Gemma 4: \u043c\u044b\u0448\u043b\u0435\u043d\u0438\u0435 \u0437\u0430\u043a\u0430\u043d\u0447\u0438\u0432\u0430\u0435\u0442\u0441\u044f
+                else:
+                    OPEN_TAG  = "<think>"
+                    CLOSE_TAG = "</think>"
+                thinking_models = ("qwen", "deepseek", "generic")
+
+                if request.thinking_mode and model_family in thinking_models:
+                    phase = "thinking"
+                    yield f"data: {json.dumps({'type': 'thinking_start'}, ensure_ascii=False)}\n\n"
+                else:
+                    phase = "think_detect"
+                buf = ""
+
+                for delta in stream_gguf_chat(
+                    llm=active_llm,
+                    messages=messages_for_chat,
+                    enable_thinking=request.thinking_mode,
+                    max_tokens=request.max_tokens,
+                    temperature=request.gguf_temperature,
+                    repeat_penalty=request.repeat_penalty,
+                    top_p=request.top_p,
+                    min_p=request.min_p,
+                ):
+                    if not delta:
+                        continue
+                    buf += delta
+                    token_count += 1   # каждый delta ≈ 1 токен
+                    full_response += delta
+
+                    if phase == "think_detect":
+                        if OPEN_TAG in buf:
+                            buf = buf[buf.index(OPEN_TAG) + len(OPEN_TAG):]
+                            yield f"data: {json.dumps({'type': 'thinking_start'}, ensure_ascii=False)}\n\n"
+                            phase = "thinking"
+                        elif len(buf) > len(OPEN_TAG) + 4:
+                            phase = "answer"
+                            yield f"data: {json.dumps({'type': 'chunk', 'text': buf}, ensure_ascii=False)}\n\n"
+                            buf = ""
+
+                    if phase == "thinking":
+                        if CLOSE_TAG in buf:
+                            think_part, _, rest = buf.partition(CLOSE_TAG)
+                            if think_part:
+                                yield f"data: {json.dumps({'type': 'thinking_chunk', 'text': think_part}, ensure_ascii=False)}\n\n"
+                            yield f"data: {json.dumps({'type': 'thinking_done'}, ensure_ascii=False)}\n\n"
+                            phase = "answer"
+                            buf = rest.lstrip("\n")
+                            if buf:
+                                yield f"data: {json.dumps({'type': 'chunk', 'text': buf}, ensure_ascii=False)}\n\n"
+                                buf = ""
+                        else:
+                            safe = buf[:-len(CLOSE_TAG)] if len(buf) > len(CLOSE_TAG) else ""
+                            if safe:
+                                yield f"data: {json.dumps({'type': 'thinking_chunk', 'text': safe}, ensure_ascii=False)}\n\n"
+                                buf = buf[len(safe):]
+
+                    elif phase == "answer":
+                        yield f"data: {json.dumps({'type': 'chunk', 'text': buf}, ensure_ascii=False)}\n\n"
+                        buf = ""
+
+                # Дочищаем буфер
+                if buf and phase == "thinking":
+                    yield f"data: {json.dumps({'type': 'thinking_chunk', 'text': buf}, ensure_ascii=False)}\n\n"
+                    yield f"data: {json.dumps({'type': 'thinking_done'}, ensure_ascii=False)}\n\n"
+                elif buf and phase == "answer":
+                    yield f"data: {json.dumps({'type': 'chunk', 'text': buf}, ensure_ascii=False)}\n\n"
+                print("[GGUF Chat] Генерация завершена.")
+
+            else:
+                # Для API (LM Studio) используем стандартный prompt
+                prompt = make_prompt(request.query, context_str, thinking_mode=request.thinking_mode, max_tokens=request.max_tokens)
+                for chunk in active_llm.stream_complete(prompt):
+                    if chunk.delta:
+                        token_count += 1 
+                        full_response += chunk.delta
+                        yield f"data: {json.dumps({'type': 'chunk', 'text': chunk.delta}, ensure_ascii=False)}\n\n"
             # print(f"\n[CHAT] Ответ модели:\n{full_response}\n")
 
             elapsed = time.time() - start_time
