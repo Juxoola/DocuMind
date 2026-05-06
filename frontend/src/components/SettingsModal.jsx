@@ -410,10 +410,7 @@ export default function SettingsModal({ isOpen, onClose, settings, onSave }) {
                                                         <option value="false">Выкл</option>
                                                     </select>
                                                 </label>
-                                                <label className="flex flex-col gap-1 text-[10px] text-muted-foreground" title="Количество одновременных запросов к модели (ускоряет анализ видео).">
-                                                    Concurrent Predictions ℹ️
-                                                    <input type="number" step="1" min="1" max="8" value={localSettings.vision_concurrency || 1} onChange={e => setLocalSettings({...localSettings, vision_concurrency: parseInt(e.target.value)})} className="bg-background border border-border rounded px-2 py-1 text-foreground" />
-                                                </label>
+
                                                 <label className="flex flex-col gap-1 text-[10px] text-muted-foreground col-span-2" title="Максимальное количество токенов в ответе.">
                                                     Max Tokens ℹ️
                                                     <input type="number" step="64" value={localSettings.vision_max_tokens || 512} onChange={e => setLocalSettings({...localSettings, vision_max_tokens: parseInt(e.target.value)})} className="bg-background border border-border rounded px-2 py-1 text-foreground" />

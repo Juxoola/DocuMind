@@ -56,19 +56,7 @@ try:
     llama_cpp.llama_log_set(dummy_log_callback, None)
 except: pass
 
-# Контекстный менеджер для подавления спама в консоли (llama-cpp, torch и т.д.)
-class suppress_stdout_stderr:
-    def __enter__(self):
-        self.out = os.dup(sys.stdout.fileno())
-        self.err = os.dup(sys.stderr.fileno())
-        self.null = os.open(os.devnull, os.O_WRONLY)
-        os.dup2(self.null, sys.stdout.fileno())
-        os.dup2(self.null, sys.stderr.fileno())
 
-    def __exit__(self, *args):
-        os.dup2(self.out, sys.stdout.fileno())
-        os.dup2(self.err, sys.stderr.fileno())
-        os.close(self.null); os.close(self.out); os.close(self.err)
 
 def cleanup_gpu():
     """Принудительная очистка всей видеопамяти перед тяжелыми задачами."""
@@ -105,11 +93,10 @@ def describe_image_with_lmstudio(image_path, llm_settings=None, existing_llm=Non
         try:
             v_temp = float(llm_settings.get("vision_temperature") or 0.2)
             v_max = int(llm_settings.get("vision_max_tokens") or 512)
-            with suppress_stdout_stderr():
-                res = existing_llm.create_chat_completion(
-                    messages=[{"role":"user","content":[{"type":"text","text":prompt},{"type":"image_url","image_url":{"url":f"data:image/jpeg;base64,{get_image_base64(image_path)}"}}]}],
-                    temperature=v_temp, max_tokens=v_max
-                )
+            res = existing_llm.create_chat_completion(
+                messages=[{"role":"user","content":[{"type":"text","text":prompt},{"type":"image_url","image_url":{"url":f"data:image/jpeg;base64,{get_image_base64(image_path)}"}}]}],
+                temperature=v_temp, max_tokens=v_max
+            )
             ans = res["choices"][0]["message"]["content"]
             return _clean_think_tags(ans)
         except Exception as e: return f"Ошибка GGUF: {e}"
@@ -136,7 +123,10 @@ def save_high_res_frame(video_path, time_sec, output_path):
 def process_audio_video(file_path, images_dir, is_video=False, progress_cb=None, llm_settings=None):
     file_name = os.path.basename(file_path)
     def prog(pct, msg):
-        print(f"  [{pct}%] {msg}")
+        try:
+            print(f"  [{pct}%] {msg}")
+        except Exception:
+            pass
         if progress_cb: progress_cb(pct, msg)
     
     nodes = []
@@ -257,50 +247,25 @@ def process_audio_video(file_path, images_dir, is_video=False, progress_cb=None,
                 v_th = int(llm_settings.get("vision_threads") or 8)
                 v_b = int(llm_settings.get("vision_batch_size") or 2048)
                 v_fa = llm_settings.get("vision_flash_attn") == "true"
-                v_conc = int(llm_settings.get("vision_concurrency") or 1)
-                with suppress_stdout_stderr():
-                    shared_llm = Llama(
-                        model_path=g_path, 
-                        chat_handler=Llava15ChatHandler(clip_model_path=m_path, verbose=False), 
-                        n_ctx=v_ctx, n_gpu_layers=v_gl, verbose=False, n_batch=v_b, n_threads=v_th, 
-                        flash_attn=v_fa,
-                        type_k=8, type_v=8,
-                        n_parallel=v_conc # Поддержка параллельных запросов
-                    )
+                shared_llm = Llama(
+                    model_path=g_path, 
+                    chat_handler=Llava15ChatHandler(clip_model_path=m_path, verbose=False), 
+                    n_ctx=v_ctx, n_gpu_layers=v_gl, verbose=False, n_batch=v_b, n_threads=v_th, 
+                    flash_attn=v_fa,
+                    type_k=8, type_v=8
+                )
             except: pass
             
 
-        from concurrent.futures import ThreadPoolExecutor
-        concurrency = int(llm_settings.get("vision_concurrency") or 1) if llm_settings else 1
+        prog(65, f"Описание {n} кадров (последовательно)...")
         
-        done = 0
-        results_map = {}
-        
-        # Функция для параллельной обработки одного кадра
-        def process_frame(idx):
-            path, t = frame_list[idx]
+        for idx, (path, t) in enumerate(frame_list):
             desc = describe_image_with_lmstudio(path, llm_settings, shared_llm)
-            return (idx, path, t, desc)
-
-        prog(65, f"Описание {n} кадров (параллельно: {concurrency})...")
-        
-        with ThreadPoolExecutor(max_workers=concurrency) as executor:
-            # Запускаем все задачи
-            from concurrent.futures import as_completed
-            futures = {executor.submit(process_frame, i): i for i in range(n)}
-            
-            # Обрабатываем результаты по мере их готовности для обновления прогресса
-            for future in as_completed(futures):
-                idx, path, t, desc = future.result()
-                results_map[idx] = (path, t, desc)
-                done += 1
-                prog(65 + int(done/n*22) if n else 87, f"Описание: {done}/{n}")
-            
-        # Теперь собираем результаты в правильном порядке
-        for i in range(n):
-            path, t, desc = results_map[i]
             nodes.append(TextNode(text=f"Кадр {file_name} [{format_seconds(t)}]: {desc}", metadata={"file_name":file_name, "image_path":path, "time":t}))
             frame_data.append({"time":t, "image_path":path, "description":desc})
+            
+            done = idx + 1
+            prog(65 + int(done/n*22) if n else 87, f"Описание: {done}/{n}")
             
         if shared_llm:
             del shared_llm

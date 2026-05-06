@@ -439,6 +439,8 @@ class ChatRequest(BaseModel):
 
 @app.post("/api/chat")
 async def chat(request: ChatRequest):
+    import time
+    global_start_time = time.time()
     # Определяем, какой LLM использовать
     effective_llm_url = request.llm_url
     effective_llm_api_key = request.llm_api_key
@@ -537,7 +539,7 @@ async def chat(request: ChatRequest):
             def generate():
                 try:
                     import time as _time
-                    _gen_start = _time.time()
+                    _gen_start = global_start_time
                     _token_count = 0
                     _answer_chars = 0
                     print("DEBUG: Запуск генерации...")
@@ -651,7 +653,7 @@ async def chat(request: ChatRequest):
         return StreamingResponse(no_files(), media_type="text/event-stream")
 
     async def generate():
-        start_time = time.time()
+        start_time = global_start_time
         token_count = 0
         try:
             nodes = retrieve_nodes(
