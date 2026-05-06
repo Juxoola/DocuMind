@@ -96,7 +96,7 @@ const Citation = ({ n, sources, onClick, onHover, onLeave }) => {
 
   return (
     <span className="relative inline-flex items-center align-baseline">
-      <button 
+      <button
         ref={btnRef}
         onClick={(e) => { e.preventDefault(); onClick(src); }}
         onMouseEnter={handleMouseEnter}
@@ -116,7 +116,7 @@ export default function ChatArea({ notebook, selectedSources, onOpenSource, llmS
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [stats, setStats] = useState(null);
-  const [maxTokens, setMaxTokens] = useState(4096);
+  const [maxTokens, setMaxTokens] = useState(1024);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [thinkingMode, setThinkingMode] = useState(false);
   const [hoveredSource, setHoveredSource] = useState(null);
@@ -205,10 +205,10 @@ export default function ChatArea({ notebook, selectedSources, onOpenSource, llmS
 
     const userMsg = { role: 'user', content: input, image: imagePreview };
     setMessages(prev => [...prev, userMsg]);
-    
+
     const currentInput = input;
     const currentImage = imagePreview?.split(',')[1];
-    
+
     setInput('');
     removeImage();
     setIsLoading(true);
@@ -216,7 +216,7 @@ export default function ChatArea({ notebook, selectedSources, onOpenSource, llmS
 
     const aiMsgIndex = messages.length + 1;
     setMessages(prev => [...prev, { role: 'ai', content: '', thinkingContent: '', thinkingDone: false, loading: true }]);
-    
+
     const controller = new AbortController();
     setAbortController(controller);
 
@@ -248,17 +248,17 @@ export default function ChatArea({ notebook, selectedSources, onOpenSource, llmS
 
         buffer += decoder.decode(value, { stream: true });
         const lines = buffer.split('\n');
-        
+
         // Оставляем последний (возможно неполный) кусок в буфере
         buffer = lines.pop() || '';
-        
+
         for (const line of lines) {
           const trimmedLine = line.trim();
           if (!trimmedLine || !trimmedLine.startsWith('data: ')) continue;
-          
+
           const payload = trimmedLine.slice(6);
           if (payload === '[DONE]') break;
-          
+
           try {
             const data = JSON.parse(payload);
             if (data.type === 'sources') {
@@ -358,8 +358,8 @@ export default function ChatArea({ notebook, selectedSources, onOpenSource, llmS
       // <channel|>...<|channel> — Gemma 4 (настоящий формат)
       const thinkFormats = [
         { open: '<|channel>', close: '<channel|>' },   // Gemma 4
-        { open: '<think>',    close: '</think>' },     // Qwen/DeepSeek
-        { open: '<|think|>',  close: '<|/think|>' },  // запасной
+        { open: '<think>', close: '</think>' },     // Qwen/DeepSeek
+        { open: '<|think|>', close: '<|/think|>' },  // запасной
       ];
       for (const { open, close } of thinkFormats) {
         if (!processed.includes(open)) continue;
@@ -393,7 +393,7 @@ export default function ChatArea({ notebook, selectedSources, onOpenSource, llmS
           />
         )}
         <div className="prose prose-invert prose-sm max-w-none">
-          <ReactMarkdown 
+          <ReactMarkdown
             remarkPlugins={[remarkGfm, remarkMath]}
             rehypePlugins={[rehypeRaw, rehypeKatex]}
             components={{
@@ -402,13 +402,13 @@ export default function ChatArea({ notebook, selectedSources, onOpenSource, llmS
                   const num = href.split(':')[1];
                   return (
                     <span className="inline-block ml-1 no-underline">
-                      <Citation 
-                        n={parseInt(num)} 
-                        sources={msg.sources} 
+                      <Citation
+                        n={parseInt(num)}
+                        sources={msg.sources}
                         onClick={(src) => {
                           setHoveredSource(null);
                           onOpenSource(src);
-                        }} 
+                        }}
                         onHover={(src, coords) => {
                           clearTimeout(tooltipTimeoutRef.current);
                           setHoveredSource(src);
@@ -428,7 +428,7 @@ export default function ChatArea({ notebook, selectedSources, onOpenSource, llmS
                 return !inline && match ? (
                   <div className="relative group my-4">
                     <div className="absolute right-3 top-3 opacity-0 group-hover:opacity-100 transition-opacity">
-                      <button 
+                      <button
                         onClick={() => navigator.clipboard.writeText(String(children).replace(/\n$/, ''))}
                         className="p-1.5 bg-white/10 hover:bg-white/20 rounded text-xs text-white/70 flex items-center gap-1"
                       >
@@ -455,11 +455,11 @@ export default function ChatArea({ notebook, selectedSources, onOpenSource, llmS
           >
             {preProcessMessage(msg.content)}
           </ReactMarkdown>
-          
+
           {msg.sources && msg.sources.length > 0 && (
             <div className="mt-4 flex flex-wrap gap-2 pt-4 border-t border-border/20">
               {msg.sources.map((src, idx) => (
-                <button 
+                <button
                   key={idx}
                   title={`${src.file_name} ${src.page ? '(стр. ' + src.page + ')' : ''}`}
                   onClick={() => {
@@ -491,7 +491,7 @@ export default function ChatArea({ notebook, selectedSources, onOpenSource, llmS
   };
 
   return (
-    <div 
+    <div
       className="flex flex-col h-full w-full max-w-4xl mx-auto relative"
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
@@ -499,7 +499,7 @@ export default function ChatArea({ notebook, selectedSources, onOpenSource, llmS
     >
       <AnimatePresence>
         {isDragging && (
-          <motion.div 
+          <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
@@ -526,16 +526,17 @@ export default function ChatArea({ notebook, selectedSources, onOpenSource, llmS
         </div>
         <div className="flex items-center gap-4">
           <div className="flex bg-muted p-1 rounded-lg">
-            {[2048, 4096, 8192].map(tokens => (
-              <button 
+            {[512, 1024, 2048].map(tokens => (
+              <button
                 key={tokens}
                 onClick={() => setMaxTokens(tokens)}
+                title={`Макс. токенов: ${tokens}`}
                 className={cn(
                   "px-3 py-1 text-[10px] font-bold rounded-md transition-all",
                   maxTokens === tokens ? "bg-background text-primary shadow-sm" : "text-muted-foreground hover:text-foreground"
                 )}
               >
-                {tokens === 2048 ? 'Короткий' : tokens === 4096 ? 'Средний' : 'Длинный'}
+                {tokens === 512 ? 'Короткий' : tokens === 1024 ? 'Средний' : 'Длинный'}
               </button>
             ))}
           </div>
@@ -549,7 +550,7 @@ export default function ChatArea({ notebook, selectedSources, onOpenSource, llmS
             <Sparkles size={12} />
             {thinkingMode ? "Думает" : "Без рассуждений"}
           </button>
-          <button 
+          <button
             onClick={() => setIsSettingsOpen(true)}
             className="p-2 hover:bg-muted rounded-lg text-muted-foreground transition-colors"
           >
@@ -565,7 +566,7 @@ export default function ChatArea({ notebook, selectedSources, onOpenSource, llmS
       <div className="flex-1 overflow-y-auto p-6 space-y-8">
         <AnimatePresence initial={false}>
           {messages.map((msg, i) => (
-            <motion.div 
+            <motion.div
               key={i}
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
@@ -589,13 +590,13 @@ export default function ChatArea({ notebook, selectedSources, onOpenSource, llmS
       {/* Input Area */}
       <div className="p-6 pt-0">
         {imagePreview && (
-          <motion.div 
+          <motion.div
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
             className="mb-3 relative inline-block"
           >
             <img src={imagePreview} alt="Preview" className="h-20 w-auto rounded-xl border border-primary/30 shadow-lg" />
-            <button 
+            <button
               onClick={removeImage}
               className="absolute -top-2 -right-2 p-1 bg-red-500 text-white rounded-full shadow-md hover:scale-110 transition-transform"
             >
@@ -605,21 +606,21 @@ export default function ChatArea({ notebook, selectedSources, onOpenSource, llmS
         )}
         <div className="relative">
           <div className="flex items-end gap-2 bg-muted/20 border border-border/50 rounded-xl p-2 pl-4">
-            <input 
+            <input
               type="file"
               ref={fileInputRef}
               onChange={handleImageChange}
               accept="image/*"
               className="hidden"
             />
-            <button 
+            <button
               onClick={() => fileInputRef.current?.click()}
               className="p-3 text-muted-foreground hover:text-primary transition-colors"
               title="Прикрепить фото"
             >
               <ImageIcon size={20} />
             </button>
-            <textarea 
+            <textarea
               ref={textareaRef}
               value={input}
               onChange={(e) => setInput(e.target.value)}
@@ -635,7 +636,7 @@ export default function ChatArea({ notebook, selectedSources, onOpenSource, llmS
               rows={1}
             />
             {isLoading ? (
-              <button 
+              <button
                 onClick={() => abortController?.abort()}
                 className="p-3 bg-red-500 hover:bg-red-600 text-white rounded-xl transition-all shadow-lg shadow-red-500/20"
                 title="Остановить генерацию"
@@ -643,7 +644,7 @@ export default function ChatArea({ notebook, selectedSources, onOpenSource, llmS
                 <Square size={18} className="fill-current" />
               </button>
             ) : (
-              <button 
+              <button
                 onClick={handleSend}
                 disabled={!input.trim() && !imagePreview}
                 className={cn(
@@ -688,7 +689,7 @@ export default function ChatArea({ notebook, selectedSources, onOpenSource, llmS
         </AnimatePresence>
       </div>
       {/* Settings Modal */}
-      <SettingsModal 
+      <SettingsModal
         isOpen={isSettingsOpen}
         onClose={() => setIsSettingsOpen(false)}
         settings={llmSettings}
@@ -708,7 +709,7 @@ export default function ChatArea({ notebook, selectedSources, onOpenSource, llmS
             onMouseEnter={() => clearTimeout(tooltipTimeoutRef.current)}
             onMouseLeave={() => setHoveredSource(null)}
             className="fixed w-80 p-4 bg-card/98 border border-border/80 shadow-[0_20px_50px_rgba(0,0,0,0.5)] rounded-2xl z-[9999] pointer-events-auto backdrop-blur-2xl text-left"
-            style={{ 
+            style={{
               left: Math.max(20, Math.min(window.innerWidth - 340, tooltipCoords.x - 160)),
               bottom: window.innerHeight - tooltipCoords.y + 12
             }}
@@ -720,8 +721,8 @@ export default function ChatArea({ notebook, selectedSources, onOpenSource, llmS
               <div className="flex flex-col min-w-0">
                 <span className="text-[11px] font-bold truncate text-primary uppercase tracking-wider">{hoveredSource.file_name}</span>
                 <div className="flex gap-2 mt-0.5">
-                   {hoveredSource.page && <span className="text-[9px] text-muted-foreground font-medium">Стр {hoveredSource.page}</span>}
-                   {hoveredSource.time !== undefined && <span className="text-[9px] text-muted-foreground font-medium">• {Math.floor(hoveredSource.time / 60)}:{(hoveredSource.time % 60).toString().padStart(2, '0')}</span>}
+                  {hoveredSource.page && <span className="text-[9px] text-muted-foreground font-medium">Стр {hoveredSource.page}</span>}
+                  {hoveredSource.time !== undefined && <span className="text-[9px] text-muted-foreground font-medium">• {Math.floor(hoveredSource.time / 60)}:{(hoveredSource.time % 60).toString().padStart(2, '0')}</span>}
                 </div>
               </div>
             </div>
@@ -733,8 +734,8 @@ export default function ChatArea({ notebook, selectedSources, onOpenSource, llmS
             <div className="mt-3 pt-2 border-t border-border/40 flex justify-between items-center">
               <span className="text-[9px] font-medium text-muted-foreground uppercase tracking-wider">Нажмите для перехода</span>
             </div>
-            <div 
-              className="absolute top-full border-[8px] border-transparent border-t-card/98" 
+            <div
+              className="absolute top-full border-[8px] border-transparent border-t-card/98"
               style={{ left: Math.max(15, Math.min(305, tooltipCoords.x - (Math.max(20, Math.min(window.innerWidth - 340, tooltipCoords.x - 160))) - 8)) }}
             />
           </motion.div>
