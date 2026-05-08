@@ -102,10 +102,7 @@ def robust_rmtree(path, max_retries=5, delay=0.5):
             else:
                 raise
 
-@app.get("/", response_class=HTMLResponse)
-async def get_index():
-    with open(os.path.join(config.BASE_DIR, "static", "index.html"), "r", encoding="utf-8") as f:
-        return f.read()
+
 
 # ── Notebook Management ──
 
@@ -173,8 +170,10 @@ async def upload_file(
     vision_threads: Optional[int] = 8,
     vision_batch_size: Optional[int] = 2048,
     vision_flash_attn: Optional[str] = "true",
-    vision_max_tokens: Optional[int] = 512,
+    vision_max_tokens: Optional[int] = 1024,
+    vision_repeat_penalty: Optional[float] = 1.1,
     vision_concurrency: Optional[int] = 1,
+    vision_kv_quant: Optional[int] = 2,
 ):
     paths = config.get_notebook_paths(notebook_id)
     os.makedirs(paths["data"], exist_ok=True)
@@ -217,7 +216,9 @@ async def upload_file(
         "vision_batch_size": vision_batch_size,
         "vision_flash_attn": vision_flash_attn,
         "vision_max_tokens": vision_max_tokens,
+        "vision_repeat_penalty": vision_repeat_penalty,
         "vision_concurrency": vision_concurrency,
+        "vision_kv_quant": vision_kv_quant,
     }
 
     def process_task():
@@ -479,7 +480,13 @@ async def chat(request: ChatRequest):
                     ]}
                 ]
                 try:
-                    res = active_llm.create_chat_completion(messages=vision_messages, stream=False, max_tokens=150)
+                    v_payload = {
+                        "messages": vision_messages,
+                        "stream": False,
+                        "max_tokens": 150
+                    }
+                    r_vision = requests.post(f"{active_llm}/v1/chat/completions", json=v_payload, timeout=60)
+                    res = r_vision.json()
                     extracted_query = res["choices"][0]["message"]["content"].strip()
                     
                     # Очистка от "болтливости" модели (если она начала объяснять, что делает)
@@ -561,7 +568,7 @@ async def chat(request: ChatRequest):
                     buf = ""
 
                     for delta in stream_gguf_chat(
-                        llm=active_llm,
+                        llm_url=active_llm,
                         messages=messages_for_chat,
                         enable_thinking=request.thinking_mode,
                         max_tokens=request.max_tokens,
@@ -689,7 +696,7 @@ async def chat(request: ChatRequest):
                 buf = ""
 
                 for delta in stream_gguf_chat(
-                    llm=active_llm,
+                    llm_url=active_llm,
                     messages=messages_for_chat,
                     enable_thinking=request.thinking_mode,
                     max_tokens=request.max_tokens,

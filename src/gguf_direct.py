@@ -1,160 +1,45 @@
 import os
 import re
-import llama_cpp
-from typing import Dict, Optional, Tuple
+import subprocess
+import time
+import requests
+import json
+import signal
+import threading
+from typing import Dict, Optional, Tuple, List
 import config
+import torch
 
-# Отключаем лишние логи llama-cpp
-try:
-    def dummy_log_callback(level, message, user_data):
-        pass
-    llama_cpp.llama_log_set(dummy_log_callback, None)
-except: pass
+# Глобальный кэш запущенных серверов
+_server_processes: Dict[str, subprocess.Popen] = {}
+_server_ports: Dict[str, int] = {}
+_server_configs: Dict[str, Dict] = {}
+_lock = threading.Lock()
 
-# Глобальный кэш загруженных моделей
-_model_cache: Dict[str, llama_cpp.Llama] = {}
-
-
-# ── Определение семейства модели ─────────────────────────────────────────────
+SERVER_EXE = os.path.join(config.BASE_DIR, "bin", "llama-server.exe")
 
 def detect_model_family(gguf_path: str) -> str:
-    """
-    Определяет семейство модели по имени файла.
-    Возвращает: 'qwen' | 'gemma4' | 'gemma3' | 'deepseek' | 'llama' | 'generic'
-    """
+    """Определяет семейство модели по имени файла."""
     name = os.path.basename(gguf_path).lower()
     if any(x in name for x in ["qwen", "qwq"]):
         return "qwen"
     if "gemma" in name:
-        # Gemma 4 вышла в апреле 2025 — новый формат токенов
         if any(x in name for x in ["gemma-4", "gemma4", "gemma_4", "-4b", "-4e", "e4b"]):
             return "gemma4"
-        return "gemma3"  # Gemma 1/2/3 — старый формат
+        return "gemma3"
     if any(x in name for x in ["deepseek", "-r1", "_r1"]):
         return "deepseek"
     if "llama" in name:
         return "llama"
     return "generic"
 
-
-# ── Шаблоны форматов моделей ──────────────────────────────────────────────────
-
-# Стоп-токены для каждого семейства
-STOP_TOKENS = {
-    "qwen":     ["<|im_end|>", "<|endoftext|>"],
-    "gemma4":   ["<turn|>", "<eos>"],        # Gemma 4: новый формат
-    "gemma3":   ["<end_of_turn>", "<eos>"],  # Gemma 1/2/3
-    "deepseek": ["<|im_end|>", "</s>"],
-    "llama":    ["<|eot_id|>", "<|end_of_text|>"],
-    "generic":  ["<|im_end|>", "</s>", "<|endoftext|>"],
-}
-
-
-def build_thinking_prompt(messages: list, enable_thinking: bool, model_family: str) -> str:
-    """
-    Универсальный сборщик промпта с поддержкой thinking mode.
-
-    Стратегия:
-      - Qwen / DeepSeek / generic (ChatML): prefill '<think>\\n' включает думание.
-      - Gemma 4: новый формат <|turn|>/<turn|>, thinking через <|think|>.
-      - Gemma 1/2/3: старый <start_of_turn>/<end_of_turn>, thinking не нативный.
-      - Llama 3: llama-3 шаблон.
-
-    Args:
-        messages: список dict с ключами 'role' и 'content'
-        enable_thinking: включить ли think-блок
-        model_family: результат detect_model_family()
-
-    Returns:
-        Готовый строковый промпт для передачи в llm(prompt=...)
-    """
-    system = next((m["content"] for m in messages if m["role"] == "system"), "")
-    # Поддержка мультимодального content (list of dicts)
-    user_msg = next((m for m in messages if m["role"] == "user"), None)
-    if user_msg:
-        content = user_msg["content"]
-        if isinstance(content, list):
-            # Берём только текстовые части — изображения передаются отдельно
-            user = " ".join(p["text"] for p in content if p.get("type") == "text")
-        else:
-            user = content
-    else:
-        user = ""
-
-    if model_family in ("qwen", "deepseek", "generic"):
-        # ChatML формат
-        sys_block = f"<|im_start|>system\n{system}<|im_end|>\n" if system else ""
-        think_suffix = "<think>\n" if enable_thinking else "<think>\n\n</think>\n"
-        return (
-            f"{sys_block}"
-            f"<|im_start|>user\n{user}<|im_end|>\n"
-            f"<|im_start|>assistant\n{think_suffix}"
-        )
-
-    elif model_family == "gemma4":
-        # Gemma 4 (2025): формат <|turn>role\ncontent<turn|>\n
-        # Thinking включается через <|think|> в системном блоке.
-        # Модель выводит рассуждения в формате: <channel|>...<|channel>
-        if enable_thinking:
-            # <|think|> идёт в начало системного блока
-            sys_content = f"<|think|>{system}" if system else "<|think|>"
-            sys_block = f"<|turn>system\n{sys_content}<turn|>\n"
-        else:
-            sys_block = f"<|turn>system\n{system}<turn|>\n" if system else ""
-        return (
-            f"{sys_block}"
-            f"<|turn>user\n{user}<turn|>\n"
-            f"<|turn>model\n"
-        )
-
-    elif model_family == "gemma3":
-        # Gemma 1/2/3: старый формат <start_of_turn>/<end_of_turn>
-        if system:
-            return (
-                f"<start_of_turn>user\n{system}\n\n{user}<end_of_turn>\n"
-                f"<start_of_turn>model\n"
-            )
-        return f"<start_of_turn>user\n{user}<end_of_turn>\n<start_of_turn>model\n"
-
-    elif model_family == "llama":
-        # Llama 3 Instruct формат
-        sys_block = f"<|start_header_id|>system<|end_header_id|>\n\n{system}<|eot_id|>\n" if system else ""
-        return (
-            f"<|begin_of_text|>{sys_block}"
-            f"<|start_header_id|>user<|end_header_id|>\n\n{user}<|eot_id|>\n"
-            f"<|start_header_id|>assistant<|end_header_id|>\n\n"
-        )
-
-    # Fallback — ChatML
-    sys_block = f"<|im_start|>system\n{system}<|im_end|>\n" if system else ""
-    think_suffix = "<think>\n" if enable_thinking else "<think>\n\n</think>\n"
-    return (
-        f"{sys_block}"
-        f"<|im_start|>user\n{user}<|im_end|>\n"
-        f"<|im_start|>assistant\n{think_suffix}"
-    )
-
-
-def parse_thinking_response(text: str) -> Tuple[str, str]:
-    """
-    Разбирает ответ модели на части: мышление и финальный ответ.
-
-    Returns:
-        (thinking_content, final_answer)
-        thinking_content будет пустой строкой, если think-блока не было.
-    """
-    match = re.search(r"<think>(.*?)</think>(.*)", text, re.DOTALL)
-    if match:
-        return match.group(1).strip(), match.group(2).strip()
-    return "", text.strip()
-
-
-def get_stop_tokens(model_family: str) -> list:
-    """Возвращает список стоп-токенов для данного семейства моделей."""
-    return STOP_TOKENS.get(model_family, STOP_TOKENS["generic"])
-
-
-# ── Загрузка модели ───────────────────────────────────────────────────────────
+def is_server_ready(port: int) -> bool:
+    """Проверяет, готов ли сервер принимать запросы."""
+    try:
+        r = requests.get(f"http://127.0.0.1:{port}/health", timeout=1)
+        return r.status_code == 200
+    except:
+        return False
 
 def get_gguf_llm(
     gguf_path: str,
@@ -164,57 +49,136 @@ def get_gguf_llm(
     gpu_layers: int = -1,
     n_threads: int = None,
     n_batch: int = 2048,
-    flash_attn: bool = False,
-    max_tokens: int = 2048,
+    flash_attn: bool = True,
+    max_tokens: int = 4096,
     type_k: int = 2,
     type_v: int = 2,
     enable_thinking: bool = True,
-) -> llama_cpp.Llama:
+    custom_args: Optional[List[str]] = None,
+) -> str:
     """
-    Загружает GGUF модель через прямой API llama-cpp-python.
-    Кэширует по пути модели (thinking не влияет на загрузку — он управляется промптом).
+    Запускает llama-server.exe для указанной модели.
+    Возвращает URL сервера (например, http://127.0.0.1:49152).
     """
-    gguf_path = os.path.normpath(gguf_path)
-    cache_key = gguf_path  # thinking не требует перезагрузки модели
-
-    if cache_key in _model_cache:
-        family = detect_model_family(gguf_path)
-        print(f"[GGUF Direct] Кэш: {os.path.basename(gguf_path)} | семейство: {family} | thinking: {enable_thinking}")
-        return _model_cache[cache_key]
-
-    from src.rag_pipeline import unload_rag_models
-    unload_rag_models()
-
-    if not os.path.exists(gguf_path):
-        raise FileNotFoundError(f"GGUF модель не найдена: {gguf_path}")
-
-    family = detect_model_family(gguf_path)
-    print(f"[GGUF Direct] Загрузка: {os.path.basename(gguf_path)} | семейство: {family} | thinking: {enable_thinking}")
-
-    llama_kwargs = {
-        "model_path": gguf_path,
-        "n_ctx": ctx_size,
-        "n_gpu_layers": gpu_layers,
-        "n_threads": n_threads if n_threads is not None else config.GGUF_THREADS,
-        "n_batch": n_batch if n_batch is not None else 2048,
-        "flash_attn": flash_attn,
-        "type_k": type_k,
-        "type_v": type_v,
-        "verbose": False,
+    # Нормализуем путь к модели (для Windows регистр не важен)
+    gguf_path = os.path.normpath(config.resolve_model_path(gguf_path)).lower()
+    if mmproj_path:
+        mmproj_path = os.path.normpath(config.resolve_model_path(mmproj_path)).lower()
+    
+    # Собираем текущий конфиг запроса для сравнения
+    # Нормализуем значения (None -> default), чтобы избежать ложных перезапусков
+    current_config = {
+        "mmproj": mmproj_path or None,
+        "ctx_size": int(ctx_size or 8192),
+        "gpu_layers": int(gpu_layers if gpu_layers is not None else -1),
+        "n_batch": int(n_batch or 2048),
+        "flash_attn": bool(flash_attn),
+        "max_tokens": int(max_tokens or 4096),
+        "type_k": int(type_k or 2),
+        "type_v": int(type_v or 2),
+        "enable_thinking": bool(enable_thinking),
+        "custom_args": custom_args if custom_args is not None else []
     }
 
-    if mmproj_path and os.path.exists(mmproj_path):
-        print(f"[GGUF Direct] mmproj найден: {os.path.basename(mmproj_path)}")
+    with _lock:
+        if gguf_path in _server_processes:
+            # Если процесс жив И конфиг совпадает — возвращаем URL
+            if _server_processes[gguf_path].poll() is None and _server_configs.get(gguf_path) == current_config:
+                return f"http://127.0.0.1:{_server_ports[gguf_path]}"
+            else:
+                print(f"[GGUF Server] Настройки изменились или сервер упал. Перезапуск {os.path.basename(gguf_path)}...")
+                # Мы не удаляем его из _server_processes здесь, 
+                # чтобы unload_all_models() ниже гарантированно его прибил.
 
-    llm = llama_cpp.Llama(**llama_kwargs)
-    _model_cache[cache_key] = llm
-    return llm
+        # Выгружаем другие модели перед запуском новой (экономия VRAM)
+        from src.rag_pipeline import unload_rag_models
+        unload_rag_models()
+        unload_all_models()
 
+        if not os.path.exists(gguf_path):
+            raise FileNotFoundError(f"GGUF модель не найдена: {gguf_path}")
 
-# ── Высокоуровневый стриминг ──────────────────────────────────────────────────
+        # Подбираем свободный порт
+        import socket
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.bind(('', 0))
+        port = s.getsockname()[1]
+        s.close()
+
+    cmd = [
+        SERVER_EXE,
+        "-m", gguf_path,
+        "--port", str(port),
+        "-c", str(current_config["ctx_size"]),
+        "-ngl", str(current_config["gpu_layers"]),
+        "-b", str(current_config["n_batch"]),
+        "--parallel", "1",
+        "--no-context-shift",
+        "--jinja",
+        "-n", str(current_config["max_tokens"])
+    ]
+    
+    if current_config["flash_attn"]:
+        # Добавляем только если его нет в custom_args
+        if not any("--flash-attn" in str(arg) for arg in (current_config["custom_args"] or [])):
+            cmd.extend(["--flash-attn", "on"])
+    
+    if n_threads and n_threads > 0:
+        cmd.extend(["-t", str(n_threads)])
+    
+    if current_config["mmproj"] and os.path.exists(current_config["mmproj"]):
+        cmd.extend(["--mmproj", os.path.normpath(current_config["mmproj"])])
+        print(f"[GGUF Server] С поддержкой Vision: {os.path.basename(current_config['mmproj'])}")
+
+    if current_config["custom_args"]:
+        # Добавляем кастомные аргументы в конец
+        cmd.extend(current_config["custom_args"])
+
+    print(f"[GGUF Server] Запуск: {os.path.basename(gguf_path)} на порту {port}...")
+    
+    # Запускаем процесс в фоновом режиме
+    # На Windows используем CREATE_NO_WINDOW чтобы не мелькали консоли
+    creationflags = 0x08000000 # CREATE_NO_WINDOW
+    process = subprocess.Popen(
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        creationflags=creationflags
+    )
+    
+    # Ждем готовности сервера (до 60 секунд)
+    start_wait = time.time()
+    while time.time() - start_wait < 60:
+        if is_server_ready(port):
+            print(f"[GGUF Server] Готов!")
+            _server_processes[gguf_path] = process
+            _server_ports[gguf_path] = port
+            _server_configs[gguf_path] = {
+                "mmproj": mmproj_path,
+                "ctx_size": ctx_size,
+                "gpu_layers": gpu_layers,
+                "n_batch": n_batch,
+                "flash_attn": flash_attn,
+                "max_tokens": max_tokens,
+                "type_k": type_k,
+                "type_v": type_v,
+                "enable_thinking": enable_thinking,
+                "custom_args": custom_args
+            }
+            return f"http://127.0.0.1:{port}"
+        
+        if process.poll() is not None:
+            stdout, stderr = process.communicate()
+            raise RuntimeError(f"Сервер упал при запуске:\n{stderr}")
+            
+        time.sleep(0.5)
+    
+    process.terminate()
+    raise TimeoutError("Сервер не ответил за 30 секунд")
 
 def stream_gguf_chat(
-    llm: llama_cpp.Llama,
+    llm_url: str,
     messages: list,
     enable_thinking: bool,
     max_tokens: int,
@@ -223,50 +187,76 @@ def stream_gguf_chat(
     top_p: float,
     min_p: float,
 ):
-    """
-    Генератор дельт текста.
-
-    Использует build_thinking_prompt для построения правильного промпта
-    (семейство определяется автоматически по llm.model_path),
-    затем вызывает llm(prompt=..., stream=True).
-
-    Интерфейс в main.py не знает ни о семействах, ни о шаблонах — всё здесь.
-    """
-    model_path = getattr(llm, "model_path", "") or ""
-    family = detect_model_family(model_path)
-    prompt = build_thinking_prompt(messages, enable_thinking, family)
-    stop_tokens = get_stop_tokens(family)
-
-    print(f"[stream_gguf_chat] семейство={family} | thinking={enable_thinking}")
-
-    for chunk in llm(
-        prompt=prompt,
-        stream=True,
-        max_tokens=max_tokens,
-        temperature=temperature,
-        repeat_penalty=repeat_penalty,
-        top_p=top_p,
-        min_p=min_p,
-        stop=stop_tokens,
-    ):
-        delta = chunk["choices"][0].get("text", "")
-        if delta:
-            yield delta
-
-
-# ── Управление кэшем ──────────────────────────────────────────────────────────
+    """Стриминг через OpenAI-совместимый API сервера llama.cpp."""
+    payload = {
+        "messages": messages,
+        "stream": True,
+        "max_tokens": max_tokens,
+        "temperature": temperature,
+        "repeat_penalty": repeat_penalty,
+        "top_p": top_p,
+        "min_p": min_p,
+    }
+    
+    # Если модель поддерживает thinking, и это не Gemma 4 (где она через системный промпт),
+    # сервер может сам обрабатывать теги, если они прописаны в шаблоне.
+    
+    try:
+        r = requests.post(
+            f"{llm_url}/v1/chat/completions",
+            json=payload,
+            stream=True,
+            timeout=60
+        )
+        
+        for line in r.iter_lines():
+            if line:
+                line_str = line.decode("utf-8")
+                if line_str.startswith("data: "):
+                    if line_str == "data: [DONE]":
+                        break
+                    try:
+                        data = json.loads(line_str[6:])
+                        delta = data["choices"][0]["delta"].get("content", "")
+                        if delta:
+                            yield delta
+                    except:
+                        continue
+    except Exception as e:
+        print(f"[GGUF Stream] Ошибка: {e}")
+        yield f"Ошибка связи с сервером: {e}"
 
 def unload_all_models():
-    """Полная очистка всех загруженных моделей из кэша и VRAM."""
-    global _model_cache
-    for path, model in _model_cache.items():
-        print(f"[GGUF Direct] Выгрузка: {os.path.basename(path)}")
-        del model
-    _model_cache = {}
+    """Убивает все процессы серверов максимально надежно."""
+    global _server_processes, _server_ports, _server_configs
+    if not _server_processes:
+        return
+
+    print(f"[GGUF Server] Выгрузка всех моделей: {list(map(os.path.basename, _server_processes.keys()))}")
+    
+    for path, process in _server_processes.items():
+        if process.poll() is None: # Если еще живой
+            try:
+                process.terminate()
+                try:
+                    process.wait(timeout=3)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    process.wait(timeout=2)
+            except Exception as e:
+                print(f"[GGUF Server] Ошибка при остановке {os.path.basename(path)}: {e}")
+    
+    _server_processes = {}
+    _server_ports = {}
+    _server_configs = {}
+    
+    # На Windows иногда процессы зависают, пробуем почистить по имени порта если нужно, 
+    # но пока ограничимся gc.
     import gc
     gc.collect()
-
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
 
 def get_loaded_models():
-    """Возвращает список путей к загруженным моделям."""
-    return list(_model_cache.keys())
+    """Возвращает список путей к запущенным моделям."""
+    return list(_server_processes.keys())

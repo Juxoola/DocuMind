@@ -213,56 +213,60 @@ export default function Sidebar({
                 </button>
               </div>
               {filtered.map((file) => (
-          <div 
-            key={file}
-            className={cn(
-              "group flex items-center justify-between gap-3 p-3 rounded-xl border transition-all cursor-pointer",
-              selectedSources.includes(file) 
-                ? "bg-primary/5 border-primary/20" 
-                : "bg-transparent border-transparent hover:bg-muted"
-            )}
-            onClick={() => {
-              if (selectedSources.includes(file)) {
-                onSelectSources(selectedSources.filter(s => s !== file));
-              } else {
-                onSelectSources([...selectedSources, file]);
-              }
-            }}
-          >
-            <div className="flex items-center gap-3 min-w-0 flex-1">
-              <div className="p-1.5 bg-muted rounded-lg group-hover:bg-primary/10 transition-colors">
-                <FileText size={14} className="text-muted-foreground group-hover:text-primary" />
-              </div>
-              <div className="min-w-0 flex-1" onClick={(e) => { e.stopPropagation(); onOpenFile(file); }}>
-                <p className="text-xs font-medium truncate group-hover:text-primary transition-colors">{file}</p>
-              </div>
-            </div>
+                <div 
+                  key={file}
+                  className={cn(
+                    "group flex items-center justify-between gap-3 p-3 rounded-xl border transition-all cursor-pointer",
+                    selectedSources.includes(file) 
+                      ? "bg-primary/5 border-primary/20" 
+                      : "bg-transparent border-transparent hover:bg-muted"
+                  )}
+                  onClick={() => onOpenFile(file)}
+                >
+                  <div className="flex items-center gap-3 min-w-0 flex-1">
+                    <div className="p-1.5 bg-muted rounded-lg group-hover:bg-primary/10 transition-colors">
+                      <FileText size={14} className="text-muted-foreground group-hover:text-primary" />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-xs font-medium truncate group-hover:text-primary transition-colors">{file}</p>
+                    </div>
+                  </div>
 
-            <div className="flex items-center gap-2">
-              <button 
-                onClick={(e) => deleteFile(e, file)}
-                className="opacity-0 group-hover:opacity-100 p-1.5 hover:bg-destructive/10 text-muted-foreground hover:text-destructive rounded-lg transition-all"
-              >
-                <Trash2 size={16} />
-              </button>
-              
-              <div className={cn(
-                "transition-all duration-300 transform",
-                selectedSources.includes(file) 
-                  ? "text-primary scale-125 opacity-100" 
-                  : "text-muted-foreground/20 scale-100 opacity-0 group-hover:opacity-30"
-              )}>
-                <CheckCircle2 size={24} strokeWidth={2.5} />
-              </div>
-            </div>
-          </div>
-        ))}
-        {filtered.length === 0 && !uploading && (
-          <div className="text-center py-8 opacity-40">
-            <FileText size={32} className="mx-auto mb-2" />
-            <p className="text-[10px]">Нет источников</p>
-          </div>
-        )}
+                  <div className="flex items-center gap-2">
+                    <button 
+                      onClick={(e) => deleteFile(e, file)}
+                      className="opacity-0 group-hover:opacity-100 p-1.5 hover:bg-destructive/10 text-muted-foreground hover:text-destructive rounded-lg transition-all"
+                    >
+                      <Trash2 size={16} />
+                    </button>
+                    
+                    <div 
+                      className={cn(
+                        "transition-all duration-300 transform cursor-pointer",
+                        selectedSources.includes(file) 
+                          ? "text-primary scale-125 opacity-100" 
+                          : "text-muted-foreground/20 scale-100 opacity-0 group-hover:opacity-30"
+                      )}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (selectedSources.includes(file)) {
+                          onSelectSources(selectedSources.filter(s => s !== file));
+                        } else {
+                          onSelectSources([...selectedSources, file]);
+                        }
+                      }}
+                    >
+                      <CheckCircle2 size={24} strokeWidth={2.5} />
+                    </div>
+                  </div>
+                </div>
+              ))}
+              {filtered.length === 0 && !uploading && (
+                <div className="text-center py-8 opacity-40">
+                  <FileText size={32} className="mx-auto mb-2" />
+                  <p className="text-[10px]">Нет источников</p>
+                </div>
+              )}
             </>
           );
         })()}

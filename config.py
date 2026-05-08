@@ -40,7 +40,7 @@ USE_RERANKER = os.getenv("USE_RERANKER", "true").lower() == "true"
 # Например: "F:/llm/mradermacher;D:/models"
 GGUF_SEARCH_DIRS = os.getenv("GGUF_SEARCH_DIRS", "F:/llm")
 
-# Порт для llama-cpp-python сервера (запускается локально)
+# Дефолтный порт для llama-server.exe (если не выбран свободный автоматически)
 GGUF_SERVER_PORT = int(os.getenv("GGUF_SERVER_PORT", 8081))
 GGUF_SERVER_HOST = os.getenv("GGUF_SERVER_HOST", "127.0.0.1")
 
@@ -117,7 +117,7 @@ def resolve_model_path(path_or_filename: str) -> str:
     
     # Если это уже существующий абсолютный путь
     if os.path.isabs(path_or_filename) and os.path.exists(path_or_filename):
-        return os.path.normpath(path_or_filename)
+        return os.path.normpath(path_or_filename).lower()
     
     # Иначе ищем в GGUF_SEARCH_DIRS
     search_dirs = [d.strip() for d in GGUF_SEARCH_DIRS.split(";") if d.strip()]
@@ -129,7 +129,7 @@ def resolve_model_path(path_or_filename: str) -> str:
             if filename in filenames:
                 full_path = os.path.join(dirpath, filename)
                 print(f"[CONFIG] Модель найдена: {full_path}")
-                return os.path.normpath(full_path)
+                return os.path.normpath(full_path).lower()
     
     # Если не нашли — возвращаем как есть (может упасть позже, но это честно)
     return path_or_filename
