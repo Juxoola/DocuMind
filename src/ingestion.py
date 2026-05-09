@@ -56,7 +56,8 @@ def cleanup_gpu():
     try:
         from src.rag_pipeline import unload_rag_models
         unload_rag_models()
-        unload_all_models()
+        # Мы НЕ выгружаем GGUF модели здесь, так как get_gguf_llm сам решит, 
+        # нужно ли перезапускать сервер или использовать текущий.
         import gc, torch
         gc.collect()
         if torch.cuda.is_available():
@@ -71,6 +72,39 @@ def format_seconds(s):
 
 def get_image_base64(image_path):
     with open(image_path, "rb") as image_file: return base64.b64encode(image_file.read()).decode("utf-8")
+
+def get_vision_url(llm_settings, progress_cb=None):
+    """Ленивая инициализация Vision-сервера только когда он реально нужен."""
+    if not llm_settings or not llm_settings.get("use_gguf_direct"):
+        return None
+        
+    v_model = llm_settings.get("vision_model_path") or llm_settings.get("gguf_model_path")
+    if not v_model:
+        return None
+        
+    try:
+        if progress_cb: progress_cb(60, "Запуск Vision-сервера (ленивая загрузка)...")
+        from src.ingestion import cleanup_gpu
+        cleanup_gpu()
+        
+        v_mmproj = llm_settings.get("vision_mmproj_path") or llm_settings.get("gguf_mmproj_path")
+        g_path = config.resolve_model_path(v_model)
+        m_path = config.resolve_model_path(v_mmproj)
+        v_ctx = int(llm_settings.get("vision_ctx_size") or config.GGUF_CTX_SIZE)
+        v_gl = int(llm_settings.get("vision_gpu_layers") or -1)
+        v_b = int(llm_settings.get("vision_batch_size") or 2048)
+        v_fa = llm_settings.get("vision_flash_attn") == "true"
+        v_kv = int(llm_settings.get("vision_kv_quant") or 2)
+        
+        return get_gguf_llm(
+            gguf_path=g_path, mmproj_path=m_path, 
+            ctx_size=v_ctx, gpu_layers=v_gl, n_batch=v_b, flash_attn=v_fa,
+            type_k=v_kv, type_v=v_kv,
+            custom_args=["--ignore-eos"]
+        )
+    except Exception as e:
+        print(f"[Vision] Ошибка ленивого запуска: {e}")
+        return None
 
 def describe_image_with_lmstudio(image_path, llm_settings=None, existing_llm_url=None):
     def _clean_think_tags(text):
@@ -249,31 +283,7 @@ def process_audio_video(file_path, images_dir, is_video=False, progress_cb=None,
         shared_llm_url = None
         if n > 0:
             prog(65, f"Запуск Vision-сервера для описания {n} кадров...")
-            cleanup_gpu()
-            
-            if llm_settings and llm_settings.get("use_gguf_direct"):
-                try:
-                    v_model = llm_settings.get("vision_model_path") or llm_settings.get("gguf_model_path")
-                    v_mmproj = llm_settings.get("vision_mmproj_path") or llm_settings.get("gguf_mmproj_path")
-                    g_path = config.resolve_model_path(v_model)
-                    m_path = config.resolve_model_path(v_mmproj)
-                    v_ctx = int(llm_settings.get("vision_ctx_size") or config.GGUF_CTX_SIZE)
-                    v_gl = int(llm_settings.get("vision_gpu_layers") or -1)
-                    v_b = int(llm_settings.get("vision_batch_size") or 2048)
-                    v_fa = llm_settings.get("vision_flash_attn") == "true"
-                    v_kv = int(llm_settings.get("vision_kv_quant") or 2)
-                    v_conc = int(llm_settings.get("vision_concurrency") or config.VISION_CONCURRENCY)
-                    
-                    shared_llm_url = get_gguf_llm(
-                        gguf_path=g_path, 
-                        mmproj_path=m_path, 
-                        ctx_size=v_ctx, gpu_layers=v_gl, n_batch=v_b,
-                        flash_attn=v_fa,
-                        type_k=v_kv, type_v=v_kv,
-                        n_parallel=v_conc,
-                        custom_args=["--ignore-eos"]
-                    )
-                except Exception as e: print(f"Init Vision Server Error: {e}")
+            shared_llm_url = get_vision_url(llm_settings, progress_cb=prog)
 
         prog(65, f"Описание {n} кадров ({'параллельно' if (int(llm_settings.get('vision_concurrency') or config.VISION_CONCURRENCY)) > 1 else 'последовательно'})...")
         v_conc = int(llm_settings.get("vision_concurrency") or config.VISION_CONCURRENCY)
@@ -306,12 +316,57 @@ def process_pdf(file_path, images_dir, llm_settings=None, shared_llm_url=None):
     nodes = []; file_name = os.path.basename(file_path); doc = fitz.open(file_path)
     for page_num in range(len(doc)):
         page = doc.load_page(page_num); text = page.get_text()
-        if text.strip(): nodes.append(TextNode(text=f"PDF {file_name} стр {page_num+1}:\n{text}", metadata={"file_name":file_name, "page":page_num+1}))
-        if len(page.get_images()) > 0 or len(page.get_drawings()) > 5:
-            image_path = os.path.join(images_dir, f"p_{page_num+1}_{uuid.uuid4().hex[:6]}.png")
-            page.get_pixmap(dpi=150).save(image_path)
-            desc = describe_image_with_lmstudio(image_path, llm_settings, shared_llm_url)
-            nodes.append(TextNode(text=f"Изображение PDF {file_name} стр {page_num+1}: {desc}", metadata={"file_name":file_name, "image_path":image_path, "page":page_num+1}))
+        if text.strip(): 
+            nodes.append(TextNode(text=f"PDF {file_name} стр {page_num+1}:\n{text}", metadata={"file_name":file_name, "page":page_num+1}))
+        
+        # Фильтрация: анализируем, нужно ли отправлять страницу на Vision-анализ.
+        # Мы хотим избежать отправки страниц, где из графики только рамки вокруг кода.
+        images = page.get_images()
+        drawings = page.get_drawings()
+        
+        has_real_graphics = False
+        if len(images) > 0:
+            has_real_graphics = True
+        else:
+            # Проверяем векторные рисунки на признаки реальных схем/диаграмм.
+            # Мы хотим отличить схемы от декоративных рамок кода и фона текста.
+            graphics_weight = 0
+            for d in drawings:
+                items = d.get('items', [])
+                # 1. Кривые ('c', 'q') или сложные пути — это 100% графика (схемы, иллюстрации)
+                if any(i[0] in ['c', 'q'] for i in items) or len(items) > 12:
+                    has_real_graphics = True
+                    break
+                
+                # 2. Игнорируем белые прямоугольники (это почти всегда фон текста или кода)
+                fill = d.get('fill')
+                is_white_rect = len(items) == 1 and items[0][0] == 're' and fill and (sum(fill) > 2.9)
+                if is_white_rect:
+                    continue
+                
+                # 3. Все остальное (линии, цветные блоки) считаем потенциальной графикой
+                graphics_weight += 1
+            
+            if not has_real_graphics:
+                # Порог в 25 объектов-весов позволяет игнорировать даже 5-6 рамок кода 
+                # (каждая рамка — это 4 линии), но захватит реальные чертежи или таблицы.
+                if graphics_weight > 25:
+                    has_real_graphics = True
+
+        if has_real_graphics:
+            # Ленивый запуск сервера
+            if shared_llm_url is None:
+                shared_llm_url = get_vision_url(llm_settings)
+            
+            if shared_llm_url:
+                image_path = os.path.join(images_dir, f"p_{page_num+1}_{uuid.uuid4().hex[:6]}.png")
+                page.get_pixmap(dpi=150).save(image_path)
+                desc = describe_image_with_lmstudio(image_path, llm_settings, shared_llm_url)
+                if desc and "Изображение без описания" not in desc:
+                    nodes.append(TextNode(text=f"Изображение PDF {file_name} стр {page_num+1}: {desc}", metadata={"file_name":file_name, "image_path":image_path, "page":page_num+1}))
+                else:
+                    try: os.remove(image_path)
+                    except: pass
     return nodes
 
 def process_pptx(file_path, images_dir, llm_settings=None, shared_llm_url=None):
@@ -404,29 +459,9 @@ def ingest_file(file_path, notebook_id, progress_cb=None, llm_settings=None):
     if ext in ['.mp4', '.avi', '.mkv', '.mov']: file_path = ensure_720p_video(file_path, progress_cb)
     elif ext in ['.mp3', '.wav', '.m4a']: file_path = ensure_mp3_audio(file_path, progress_cb); ext = ".mp3"
     if ext in ['.mp4', '.avi', '.mkv', '.mov', '.mp3']: return process_audio_video(file_path, images_dir, ext != ".mp3", progress_cb, llm_settings)
-    # Определение Vision-сервера для документов
+    # Больше не запускаем Vision-сервер заранее. 
+    # Он запустится лениво (lazy-load) только если внутри PDF/PPTX/DOCX обнаружится реальное изображение.
     shared_llm_url = None
-    if ext in ['.pdf', '.pptx', '.docx']:
-        if llm_settings and llm_settings.get("use_gguf_direct") and (llm_settings.get("vision_model_path") or llm_settings.get("gguf_model_path")):
-            try:
-                if progress_cb: progress_cb(60, "Запуск Vision-сервера для документа...")
-                cleanup_gpu()
-                v_model = llm_settings.get("vision_model_path") or llm_settings.get("gguf_model_path")
-                v_mmproj = llm_settings.get("vision_mmproj_path") or llm_settings.get("gguf_mmproj_path")
-                g_path = config.resolve_model_path(v_model)
-                m_path = config.resolve_model_path(v_mmproj)
-                v_ctx = int(llm_settings.get("vision_ctx_size") or config.GGUF_CTX_SIZE)
-                v_gl = int(llm_settings.get("vision_gpu_layers") or -1)
-                v_b = int(llm_settings.get("vision_batch_size") or 2048)
-                v_fa = llm_settings.get("vision_flash_attn") == "true"
-                v_kv = int(llm_settings.get("vision_kv_quant") or 2)
-                shared_llm_url = get_gguf_llm(
-                    gguf_path=g_path, mmproj_path=m_path, 
-                    ctx_size=v_ctx, gpu_layers=v_gl, n_batch=v_b, flash_attn=v_fa,
-                    type_k=v_kv, type_v=v_kv,
-                    custom_args=["--ignore-eos"]
-                )
-            except: pass
 
     try:
         if ext == '.pdf': nodes = process_pdf(file_path, images_dir, llm_settings, shared_llm_url)
@@ -439,6 +474,7 @@ def ingest_file(file_path, notebook_id, progress_cb=None, llm_settings=None):
                 with open(file_path, 'r', encoding='cp1251') as f: text = f.read()
             nodes = SentenceSplitter(chunk_size=512).get_nodes_from_documents([TextNode(text=text, metadata={"file_name":os.path.basename(file_path)})])
     finally:
-        if shared_llm_url:
-            unload_all_models()
+        # Мы НЕ выгружаем модели в finally, чтобы они оставались в памяти для следующего файла в батче.
+        # Модели будут выгружены автоматически, если потребуется память для другого типа моделей.
+        pass
     return nodes
