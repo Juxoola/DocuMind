@@ -10,6 +10,7 @@ export default function DocumentViewer({ file, notebook, onClose }) {
   const [videoMeta, setVideoMeta] = useState(null);
   const [currentTime, setCurrentTime] = useState(0);
   const [showRawText, setShowRawText] = useState(false);
+  const [showImagesOnly, setShowImagesOnly] = useState(false);
   const vidRef = useRef(null);
   const feedRef = useRef(null);
   const itemRefs = useRef({});
@@ -66,7 +67,15 @@ export default function DocumentViewer({ file, notebook, onClose }) {
       if (isSpecial) setLoading(false);
     }
     
-    if (isPdf) setLoading(false);
+    if (isPdf) {
+      // Пытаемся загрузить метаданные (картинки) для PDF
+      fetch(`/api/video_metadata?filename=${encodeURIComponent(filename)}&notebook_id=${notebook.id}`)
+        .then(r => r.json())
+        .then(data => {
+          if (!data.error) setVideoMeta(data);
+          setLoading(false);
+        });
+    }
   }, [filename, notebook.id]);
 
   // Обработка перехода по времени при клике из чата
@@ -154,17 +163,37 @@ export default function DocumentViewer({ file, notebook, onClose }) {
         </div>
         <div className="flex items-center gap-2">
           {!isMedia && (
-            <button 
-              onClick={() => setShowRawText(!showRawText)}
-              className={cn(
-                "px-3 py-1.5 text-[10px] font-bold rounded-lg transition-all border",
-                showRawText 
-                  ? "bg-primary text-primary-foreground border-primary" 
-                  : "bg-muted/50 text-muted-foreground border-border/40 hover:border-primary/30"
+            <div className="flex bg-muted/30 p-1 rounded-xl border border-border/40">
+              <button 
+                onClick={() => { setShowRawText(false); setShowImagesOnly(false); }}
+                className={cn(
+                  "px-3 py-1.5 text-[10px] font-bold rounded-lg transition-all",
+                  (!showRawText && !showImagesOnly) ? "bg-card text-primary shadow-sm" : "text-muted-foreground hover:text-foreground"
+                )}
+              >
+                Документ
+              </button>
+              <button 
+                onClick={() => { setShowRawText(true); setShowImagesOnly(false); }}
+                className={cn(
+                  "px-3 py-1.5 text-[10px] font-bold rounded-lg transition-all",
+                  showRawText ? "bg-card text-primary shadow-sm" : "text-muted-foreground hover:text-foreground"
+                )}
+              >
+                Текст
+              </button>
+              {(isPdf || isPpt) && videoMeta?.frames?.length > 0 && (
+                <button 
+                  onClick={() => { setShowRawText(false); setShowImagesOnly(true); }}
+                  className={cn(
+                    "px-3 py-1.5 text-[10px] font-bold rounded-lg transition-all",
+                    showImagesOnly ? "bg-card text-primary shadow-sm" : "text-muted-foreground hover:text-foreground"
+                  )}
+                >
+                  Картинки
+                </button>
               )}
-            >
-              {showRawText ? "Визуальный вид" : "Сырой текст"}
-            </button>
+            </div>
           )}
           <button onClick={onClose} className="p-2 hover:bg-muted rounded-xl transition-all hover:rotate-90">
             <X size={18} />
@@ -178,6 +207,37 @@ export default function DocumentViewer({ file, notebook, onClose }) {
           <div className="h-full flex flex-col items-center justify-center gap-4 text-muted-foreground">
              <div className="w-10 h-10 border-2 border-primary border-t-transparent rounded-full animate-spin shadow-[0_0_15px_rgba(var(--primary),0.3)]" />
              <span className="text-[10px] font-bold uppercase tracking-tighter">Загрузка контента...</span>
+          </div>
+        ) : showImagesOnly ? (
+          <div className="h-full overflow-y-auto p-6 space-y-6 custom-scrollbar bg-muted/5">
+            {videoMeta?.frames?.map((f, i) => (
+              <motion.div 
+                key={i}
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="bg-card border border-border/50 rounded-2xl overflow-hidden shadow-md"
+              >
+                <div className="p-3 border-b bg-muted/20 flex items-center justify-between">
+                  <span className="text-[10px] font-black uppercase tracking-widest text-primary">Стр {f.page}</span>
+                  <ImageIcon size={14} className="text-muted-foreground" />
+                </div>
+                <div className="p-4 flex flex-col md:flex-row gap-6">
+                  <div className="w-full md:w-1/2 rounded-xl overflow-hidden border border-border/40 bg-black">
+                    <img 
+                      src={`/files/${notebook.id}/images/${f.image_path.split(/[\\/]/).pop()}`} 
+                      className="w-full h-auto object-contain cursor-zoom-in hover:scale-105 transition-transform duration-500" 
+                      onClick={() => window.open(`/files/${notebook.id}/images/${f.image_path.split(/[\\/]/).pop()}`, '_blank')}
+                    />
+                  </div>
+                  <div className="w-full md:w-1/2 space-y-3">
+                    <h4 className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Описание</h4>
+                    <p className="text-xs leading-relaxed text-foreground/80 font-medium whitespace-pre-wrap">
+                      {f.description}
+                    </p>
+                  </div>
+                </div>
+              </motion.div>
+            ))}
           </div>
         ) : showRawText ? (
           <div className="h-full p-8 overflow-y-auto prose prose-invert prose-sm max-w-none">

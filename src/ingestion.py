@@ -100,7 +100,7 @@ def get_vision_url(llm_settings, progress_cb=None):
             gguf_path=g_path, mmproj_path=m_path, 
             ctx_size=v_ctx, gpu_layers=v_gl, n_batch=v_b, flash_attn=v_fa,
             type_k=v_kv, type_v=v_kv,
-            custom_args=["--ignore-eos"]
+            custom_args=["--reasoning", "off", "--reasoning-format", "none", "--reasoning-budget", "0"]
         )
     except Exception as e:
         print(f"[Vision] Ошибка ленивого запуска: {e}")
@@ -118,7 +118,7 @@ def describe_image_with_lmstudio(image_path, llm_settings=None, existing_llm_url
 1. СТРУКТУРА: Опиши основные окна, их заголовки и расположение.
 2. OCR (ТЕКСТ): Извлеки весь значимый текст, данные, адреса и названия. Сохраняй структуру (таблицы, списки).
 3. СХЕМЫ И ГРАФИКИ: Опиши компоненты, связи и ключевые показатели на схемах.
-Пиши сразу результат, четко и структурировано. Избегай вступлений и лишних рассуждений."""
+Пиши результат четко и структурировано."""
 
     # Если передан URL запущенного сервера llama-server
     if existing_llm_url:
@@ -312,12 +312,17 @@ def process_audio_video(file_path, images_dir, is_video=False, progress_cb=None,
         json.dump(metadata_json, f, ensure_ascii=False, indent=2)
     return nodes
 
-def process_pdf(file_path, images_dir, llm_settings=None, shared_llm_url=None):
-    nodes = []; file_name = os.path.basename(file_path); doc = fitz.open(file_path)
+def process_pdf(file_path, images_dir, llm_settings=None, shared_llm_url=None, original_filename=None):
+    nodes = []; file_name = original_filename or os.path.basename(file_path); doc = fitz.open(file_path)
+    frame_data = []
+    splitter = SentenceSplitter(chunk_size=1024, chunk_overlap=128)
     for page_num in range(len(doc)):
         page = doc.load_page(page_num); text = page.get_text()
         if text.strip(): 
-            nodes.append(TextNode(text=f"PDF {file_name} стр {page_num+1}:\n{text}", metadata={"file_name":file_name, "page":page_num+1}))
+            page_nodes = splitter.get_nodes_from_documents([
+                TextNode(text=text, metadata={"file_name":file_name, "page":page_num+1})
+            ])
+            nodes.extend(page_nodes)
         
         # Фильтрация: анализируем, нужно ли отправлять страницу на Vision-анализ.
         # Мы хотим избежать отправки страниц, где из графики только рамки вокруг кода.
@@ -364,21 +369,34 @@ def process_pdf(file_path, images_dir, llm_settings=None, shared_llm_url=None):
                 desc = describe_image_with_lmstudio(image_path, llm_settings, shared_llm_url)
                 if desc and "Изображение без описания" not in desc:
                     nodes.append(TextNode(text=f"Изображение PDF {file_name} стр {page_num+1}: {desc}", metadata={"file_name":file_name, "image_path":image_path, "page":page_num+1}))
+                    frame_data.append({"page": page_num+1, "image_path": image_path, "description": desc})
                 else:
                     try: os.remove(image_path)
                     except: pass
+    
+    # Сохраняем метаданные для PDF (как для видео), чтобы фронтенд мог показать картинки
+    if frame_data:
+        metadata_json = {"file_name": file_name, "is_video": False, "transcript": [], "frames": frame_data}
+        with open(os.path.join(os.path.dirname(file_path), f"{file_name}.json"), "w", encoding="utf-8") as f:
+            json.dump(metadata_json, f, ensure_ascii=False, indent=2)
+            
     return nodes
 
 def process_pptx(file_path, images_dir, llm_settings=None, shared_llm_url=None):
-    nodes = []; file_name = os.path.basename(file_path); pdf_path = file_path.rsplit('.', 1)[0] + ".temp.pdf"
+    nodes = []; file_name = os.path.basename(file_path); pdf_path = os.path.splitext(file_path)[0] + ".pdf"
     import win32com.client, pythoncom
     try:
         pythoncom.CoInitialize()
         app = win32com.client.Dispatch("Powerpoint.Application")
         deck = app.Presentations.Open(os.path.abspath(file_path), WithWindow=False)
         deck.SaveAs(os.path.abspath(pdf_path), 32); deck.Close(); app.Quit()
-        nodes = process_pdf(pdf_path, images_dir, llm_settings, shared_llm_url)
-        os.remove(pdf_path)
+        # После конвертации удаляем оригинал и работаем с PDF
+        if os.path.exists(pdf_path):
+            if os.path.exists(file_path): os.remove(file_path)
+            # Метаданные сохраняем уже для нового PDF
+            nodes = process_pdf(pdf_path, images_dir, llm_settings, shared_llm_url, original_filename=os.path.basename(pdf_path))
+        else:
+            raise Exception("PDF conversion failed")
     except:
         prs = Presentation(file_path)
         for i, slide in enumerate(prs.slides):
@@ -386,15 +404,20 @@ def process_pptx(file_path, images_dir, llm_settings=None, shared_llm_url=None):
     return nodes
 
 def process_docx(file_path, images_dir, llm_settings=None, shared_llm_url=None):
-    nodes = []; file_name = os.path.basename(file_path); pdf_path = file_path.rsplit('.', 1)[0] + ".temp.pdf"
+    nodes = []; file_name = os.path.basename(file_path); pdf_path = os.path.splitext(file_path)[0] + ".pdf"
     import win32com.client, pythoncom
     try:
         pythoncom.CoInitialize()
         app = win32com.client.Dispatch("Word.Application")
         doc = app.Documents.Open(os.path.abspath(file_path))
         doc.SaveAs(os.path.abspath(pdf_path), 17); doc.Close(); app.Quit()
-        nodes = process_pdf(pdf_path, images_dir, llm_settings, shared_llm_url)
-        os.remove(pdf_path)
+        # После конвертации удаляем оригинал и работаем с PDF
+        if os.path.exists(pdf_path):
+            if os.path.exists(file_path): os.remove(file_path)
+            # Метаданные сохраняем уже для нового PDF
+            nodes = process_pdf(pdf_path, images_dir, llm_settings, shared_llm_url, original_filename=os.path.basename(pdf_path))
+        else:
+            raise Exception("PDF conversion failed")
     except:
         import docx
         nodes.append(TextNode(text="\n".join([p.text for p in docx.Document(file_path).paragraphs]), metadata={"file_name":file_name}))
@@ -408,8 +431,10 @@ def ensure_720p_video(file_path, prog_cb=None):
     def get_duration(path):
         try:
             cmd = [ffmpeg, "-i", path]
-            res = subprocess.run(cmd, capture_output=True, text=True)
-            for line in res.stderr.split("\n"):
+            # Захватываем вывод как байты, чтобы избежать ошибок декодирования в фоновых потоках на Windows
+            res = subprocess.run(cmd, capture_output=True)
+            stderr = res.stderr.decode('utf-8', errors='ignore')
+            for line in stderr.split("\n"):
                 if "Duration" in line:
                     time_str = line.split("Duration: ")[1].split(",")[0]
                     h, m, s = time_str.split(":"); return float(h)*3600 + float(m)*60 + float(s)

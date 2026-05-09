@@ -31,7 +31,7 @@ QUANTIZATION = os.getenv("QUANTIZATION", "4bit")
 # Настройки воронки RAG
 RAG_TOP_K_PER_FILE = int(os.getenv("RAG_TOP_K_PER_FILE", 5))
 RAG_RERANK_POOL = int(os.getenv("RAG_RERANK_POOL", 30))
-RAG_FINAL_TOP_N = int(os.getenv("RAG_FINAL_TOP_N", 10))
+RAG_FINAL_TOP_N = int(os.getenv("RAG_FINAL_TOP_N", 15))
 USE_RERANKER = os.getenv("USE_RERANKER", "true").lower() == "true"
 
 # ── Настройки локальных GGUF моделей ──
@@ -48,7 +48,7 @@ GGUF_SERVER_HOST = os.getenv("GGUF_SERVER_HOST", "127.0.0.1")
 GGUF_THREADS = int(os.getenv("GGUF_THREADS", 0))
 
 # Контекст (токенов)
-GGUF_CTX_SIZE = int(os.getenv("GGUF_CTX_SIZE", 8192))
+GGUF_CTX_SIZE = int(os.getenv("GGUF_CTX_SIZE", 32768))
 
 # GPU слоёв (-1 = все на GPU, 0 = только CPU)
 GGUF_GPU_LAYERS = int(os.getenv("GGUF_GPU_LAYERS", -1))

@@ -3,7 +3,7 @@ import shutil
 import json
 import time
 import uuid
-from fastapi import FastAPI, UploadFile, File, HTTPException, Header
+from fastapi import FastAPI, UploadFile, File, HTTPException, Header, Query
 from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -155,11 +155,20 @@ async def get_files(notebook_id: str):
         files = []
     return {"files": files}
 
+# Глобальный статус загрузки для каждого блокнота
+ingestion_status = {}
+
+@app.get("/api/ingestion_status")
+async def get_ingestion_status(notebook_id: str):
+    return ingestion_status.get(notebook_id, {"is_uploading": False})
+
 @app.post("/api/upload")
 async def upload_file(
-    notebook_id: str, 
-    file: UploadFile = File(...),
-    llm_url: Optional[str] = None,
+    file: UploadFile = File(...), 
+    notebook_id: str = Query(...),
+    current_idx: int = Query(1),
+    total_count: int = Query(1),
+    llm_url: str = Query(None),
     llm_api_key: Optional[str] = None,
     llm_model: Optional[str] = None,
     use_gguf: Optional[str] = None,
@@ -182,6 +191,7 @@ async def upload_file(
     vision_concurrency: Optional[int] = 1,
     vision_kv_quant: Optional[int] = 2,
 ):
+    print(f"[API] New upload request for notebook {notebook_id}. File: {file.filename} ({current_idx}/{total_count})")
     paths = config.get_notebook_paths(notebook_id)
     os.makedirs(paths["data"], exist_ok=True)
     file_path = os.path.join(paths["data"], file.filename)
@@ -235,9 +245,24 @@ async def upload_file(
     def process_task():
         import time
         start_time = time.time()
+        # Инициализируем статус пачки
+        ingestion_status[notebook_id] = {
+            "is_uploading": True,
+            "progress": 0,
+            "batch_progress": (current_idx - 1) / total_count * 100,
+            "current_file": current_idx,
+            "total_files": total_count,
+            "status": "Подготовка..."
+        }
         try:
             def prog(pct, msg):
                 q.put({"type": "progress", "pct": pct, "msg": msg})
+                # Обновляем глобальный статус
+                if notebook_id in ingestion_status:
+                    ingestion_status[notebook_id].update({
+                        "progress": pct,
+                        "status": msg
+                    })
 
             prog(5, "Файл сохранён, подготовка...")
             nodes = ingest_file(file_path, notebook_id, progress_cb=prog, llm_settings=llm_settings)
@@ -249,12 +274,24 @@ async def upload_file(
             mins = int(elapsed // 60)
             secs = int(elapsed % 60)
             time_str = f"{mins}м {secs}с" if mins > 0 else f"{secs}с"
-            print(f"[INGESTION] Файл '{file.filename}' успешно добавлен в базу. Затрачено времени: {time_str}")
             
+            # Если это последний файл в пачке, очищаем статус через задержку или сразу
+            if current_idx >= total_count:
+                print(f"[INGESTION] Пачка завершена. {total_count} файлов обработано.")
+                ingestion_status[notebook_id] = {"is_uploading": False}
+            else:
+                # Обновляем прогресс пачки
+                ingestion_status[notebook_id].update({
+                    "batch_progress": current_idx / total_count * 100,
+                    "status": f"Готово: {file.filename}"
+                })
+
             q.put({"type": "done", "filename": file.filename, "elapsed": time_str, "elapsed_sec": elapsed})
+            print(f"[INGESTION] Готово: {file.filename} ({time_str})")
         except Exception as e:
             import traceback
             traceback.print_exc()
+            ingestion_status[notebook_id] = {"is_uploading": False, "error": str(e)}
             q.put({"type": "error", "msg": str(e)})
 
     threading.Thread(target=process_task, daemon=True).start()
@@ -423,7 +460,7 @@ async def update_rag_config(req: UpdateRagConfigRequest):
 class ChatRequest(BaseModel):
     query: str
     allowed_files: List[str]
-    max_tokens: int = 1024
+    max_tokens: int = 2048
     notebook_id: str
     thinking_mode: bool = False
     llm_url: Optional[str] = None
@@ -443,25 +480,47 @@ class ChatRequest(BaseModel):
     gguf_model_path: Optional[str] = None
     gguf_mmproj_path: Optional[str] = None
     gguf_temperature: Optional[float] = 0.7
-    gguf_ctx_size: Optional[int] = 8192
+    gguf_ctx_size: Optional[int] = 32768
     gguf_gpu_layers: Optional[int] = -1
     gguf_threads: Optional[int] = 8
     gguf_batch_size: Optional[int] = 2048
-    gguf_flash_attn: Optional[str] = "false"
+    gguf_flash_attn: Optional[str] = "true"
+    thinking_budget: Optional[int] = -1 # -1 = без ограничений
 
 @app.post("/api/chat")
 async def chat(request: ChatRequest):
     import time
     global_start_time = time.time()
-    # Определяем, какой LLM использовать
-    effective_llm_url = request.llm_url
-    effective_llm_api_key = request.llm_api_key
-    effective_llm_model = request.llm_model
     
-    # Если выбрана GGUF модель — используем прямой API
+    if not request.allowed_files:
+        async def no_files():
+            yield f"data: {json.dumps({'type': 'sources', 'sources': []})}\n\n"
+            yield f"data: {json.dumps({'type': 'chunk', 'text': 'Пожалуйста, выберите хотя бы один источник.'})}\n\n"
+            yield "data: [DONE]\n\n"
+        return StreamingResponse(no_files(), media_type="text/event-stream")
+
+    # 1. Сначала выполняем RAG (поиск чанков), пока LLM еще не заняла всю память
+    from src.rag_pipeline import retrieve_nodes, build_file_context
+    
+    query_for_rag = request.query
+    nodes = []
+    sources = []
+    context = ""
+    
+    if query_for_rag.strip():
+        print(f"DEBUG: Запуск RAG поиска для: {query_for_rag[:50]}...")
+        nodes = retrieve_nodes(query_for_rag, request.notebook_id, request.allowed_files)
+        sources, context = build_file_context(nodes, request.notebook_id)
+        print(f"DEBUG: RAG нашел {len(nodes)} фрагментов.")
+
+    # 2. Теперь определяем, какой LLM использовать и загружаем его
+    active_llm = None
+    use_direct_gguf = False
+    
     if request.use_gguf == "true" and request.gguf_model_path:
+        use_direct_gguf = True
         try:
-            print(f"DEBUG: Загрузка GGUF модели через прямой API: {request.gguf_model_path}")
+            print(f"DEBUG: Подготовка GGUF модели: {os.path.basename(request.gguf_model_path)}")
             active_llm = get_gguf_llm(
                 gguf_path=request.gguf_model_path,
                 mmproj_path=request.gguf_mmproj_path if request.gguf_mmproj_path else None,
@@ -474,281 +533,117 @@ async def chat(request: ChatRequest):
                 max_tokens=request.max_tokens,
                 type_k=request.gguf_kv_quant,
                 type_v=request.gguf_kv_quant,
-                enable_thinking=request.thinking_mode
+                enable_thinking=request.thinking_mode,
+                thinking_budget=request.thinking_budget
             )
             config.save_last_model(request.gguf_model_path, request.gguf_mmproj_path)
-            
-            # RAG: Получаем релевантные чанки
-            from src.rag_pipeline import retrieve_nodes, build_file_context
-            
-            query_for_rag = request.query
-            if not query_for_rag.strip() and request.image_base64:
-                print("DEBUG: Текст запроса пуст, извлекаем задание из изображения...")
-                vision_messages = [
-                    {"role": "user", "content": [
-                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{request.image_base64}"}},
-                        {"type": "text", "text": "Твоя задача — выполнить точный OCR (распознавание текста) с изображения. Перепиши ВЕСЬ текст вопроса и вариантов ответа, который видишь на картинке. Не добавляй никаких пояснений, только сам текст задания."}
-                    ]}
-                ]
-                try:
-                    v_payload = {
-                        "messages": vision_messages,
-                        "stream": False,
-                        "max_tokens": 150
-                    }
-                    r_vision = requests.post(f"{active_llm}/v1/chat/completions", json=v_payload, timeout=60)
-                    res = r_vision.json()
-                    extracted_query = res["choices"][0]["message"]["content"].strip()
-                    
-                    # Очистка от "болтливости" модели (если она начала объяснять, что делает)
-                    if "The user wants" in extracted_query or "Image Analysis" in extracted_query:
-                        import re
-                        # Ищем последнюю строку в кавычках или после двоеточия
-                        lines = [l.strip() for l in extracted_query.split("\n") if l.strip()]
-                        for line in reversed(lines):
-                            if ":" in line and not line.startswith("http"):
-                                extracted_query = line.split(":", 1)[1].strip().strip('"')
-                                break
-                            elif '"' in line:
-                                matches = re.findall(r'"([^"]*)"', line)
-                                if matches:
-                                    extracted_query = matches[-1]
-                                    break
-                        else:
-                            # Если ничего не нашли, берем последнюю осмысленную строку
-                            extracted_query = lines[-1].strip().strip('"')
-
-                    print(f"DEBUG: Извлеченное задание: {extracted_query}")
-                    query_for_rag = extracted_query
-                except Exception as ve:
-                    print(f"DEBUG: Ошибка при извлечении текста из фото: {ve}")
-            
-            # Если запрос все еще пуст, используем дефолтный промпт для RAG
-            if not query_for_rag or not query_for_rag.strip():
-                query_for_rag = "Опиши содержимое изображения и найди связанные инструкции в документах"
-            
-            nodes = retrieve_nodes(query_for_rag, request.notebook_id, request.allowed_files)
-            sources, context = build_file_context(nodes, request.notebook_id)
-            
-            # Формируем системный промпт с RAG контекстом
-            sys_prompt = (
-                "Ты — умный и точный AI-помощник. ОТВЕЧАЙ СТРОГО НА РУССКОМ ЯЗЫКЕ.\n"
-                "Используй Markdown для форматирования.\n\n"
-                "ПРАВИЛА ОТВЕТА:\n"
-                "1. Всегда отвечай на вопрос СРАЗУ.\n"
-                "2. Если вопрос содержит варианты ответа (тест) — СНАЧАЛА напиши правильный вариант.\n"
-                "3. После прямого ответа приведи подробное объяснение на основе источников.\n\n"
-                "ПРАВИЛО ЦИТИРОВАНИЯ:\n"
-                "- Каждое утверждение ДОЛЖНО завершаться ссылкой [N].\n"
-                "- Если ответа нет в источниках — скажи \"В документах этого нет\".\n\n"
-                f"Доступные источники:\n{context}"
-            )
-            user_text = query_for_rag if query_for_rag else "Ответь на вопрос по изображению"
-            print(f"DEBUG: RAG нашел {len(nodes)} фрагментов. Контекст подготовлен.")
-
-            # Определяем семейство модели — для логирования
-            model_family = detect_model_family(request.gguf_model_path)
-            messages_for_chat = [
-                {"role": "system", "content": sys_prompt},
-                {"role": "user",   "content": user_text},
-            ]
-            print(f"DEBUG: Семейство модели: {model_family} | thinking: {request.thinking_mode}")
-
-            def generate():
-                try:
-                    import time as _time
-                    _gen_start = global_start_time
-                    _token_count = 0
-                    _answer_chars = 0
-                    print("DEBUG: Запуск генерации...")
-                    yield f"data: {json.dumps({'type': 'sources', 'sources': sources}, ensure_ascii=False)}\n\n"
-
-                    if model_family == "gemma4":
-                        OPEN_TAG  = "<|channel>"  # Gemma 4: \u043c\u044b\u0448\u043b\u0435\u043d\u0438\u0435 \u043d\u0430\u0447\u0438\u043d\u0430\u0435\u0442\u0441\u044f
-                        CLOSE_TAG = "<channel|>"  # Gemma 4: \u043c\u044b\u0448\u043b\u0435\u043d\u0438\u0435 \u0437\u0430\u043a\u0430\u043d\u0447\u0438\u0432\u0430\u0435\u0442\u0441\u044f
-                    else:
-                        OPEN_TAG  = "<think>"
-                        CLOSE_TAG = "</think>"
-                    thinking_models = ("qwen", "deepseek", "generic")  # gemma4: think_detect
-
-                    if request.thinking_mode and model_family in thinking_models:
-                        phase = "thinking"
-                        yield f"data: {json.dumps({'type': 'thinking_start'}, ensure_ascii=False)}\n\n"
-                    else:
-                        phase = "think_detect"
-                    buf = ""
-
-                    for delta in stream_gguf_chat(
-                        llm_url=active_llm,
-                        messages=messages_for_chat,
-                        enable_thinking=request.thinking_mode,
-                        max_tokens=request.max_tokens,
-                        temperature=request.gguf_temperature,
-                        repeat_penalty=request.repeat_penalty,
-                        top_p=request.top_p,
-                        min_p=request.min_p,
-                    ):
-                        if not delta:
-                            continue
-                        _token_count += 1
-                        _answer_chars += len(delta)
-                        buf += delta
-
-                        if phase == "think_detect":
-                            if OPEN_TAG in buf:
-                                buf = buf[buf.index(OPEN_TAG) + len(OPEN_TAG):]
-                                yield f"data: {json.dumps({'type': 'thinking_start'}, ensure_ascii=False)}\n\n"
-                                phase = "thinking"
-                            elif len(buf) > len(OPEN_TAG) + 4:
-                                phase = "answer"
-                                yield f"data: {json.dumps({'type': 'chunk', 'text': buf}, ensure_ascii=False)}\n\n"
-                                buf = ""
-
-                        if phase == "thinking":
-                            if CLOSE_TAG in buf:
-                                think_part, _, rest = buf.partition(CLOSE_TAG)
-                                if think_part:
-                                    yield f"data: {json.dumps({'type': 'thinking_chunk', 'text': think_part}, ensure_ascii=False)}\n\n"
-                                yield f"data: {json.dumps({'type': 'thinking_done'}, ensure_ascii=False)}\n\n"
-                                phase = "answer"
-                                buf = rest.lstrip("\n")  # убираем переводы строки между </think> и ответом
-                                if buf:
-                                    yield f"data: {json.dumps({'type': 'chunk', 'text': buf}, ensure_ascii=False)}\n\n"
-                                    buf = ""
-                            else:
-                                safe = buf[:-len(CLOSE_TAG)] if len(buf) > len(CLOSE_TAG) else ""
-                                if safe:
-                                    yield f"data: {json.dumps({'type': 'thinking_chunk', 'text': safe}, ensure_ascii=False)}\n\n"
-                                    buf = buf[len(safe):]
-
-                        elif phase == "answer":
-                            yield f"data: {json.dumps({'type': 'chunk', 'text': buf}, ensure_ascii=False)}\n\n"
-                            buf = ""
-
-                    # Дочищаем буфер
-                    if buf and phase == "thinking":
-                        yield f"data: {json.dumps({'type': 'thinking_chunk', 'text': buf}, ensure_ascii=False)}\n\n"
-                        yield f"data: {json.dumps({'type': 'thinking_done'}, ensure_ascii=False)}\n\n"
-                    elif buf and phase == "answer":
-                        yield f"data: {json.dumps({'type': 'chunk', 'text': buf}, ensure_ascii=False)}\n\n"
-
-                    _elapsed = _time.time() - _gen_start
-                    # Приближенное кол-во токенов через длину (÷4 англ/÷2 рус)
-                    _est_tokens = max(_token_count, _answer_chars // 3)
-                    yield f"data: {json.dumps({'type': 'stats', 'elapsed_sec': round(_elapsed, 2), 'total_tokens': _est_tokens, 'tokens_per_sec': round(_est_tokens / _elapsed, 1) if _elapsed > 0 else 0}, ensure_ascii=False)}\n\n"
-                    yield "data: [DONE]\n\n"
-                    print(f"DEBUG: Генерация завершена. {_est_tokens} tok, {round(_elapsed,1)}s, {round(_est_tokens/_elapsed,1) if _elapsed>0 else 0} tok/s")
-                except Exception as e:
-                    yield f"data: {json.dumps({'type': 'error', 'text': str(e)}, ensure_ascii=False)}\n\n"
-                    yield "data: [DONE]\n\n"
-            
-            return StreamingResponse(generate(), media_type="text/event-stream")
         except Exception as e:
-            error_msg = str(e)
+            error_msg = f"Ошибка загрузки LLM: {str(e)}"
             async def error_gen():
                 yield f"data: {json.dumps({'type': 'error', 'text': error_msg}, ensure_ascii=False)}\n\n"
                 yield "data: [DONE]\n\n"
             return StreamingResponse(error_gen(), media_type="text/event-stream")
-    elif effective_llm_url:
+    elif request.llm_url:
         from llama_index.llms.openai import OpenAI
-        print(f"DEBUG: Используем LLM: {effective_llm_url} (model: {effective_llm_model})")
         active_llm = OpenAI(
-            api_base=effective_llm_url,
-            api_key=effective_llm_api_key or "lm-studio",
-            model=effective_llm_model or "gpt-4o",
+            api_base=request.llm_url,
+            api_key=request.llm_api_key or "lm-studio",
+            model=request.llm_model or "gpt-4o",
             temperature=0.1,
             max_tokens=request.max_tokens
         )
     else:
-        print(f"DEBUG: Используем системный LLM")
         active_llm = Settings.llm
 
-    if not request.allowed_files:
-        async def no_files():
-            yield f"data: {json.dumps({'type': 'sources', 'sources': []})}\n\n"
-            yield f"data: {json.dumps({'type': 'chunk', 'text': 'Пожалуйста, выберите хотя бы один источник.'})}\n\n"
-            yield "data: [DONE]\n\n"
-        return StreamingResponse(no_files(), media_type="text/event-stream")
-
+    # 3. Генерация ответа
     async def generate():
-        start_time = global_start_time
+        start_time = time.time()
+        nonlocal query_for_rag, sources, context
         token_count = 0
         try:
-            nodes = retrieve_nodes(
-                query=request.query,
-                notebook_id=request.notebook_id,
-                allowed_files=request.allowed_files,
-                max_tokens=request.max_tokens
-            )
-            sources, context_str = build_file_context(nodes, request.notebook_id)
-            
+            # Обработка изображения (OCR), если текста не было
+            if not query_for_rag.strip() and request.image_base64 and use_direct_gguf:
+                vision_messages = [
+                    {"role": "user", "content": [
+                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{request.image_base64}"}},
+                        {"type": "text", "text": "Выполни точный OCR текста с картинки."}
+                    ]}
+                ]
+                try:
+                    v_payload = {"messages": vision_messages, "stream": False, "max_tokens": 300}
+                    r_vision = requests.post(f"{active_llm}/v1/chat/completions", json=v_payload, timeout=60)
+                    extracted = r_vision.json()["choices"][0]["message"]["content"].strip()
+                    query_for_rag = extracted
+                    nodes = retrieve_nodes(query_for_rag, request.notebook_id, request.allowed_files)
+                    sources, context = build_file_context(nodes, request.notebook_id)
+                except Exception as ve: print(f"DEBUG: OCR Error: {ve}")
+
+            if not query_for_rag or not query_for_rag.strip():
+                query_for_rag = request.query or "Опиши содержимое"
+
             yield f"data: {json.dumps({'type': 'sources', 'sources': sources}, ensure_ascii=False)}\n\n"
 
-            full_response = ""
-            
-            if request.use_gguf == "true":
-                messages_for_chat = make_messages(request.query, context_str)
+            if use_direct_gguf:
+                sys_prompt = (
+                    "Ты — умный и точный AI-помощник. ОТВЕЧАЙ СТРОГО НА РУССКОМ ЯЗЫКЕ.\n"
+                    "Используй Markdown для форматирования.\n\n"
+                    "ПРАВИЛА ОТВЕТА:\n"
+                    "1. Всегда отвечай на вопрос СРАЗУ.\n"
+                    "2. Если вопрос содержит варианты ответа — СНАЧАЛА напиши правильный вариант.\n"
+                    "3. После прямого ответа приведи подробное объяснение на основе источников.\n\n"
+                    "ПРАВИЛО ЦИТИРОВАНИЯ:\n"
+                    "- Каждое утверждение ДОЛЖНО завершаться ссылкой [N].\n"
+                    "- Если ответа нет в источниках — скажи \"В документах этого нет\".\n\n"
+                    f"Доступные источники:\n{context}"
+                )
+                messages_for_chat = [{"role": "system", "content": sys_prompt}, {"role": "user", "content": query_for_rag}]
                 model_family = detect_model_family(request.gguf_model_path)
-                print(f"[GGUF Chat] Семейство: {model_family} | thinking: {request.thinking_mode}")
-
-                if model_family == "gemma4":
-                    OPEN_TAG  = "<|channel>"  # Gemma 4: \u043c\u044b\u0448\u043b\u0435\u043d\u0438\u0435 \u043d\u0430\u0447\u0438\u043d\u0430\u0435\u0442\u0441\u044f
-                    CLOSE_TAG = "<channel|>"  # Gemma 4: \u043c\u044b\u0448\u043b\u0435\u043d\u0438\u0435 \u0437\u0430\u043a\u0430\u043d\u0447\u0438\u0432\u0430\u0435\u0442\u0441\u044f
-                else:
-                    OPEN_TAG  = "<think>"
-                    CLOSE_TAG = "</think>"
-                thinking_models = ("qwen", "deepseek", "generic")
-
-                if request.thinking_mode and model_family in thinking_models:
-                    phase = "thinking"
-                    yield f"data: {json.dumps({'type': 'thinking_start'}, ensure_ascii=False)}\n\n"
-                else:
-                    phase = "think_detect"
+                OPEN_TAG, CLOSE_TAG = ("<|channel|>", "<channel|>") if model_family == "gemma4" else ("<think>", "</think>")
+                phase = "thinking" if request.thinking_mode and model_family in ("qwen", "deepseek", "generic") else "think_detect"
+                if phase == "thinking": yield f"data: {json.dumps({'type': 'thinking_start'}, ensure_ascii=False)}\n\n"
+                
                 buf = ""
-
                 for delta in stream_gguf_chat(
-                    llm_url=active_llm,
-                    messages=messages_for_chat,
-                    enable_thinking=request.thinking_mode,
-                    max_tokens=request.max_tokens,
-                    temperature=request.gguf_temperature,
-                    repeat_penalty=request.repeat_penalty,
-                    top_p=request.top_p,
-                    min_p=request.min_p,
+                    llm_url=active_llm, messages=messages_for_chat, enable_thinking=request.thinking_mode,
+                    max_tokens=request.max_tokens, temperature=request.gguf_temperature,
+                    repeat_penalty=request.repeat_penalty, top_p=request.top_p, min_p=request.min_p
                 ):
-                    if not delta:
-                        continue
+                    if not delta: continue
+                    token_count += 1
                     buf += delta
-                    token_count += 1   # каждый delta ≈ 1 токен
-                    full_response += delta
-
                     if phase == "think_detect":
                         if OPEN_TAG in buf:
-                            buf = buf[buf.index(OPEN_TAG) + len(OPEN_TAG):]
-                            yield f"data: {json.dumps({'type': 'thinking_start'}, ensure_ascii=False)}\n\n"
-                            phase = "thinking"
-                        elif len(buf) > len(OPEN_TAG) + 4:
+                            if request.thinking_mode:
+                                buf = buf[buf.index(OPEN_TAG) + len(OPEN_TAG):]
+                                yield f"data: {json.dumps({'type': 'thinking_start'}, ensure_ascii=False)}\n\n"; phase = "thinking"
+                            else:
+                                # Если режим выключен, но тег пришел — переходим в режим игнорирования мыслей
+                                buf = buf[buf.index(OPEN_TAG) + len(OPEN_TAG):]
+                                phase = "thinking_ignore"
+                        elif len(buf) > 10:
+                            phase = "answer"; yield f"data: {json.dumps({'type': 'chunk', 'text': buf}, ensure_ascii=False)}\n\n"; buf = ""
+                    
+                    if phase == "thinking_ignore":
+                        if CLOSE_TAG in buf:
+                            _, _, rest = buf.partition(CLOSE_TAG)
+                            buf = rest.lstrip("\n")
                             phase = "answer"
-                            yield f"data: {json.dumps({'type': 'chunk', 'text': buf}, ensure_ascii=False)}\n\n"
-                            buf = ""
+                        else:
+                            # Просто очищаем буфер, так как это "мысли", которые мы не хотим показывать
+                            if len(buf) > len(CLOSE_TAG):
+                                buf = buf[-len(CLOSE_TAG):]
+                            continue
 
                     if phase == "thinking":
                         if CLOSE_TAG in buf:
                             think_part, _, rest = buf.partition(CLOSE_TAG)
-                            if think_part:
-                                yield f"data: {json.dumps({'type': 'thinking_chunk', 'text': think_part}, ensure_ascii=False)}\n\n"
-                            yield f"data: {json.dumps({'type': 'thinking_done'}, ensure_ascii=False)}\n\n"
-                            phase = "answer"
+                            if think_part: yield f"data: {json.dumps({'type': 'thinking_chunk', 'text': think_part}, ensure_ascii=False)}\n\n"
+                            yield f"data: {json.dumps({'type': 'thinking_done'}, ensure_ascii=False)}\n\n"; phase = "answer"
                             buf = rest.lstrip("\n")
-                            if buf:
-                                yield f"data: {json.dumps({'type': 'chunk', 'text': buf}, ensure_ascii=False)}\n\n"
-                                buf = ""
+                            if buf: yield f"data: {json.dumps({'type': 'chunk', 'text': buf}, ensure_ascii=False)}\n\n"; buf = ""
                         else:
                             safe = buf[:-len(CLOSE_TAG)] if len(buf) > len(CLOSE_TAG) else ""
-                            if safe:
-                                yield f"data: {json.dumps({'type': 'thinking_chunk', 'text': safe}, ensure_ascii=False)}\n\n"
-                                buf = buf[len(safe):]
-
+                            if safe: yield f"data: {json.dumps({'type': 'thinking_chunk', 'text': safe}, ensure_ascii=False)}\n\n"; buf = buf[len(safe):]
                     elif phase == "answer":
                         yield f"data: {json.dumps({'type': 'chunk', 'text': buf}, ensure_ascii=False)}\n\n"
                         buf = ""

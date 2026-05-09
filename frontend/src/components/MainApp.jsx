@@ -14,6 +14,14 @@ export default function MainApp({ notebook, onExit }) {
   const [viewerWidth, setViewerWidth] = useState(500);
   const [sidebarWidth, setSidebarWidth] = useState(300);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  const [uploadState, setUploadState] = useState({
+    isUploading: false,
+    progress: 0,
+    batchProgress: 0,
+    currentFile: 0,
+    totalFiles: 0,
+    status: ''
+  });
 	const [llmSettings, setLlmSettings] = useState(() => {
 		const saved = localStorage.getItem('llm_settings');
 		return saved ? JSON.parse(saved) : {
@@ -25,9 +33,130 @@ export default function MainApp({ notebook, onExit }) {
 			gguf_mmproj_path: '',
 		};
 	});
+  
+  const handleUpload = async (filesToUpload) => {
+    const files = Array.from(filesToUpload);
+    if (!files.length) return;
+
+    setUploadState(prev => ({ ...prev, isUploading: true, totalFiles: files.length, currentFile: 1, batchProgress: 0 }));
+    
+    let fileIdx = 1;
+    const totalFiles = files.length;
+
+    for (const file of files) {
+      const formData = new FormData();
+      formData.append('file', file);
+      
+      const uploadUrl = new URL(`/api/upload`, window.location.origin);
+      uploadUrl.searchParams.append('notebook_id', notebook.id);
+      uploadUrl.searchParams.append('current_idx', fileIdx.toString());
+      uploadUrl.searchParams.append('total_count', totalFiles.toString());
+
+      if (llmSettings) {
+        Object.entries(llmSettings).forEach(([key, value]) => {
+          if (value !== undefined && value !== null) {
+            uploadUrl.searchParams.append(key, value.toString());
+          }
+        });
+      }
+
+      try {
+        console.log(`[UPLOAD] Starting file ${fileIdx}/${totalFiles}: ${file.name}`);
+        const response = await fetch(uploadUrl.toString(), {
+          method: 'POST',
+          body: formData
+        });
+
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) {
+            console.log(`[UPLOAD] Stream closed naturally for ${file.name}`);
+            break;
+          }
+          
+          const chunk = decoder.decode(value);
+          const lines = chunk.split('\n');
+          let shouldBreak = false;
+          for (const line of lines) {
+            if (line.startsWith('data: ')) {
+              try {
+                const data = JSON.parse(line.slice(6));
+                if (data.type === 'progress') {
+                  setUploadState(prev => ({ ...prev, progress: data.pct, status: data.msg }));
+                } else if (data.type === 'done') {
+                  console.log(`[UPLOAD] Received 'done' event for ${file.name}. Breaking stream.`);
+                  setUploadState(prev => ({ ...prev, status: `Готово: ${data.filename}` }));
+                  shouldBreak = true;
+                }
+              } catch (e) {
+                console.warn("[UPLOAD] JSON parse error", e);
+              }
+            }
+          }
+          if (shouldBreak) break;
+        }
+        
+        const newBatchProgress = (fileIdx / totalFiles) * 100;
+        console.log(`[UPLOAD] Finished file ${fileIdx}/${totalFiles}. Progress: ${newBatchProgress}%`);
+        fileIdx++;
+        
+        setUploadState(prev => ({ 
+          ...prev, 
+          batchProgress: newBatchProgress, 
+          currentFile: Math.min(fileIdx, totalFiles) 
+        }));
+        
+        try {
+          await fetchSources();
+        } catch (e) {
+          console.error("[UPLOAD] Error refreshing sources:", e);
+        }
+
+        // Небольшая пауза перед следующим файлом для стабильности
+        await new Promise(r => setTimeout(r, 500));
+      } catch (err) {
+        console.error(`[UPLOAD] Error uploading ${file.name}:`, err);
+      }
+    }
+    setUploadState({ isUploading: false, progress: 0, batchProgress: 0, currentFile: 0, totalFiles: 0, status: '' });
+    fetchSources();
+  };
 
   useEffect(() => {
     fetchSources();
+    
+    // Проверка статуса фоновой загрузки при загрузке страницы
+    const checkStatus = async () => {
+      try {
+        const res = await fetch(`/api/ingestion_status?notebook_id=${notebook.id}`);
+        const data = await res.json();
+        
+        // Используем функциональное обновление, чтобы иметь доступ к актуальному состоянию
+        setUploadState(current => {
+          if (data.is_uploading) {
+            return {
+              isUploading: true,
+              progress: data.progress,
+              batchProgress: data.batch_progress,
+              currentFile: data.current_file,
+              totalFiles: data.total_files,
+              status: data.status
+            };
+          } else if (current.isUploading) {
+            // Если на сервере пусто, а мы думали что грузим - значит пачка завершилась
+            fetchSources();
+            return { isUploading: false, progress: 0, batchProgress: 0, currentFile: 0, totalFiles: 0, status: '' };
+          }
+          return current;
+        });
+      } catch (e) {}
+    };
+    checkStatus();
+    const interval = setInterval(checkStatus, 2000);
+    return () => clearInterval(interval);
   }, [notebook.id]);
 
   const fetchSources = async () => {
@@ -77,6 +206,8 @@ export default function MainApp({ notebook, onExit }) {
               llmSettings={llmSettings}
               width={sidebarWidth}
               onToggle={() => setIsSidebarOpen(false)}
+              uploadState={uploadState}
+              onUpload={handleUpload}
             />
 
             {/* Sidebar Resizer */}
@@ -179,6 +310,70 @@ export default function MainApp({ notebook, onExit }) {
               />
             </motion.div>
           </>
+        )}
+      </AnimatePresence>
+
+      {/* Global Floating Upload Card - Visible even when Sidebar is closed */}
+      <AnimatePresence>
+        {uploadState.isUploading && (
+          <motion.div
+            initial={{ opacity: 0, y: 50, scale: 0.9 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 50, scale: 0.9 }}
+            className="fixed bottom-6 right-6 z-[1000] w-72 glass border border-primary/20 rounded-3xl p-5 shadow-[0_20px_50px_rgba(0,0,0,0.3)] overflow-hidden"
+          >
+            {/* Background Glow */}
+            <div className="absolute -top-10 -right-10 w-24 h-24 bg-primary/20 blur-[40px] rounded-full pointer-events-none" />
+            
+            <div className="relative z-10">
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-2">
+                   <div className="w-2 h-2 bg-primary rounded-full animate-pulse shadow-[0_0_8px_rgba(var(--primary),0.5)]" />
+                   <span className="text-[10px] font-black uppercase tracking-[0.2em] text-primary">Загрузка</span>
+                </div>
+                <span className="text-[10px] font-bold text-muted-foreground bg-muted px-2 py-0.5 rounded-full">
+                  {uploadState.currentFile} из {uploadState.totalFiles}
+                </span>
+              </div>
+
+              {/* Progress Bars */}
+              <div className="space-y-4">
+                <div>
+                  <div className="flex justify-between items-center mb-1.5">
+                    <span className="text-[9px] font-bold text-foreground/60 uppercase">Файл</span>
+                    <span className="text-[9px] font-bold text-primary">{Math.round(uploadState.progress)}%</span>
+                  </div>
+                  <div className="w-full h-1.5 bg-primary/10 rounded-full overflow-hidden shadow-inner">
+                    <motion.div 
+                      className="bg-primary h-full shadow-[0_0_10px_rgba(var(--primary),0.3)]"
+                      initial={{ width: 0 }}
+                      animate={{ width: `${uploadState.progress}%` }}
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <div className="flex justify-between items-center mb-1.5">
+                    <span className="text-[9px] font-bold text-foreground/60 uppercase">Всего</span>
+                    <span className="text-[9px] font-bold text-muted-foreground">{Math.round(uploadState.batchProgress)}%</span>
+                  </div>
+                  <div className="w-full h-1 bg-muted rounded-full overflow-hidden">
+                    <motion.div 
+                      className="bg-muted-foreground/40 h-full"
+                      initial={{ width: 0 }}
+                      animate={{ width: `${uploadState.batchProgress}%` }}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="mt-4 pt-3 border-t border-primary/10">
+                <p className="text-[9px] font-bold text-muted-foreground text-center truncate italic">
+                  {uploadState.status}
+                </p>
+              </div>
+            </div>
+          </motion.div>
         )}
       </AnimatePresence>
     </div>

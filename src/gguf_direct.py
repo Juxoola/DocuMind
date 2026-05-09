@@ -54,6 +54,7 @@ def get_gguf_llm(
     type_k: int = 2,
     type_v: int = 2,
     enable_thinking: bool = True,
+    thinking_budget: int = -1,
     n_parallel: int = 1,
     custom_args: Optional[List[str]] = None,
 ) -> str:
@@ -78,6 +79,7 @@ def get_gguf_llm(
         "type_k": int(type_k or 2),
         "type_v": int(type_v or 2),
         "enable_thinking": bool(enable_thinking),
+        "thinking_budget": int(thinking_budget if thinking_budget is not None else -1),
         "n_parallel": int(n_parallel or 1),
         "custom_args": custom_args if custom_args is not None else []
     }
@@ -92,7 +94,8 @@ def get_gguf_llm(
                 # Мы не удаляем его из _server_processes здесь, 
                 # чтобы unload_all_models() ниже гарантированно его прибил.
 
-        # Выгружаем другие модели перед запуском новой (экономия VRAM)
+        # Выгружаем другие модели ПЕРЕД запуском новой (экономия VRAM)
+        # НО: делаем это только если мы РЕАЛЬНО запускаем новый сервер
         from src.rag_pipeline import unload_rag_models
         unload_rag_models()
         unload_all_models()
@@ -110,6 +113,17 @@ def get_gguf_llm(
     # Для параллельной работы нужно расширить общий контекст, чтобы каждому слоту хватило места
     total_ctx = current_config["ctx_size"] * current_config["n_parallel"]
     
+    # Маппинг типов квантования для llama-server
+    CACHE_TYPE_MAP = {
+        0: "f16",
+        1: "f32",
+        2: "q4_0", # q4_k часто мапится на q4_0 в простых версиях
+        8: "q8_0"
+    }
+    # Пытаемся получить строковое значение, если пришло число
+    type_k_str = CACHE_TYPE_MAP.get(current_config["type_k"], "f16")
+    type_v_str = CACHE_TYPE_MAP.get(current_config["type_v"], "f16")
+
     cmd = [
         SERVER_EXE,
         "-m", gguf_path,
@@ -119,14 +133,29 @@ def get_gguf_llm(
         "-b", str(current_config["n_batch"]),
         "--parallel", str(current_config["n_parallel"]),
         "--cont-batching",
-        "--no-context-shift",
         "--jinja",
+        "--cache-type-k", type_k_str,
+        "--cache-type-v", type_v_str,
         "-n", str(current_config["max_tokens"])
     ]
+
+    # Если рассуждения отключены — добавляем соответствующие флаги сервера
+    if not current_config["enable_thinking"]:
+        cmd.extend([
+            "--reasoning", "off", 
+            "--reasoning-format", "none", 
+            "--reasoning-budget", "0"
+        ])
+    else:
+        # Если включены — явно указываем это и задаем бюджет
+        cmd.extend([
+            "--reasoning", "on",
+            "--reasoning-budget", str(current_config["thinking_budget"])
+        ])
     
     if current_config["flash_attn"]:
         # Добавляем только если его нет в custom_args
-        if not any("--flash-attn" in str(arg) for arg in (current_config["custom_args"] or [])):
+        if not any("-fa" in str(arg) or "--flash-attn" in str(arg) for arg in (current_config["custom_args"] or [])):
             cmd.extend(["--flash-attn", "on"])
     
     if n_threads and n_threads > 0:
@@ -142,14 +171,14 @@ def get_gguf_llm(
 
     print(f"[GGUF Server] Запуск: {os.path.basename(gguf_path)} на порту {port}...")
     
-    # Запускаем процесс в фоновом режиме
-    # На Windows используем CREATE_NO_WINDOW чтобы не мелькали консоли
+    # Запускаем процесс. На Windows используем CREATE_NO_WINDOW.
+    # ВАЖНО: Мы перенаправляем вывод в DEVNULL, чтобы избежать переполнения буфера PIPE, 
+    # которое вызывает зависание процесса llama-server на Windows.
     creationflags = 0x08000000 # CREATE_NO_WINDOW
     process = subprocess.Popen(
         cmd,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
         creationflags=creationflags
     )
     

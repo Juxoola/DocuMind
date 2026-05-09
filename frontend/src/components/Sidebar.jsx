@@ -24,70 +24,14 @@ export default function Sidebar({
   onOpenFile,
   llmSettings,
   width,
-  onToggle
+  onToggle,
+  uploadState,
+  onUpload
 }) {
-  const [uploading, setUploading] = useState(false);
-  const [progress, setProgress] = useState(0);
-  const [status, setStatus] = useState('');
   const [isDragging, setIsDragging] = useState(false);
 
-  const handleUpload = async (filesToUpload) => {
-    const files = Array.from(filesToUpload);
-    if (!files.length) return;
-
-    setUploading(true);
-    for (const file of files) {
-      const formData = new FormData();
-      formData.append('file', file);
-      
-		const uploadUrl = new URL(`/api/upload`, window.location.origin);
-		uploadUrl.searchParams.append('notebook_id', notebook.id);
-		if (llmSettings) {
-			// Отправляем ВСЕ настройки, которые есть в объекте (включая vision_concurrency и т.д.)
-			Object.entries(llmSettings).forEach(([key, value]) => {
-				if (value !== undefined && value !== null) {
-					uploadUrl.searchParams.append(key, value.toString());
-				}
-			});
-		}
-
-      try {
-        const response = await fetch(uploadUrl.toString(), {
-          method: 'POST',
-          body: formData
-        });
-
-        const reader = response.body.getReader();
-        const decoder = new TextDecoder();
-        
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          
-          const chunk = decoder.decode(value);
-          const lines = chunk.split('\n');
-          for (const line of lines) {
-            if (line.startsWith('data: ')) {
-              try {
-                const data = JSON.parse(line.slice(6));
-                if (data.type === 'progress') {
-                  setProgress(data.pct);
-                  setStatus(data.msg);
-                }
-              } catch (e) {}
-            }
-          }
-        }
-        // Вызываем обновление после каждого файла для постепенного появления
-        onRefresh();
-      } catch (err) {
-        console.error(err);
-      }
-    }
-    setUploading(false);
-    setProgress(0);
-    setStatus('');
-    onRefresh();
+  const handleUpload = (files) => {
+    onUpload(files);
   };
 
   const onDragOver = (e) => {
@@ -160,7 +104,7 @@ export default function Sidebar({
           className={cn(
             "relative flex flex-col items-center justify-center p-6 border-2 border-dashed border-border rounded-2xl cursor-pointer hover:border-primary/50 hover:bg-primary/5 transition-all group",
             isDragging && "border-primary bg-primary/10 scale-[1.02]",
-            uploading && "pointer-events-none opacity-50"
+            uploadState?.isUploading && "pointer-events-none opacity-50"
           )}
         >
           <input type="file" className="hidden" multiple onChange={(e) => handleUpload(e.target.files)} />
@@ -173,16 +117,50 @@ export default function Sidebar({
           </span>
           <span className="text-[10px] text-muted-foreground/60 mt-1">PDF, DOCX, Video, Audio</span>
 
-          {uploading && (
-            <div className="absolute inset-0 bg-background/80 backdrop-blur-sm rounded-2xl flex flex-col items-center justify-center p-4">
-              <div className="w-full bg-muted h-1 rounded-full overflow-hidden mb-2">
-                <motion.div 
-                  className="bg-primary h-full" 
-                  initial={{ width: 0 }}
-                  animate={{ width: `${progress}%` }}
-                />
+          {uploadState?.isUploading && (
+            <div className="absolute inset-0 bg-background/90 backdrop-blur-md rounded-2xl flex flex-col items-center justify-center p-6 border border-primary/20 shadow-2xl">
+              {/* Текущий файл */}
+              <div className="w-full mb-4">
+                <div className="flex justify-between items-center mb-1">
+                  <span className="text-[9px] font-black uppercase tracking-widest text-primary">Файл</span>
+                  <span className="text-[9px] font-bold text-primary">{Math.round(uploadState.progress)}%</span>
+                </div>
+                <div className="w-full bg-primary/10 h-1.5 rounded-full overflow-hidden shadow-inner">
+                  <motion.div 
+                    className="bg-primary h-full shadow-[0_0_10px_rgba(var(--primary),0.5)]" 
+                    initial={{ width: 0 }}
+                    animate={{ width: `${uploadState.progress}%` }}
+                    transition={{ type: "spring", stiffness: 100, damping: 20 }}
+                  />
+                </div>
               </div>
-              <span className="text-[10px] font-medium text-center truncate w-full">{status}</span>
+
+              {/* Общий прогресс */}
+              <div className="w-full mb-6">
+                <div className="flex justify-between items-center mb-1">
+                  <div className="flex items-center gap-2">
+                    <span className="text-[9px] font-black uppercase tracking-widest text-muted-foreground">Всего</span>
+                    <span className="text-[9px] font-bold text-muted-foreground/60 bg-muted px-1.5 py-0.5 rounded">
+                      {uploadState.currentFile} из {uploadState.totalFiles}
+                    </span>
+                  </div>
+                  <span className="text-[9px] font-bold text-muted-foreground">{Math.round(uploadState.batchProgress)}%</span>
+                </div>
+                <div className="w-full bg-muted h-1 rounded-full overflow-hidden">
+                  <motion.div 
+                    className="bg-muted-foreground/40 h-full" 
+                    initial={{ width: 0 }}
+                    animate={{ width: `${uploadState.batchProgress}%` }}
+                  />
+                </div>
+              </div>
+
+              {/* Статус в нижней части */}
+              <div className="absolute bottom-0 left-0 right-0 p-2 bg-primary/10 border-t border-primary/20 backdrop-blur-sm">
+                <p className="text-[9px] font-bold text-primary text-center break-words leading-tight">
+                  {uploadState.status || 'Подготовка...'}
+                </p>
+              </div>
             </div>
           )}
         </label>
@@ -260,7 +238,7 @@ export default function Sidebar({
                   </div>
                 </div>
               ))}
-              {filtered.length === 0 && !uploading && (
+              {filtered.length === 0 && !uploadState?.isUploading && (
                 <div className="text-center py-8 opacity-40">
                   <FileText size={32} className="mx-auto mb-2" />
                   <p className="text-[10px]">Нет источников</p>

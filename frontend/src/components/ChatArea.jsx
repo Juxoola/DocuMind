@@ -119,6 +119,7 @@ export default function ChatArea({ notebook, selectedSources, onOpenSource, llmS
   const [maxTokens, setMaxTokens] = useState(1024);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [thinkingMode, setThinkingMode] = useState(false);
+  const [thinkingBudget, setThinkingBudget] = useState(-1); // -1 = no limit
   const [hoveredSource, setHoveredSource] = useState(null);
   const [tooltipCoords, setTooltipCoords] = useState({ x: 0, y: 0 });
   const [abortController, setAbortController] = useState(null);
@@ -231,6 +232,7 @@ export default function ChatArea({ notebook, selectedSources, onOpenSource, llmS
           max_tokens: maxTokens,
           notebook_id: notebook.id,
           thinking_mode: thinkingMode,
+          thinking_budget: thinkingBudget,
           image_base64: currentImage,
           ...llmSettings
         })
@@ -550,6 +552,19 @@ export default function ChatArea({ notebook, selectedSources, onOpenSource, llmS
             <Sparkles size={12} />
             {thinkingMode ? "Думает" : "Без рассуждений"}
           </button>
+          
+          {thinkingMode && (
+            <div className="flex items-center gap-2 bg-purple-500/5 border border-purple-500/20 rounded-lg px-2 py-1">
+              <span className="text-[9px] font-bold text-purple-400 uppercase tracking-tighter">Budget:</span>
+              <input 
+                type="number" 
+                value={thinkingBudget} 
+                onChange={(e) => setThinkingBudget(parseInt(e.target.value))}
+                className="w-12 bg-transparent border-none text-[10px] font-bold text-purple-500 focus:ring-0 p-0"
+                title="Лимит токенов на рассуждения. -1 = без лимита. 0 = отключить."
+              />
+            </div>
+          )}
           <button
             onClick={() => setIsSettingsOpen(true)}
             className="p-2 hover:bg-muted rounded-lg text-muted-foreground transition-colors"
