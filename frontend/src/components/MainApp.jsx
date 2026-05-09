@@ -11,7 +11,8 @@ export default function MainApp({ notebook, onExit }) {
   const [selectedSources, setSelectedSources] = useState([]);
   const [viewerFile, setViewerFile] = useState(null);
   const [isViewerOpen, setIsViewerOpen] = useState(false);
-  const [viewerWidth, setViewerWidth] = useState(500);
+  const [viewerWidth, setViewerWidth] = useState(600);
+  const [isResizing, setIsResizing] = useState(false);
   const [sidebarWidth, setSidebarWidth] = useState(300);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [uploadState, setUploadState] = useState({
@@ -127,36 +128,38 @@ export default function MainApp({ notebook, onExit }) {
 
   useEffect(() => {
     fetchSources();
-    
-    // Проверка статуса фоновой загрузки при загрузке страницы
+    let timerId;
     const checkStatus = async () => {
       try {
         const res = await fetch(`/api/ingestion_status?notebook_id=${notebook.id}`);
-        const data = await res.json();
-        
-        // Используем функциональное обновление, чтобы иметь доступ к актуальному состоянию
-        setUploadState(current => {
-          if (data.is_uploading) {
-            return {
-              isUploading: true,
-              progress: data.progress,
-              batchProgress: data.batch_progress,
-              currentFile: data.current_file,
-              totalFiles: data.total_files,
-              status: data.status
-            };
-          } else if (current.isUploading) {
-            // Если на сервере пусто, а мы думали что грузим - значит пачка завершилась
-            fetchSources();
-            return { isUploading: false, progress: 0, batchProgress: 0, currentFile: 0, totalFiles: 0, status: '' };
-          }
-          return current;
-        });
-      } catch (e) {}
+        if (res.ok) {
+          const data = await res.json();
+          setUploadState(current => {
+            if (data.is_uploading) {
+              return {
+                isUploading: true,
+                progress: data.progress,
+                batchProgress: data.batch_progress,
+                currentFile: data.current_file,
+                totalFiles: data.total_files,
+                status: data.status
+              };
+            } else if (current.isUploading) {
+              fetchSources();
+              return { isUploading: false, progress: 0, batchProgress: 0, currentFile: 0, totalFiles: 0, status: '' };
+            }
+            return current;
+          });
+        }
+      } catch (e) {
+        console.warn("[STATUS] Polling error:", e);
+      } finally {
+        timerId = setTimeout(checkStatus, 3000);
+      }
     };
+
     checkStatus();
-    const interval = setInterval(checkStatus, 2000);
-    return () => clearInterval(interval);
+    return () => clearTimeout(timerId);
   }, [notebook.id]);
 
   const fetchSources = async () => {
@@ -280,19 +283,25 @@ export default function MainApp({ notebook, onExit }) {
               style={{ width: viewerWidth }}
               className="fixed right-0 top-0 bottom-0 glass z-50 border-l flex flex-col shadow-2xl"
             >
+              {/* Global Invisible Overlay while resizing to capture mouse events outside */}
+              {isResizing && <div className="fixed inset-0 z-[100] cursor-col-resize" />}
+
               {/* Viewer Resizer */}
               <div 
-                className="absolute left-0 top-0 bottom-0 w-2 -left-1 cursor-col-resize z-[60] group/resizer"
+                className="absolute left-0 top-0 bottom-0 w-4 -left-2 cursor-col-resize z-[60] group/resizer"
                 onMouseDown={(e) => {
+                  e.preventDefault();
+                  setIsResizing(true);
                   const startX = e.clientX;
                   const startWidth = viewerWidth;
                   const onMouseMove = (e) => {
                     const newWidth = startWidth + (startX - e.clientX);
-                    if (newWidth > 350 && newWidth < window.innerWidth * 0.8) {
+                    if (newWidth > 350 && newWidth < window.innerWidth * 0.9) {
                       setViewerWidth(newWidth);
                     }
                   };
                   const onMouseUp = () => {
+                    setIsResizing(false);
                     document.removeEventListener('mousemove', onMouseMove);
                     document.removeEventListener('mouseup', onMouseUp);
                   };
@@ -300,14 +309,16 @@ export default function MainApp({ notebook, onExit }) {
                   document.addEventListener('mouseup', onMouseUp);
                 }}
               >
-                <div className="w-[1px] h-full bg-border group-hover/resizer:bg-primary/50 mx-auto transition-colors" />
+                <div className="w-[1.5px] h-full bg-border group-hover/resizer:bg-primary/50 mx-auto transition-colors shadow-[0_0_5px_rgba(var(--primary),0.2)]" />
               </div>
 
-              <DocumentViewer 
-                file={viewerFile} 
-                notebook={notebook}
-                onClose={() => setIsViewerOpen(false)} 
-              />
+              <div className={cn("flex-1 flex flex-col min-h-0 overflow-hidden", isResizing && "pointer-events-none select-none")}>
+                <DocumentViewer 
+                  file={viewerFile} 
+                  notebook={notebook}
+                  onClose={() => setIsViewerOpen(false)} 
+                />
+              </div>
             </motion.div>
           </>
         )}

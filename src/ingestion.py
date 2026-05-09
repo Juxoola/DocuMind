@@ -95,12 +95,14 @@ def get_vision_url(llm_settings, progress_cb=None):
         v_b = int(llm_settings.get("vision_batch_size") or 2048)
         v_fa = llm_settings.get("vision_flash_attn") == "true"
         v_kv = int(llm_settings.get("vision_kv_quant") or 2)
+        v_conc = int(llm_settings.get("vision_concurrency") or config.VISION_CONCURRENCY)
         
         return get_gguf_llm(
             gguf_path=g_path, mmproj_path=m_path, 
             ctx_size=v_ctx, gpu_layers=v_gl, n_batch=v_b, flash_attn=v_fa,
             type_k=v_kv, type_v=v_kv,
-            custom_args=["--reasoning", "off", "--reasoning-format", "none", "--reasoning-budget", "0"]
+            n_parallel=v_conc,
+            custom_args=["--reasoning", "off", "--reasoning-format", "none", "--reasoning-budget", "0", "--no-context-shift"]
         )
     except Exception as e:
         print(f"[Vision] Ошибка ленивого запуска: {e}")
@@ -109,8 +111,9 @@ def get_vision_url(llm_settings, progress_cb=None):
 def describe_image_with_lmstudio(image_path, llm_settings=None, existing_llm_url=None):
     def _clean_think_tags(text):
         import re
+        # Удаляем блоки рассуждений и любые системные токены типа <|...|>
         text = re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL)
-        text = re.sub(r'<\|?turn\|?>', '', text)
+        text = re.sub(r'<\|.*?\|>', '', text)
         text = re.sub(r'<start_of_turn>|<end_of_turn>', '', text)
         return text.strip()
 
@@ -122,43 +125,45 @@ def describe_image_with_lmstudio(image_path, llm_settings=None, existing_llm_url
 
     # Если передан URL запущенного сервера llama-server
     if existing_llm_url:
-        try:
-            v_temp = float(llm_settings.get("vision_temperature") or config.VISION_TEMPERATURE)
-            v_max = int(llm_settings.get("vision_max_tokens") or 4096)
-            v_r_pen = float(llm_settings.get("vision_repeat_penalty") or config.VISION_REPEAT_PENALTY)
-            v_top_p = float(llm_settings.get("vision_top_p") or config.VISION_TOP_P)
-            v_min_p = float(llm_settings.get("vision_min_p") or config.VISION_MIN_P)
-            v_pres = float(llm_settings.get("vision_presence_penalty") or 0.0)
-            v_freq = float(llm_settings.get("vision_frequency_penalty") or 0.0)
-            
-            payload = {
-                "messages": [{"role":"user","content":[{"type":"text","text":prompt},{"type":"image_url","image_url":{"url":f"data:image/jpeg;base64,{get_image_base64(image_path)}"}}]}],
-                "temperature": v_temp, 
-                "max_tokens": v_max,
-                "repeat_penalty": v_r_pen,
-                "top_p": v_top_p,
-                "min_p": v_min_p,
-                "presence_penalty": v_pres,
-                "frequency_penalty": v_freq
-            }
-            r = requests.post(f"{existing_llm_url}/v1/chat/completions", json=payload, timeout=300)
-            if r.status_code != 200:
-                print(f"[Ingestion] Сервер GGUF вернул ошибку {r.status_code}: {r.text}")
-                return f"Ошибка сервера GGUF: {r.status_code}"
-            
-            res = r.json()
-            if "choices" not in res:
-                print(f"[Ingestion] В ответе GGUF нет 'choices': {res}")
-                return "Ошибка формата ответа GGUF."
+        for attempt in range(2):
+            try:
+                v_temp = float(llm_settings.get("vision_temperature") or config.VISION_TEMPERATURE)
+                v_max = int(llm_settings.get("vision_max_tokens") or 4096)
+                v_r_pen = float(llm_settings.get("vision_repeat_penalty") or config.VISION_REPEAT_PENALTY)
+                v_top_p = float(llm_settings.get("vision_top_p") or config.VISION_TOP_P)
+                v_min_p = float(llm_settings.get("vision_min_p") or config.VISION_MIN_P)
+                v_pres = float(llm_settings.get("vision_presence_penalty") or 0.0)
+                v_freq = float(llm_settings.get("vision_frequency_penalty") or 0.0)
                 
-            ans = res["choices"][0]["message"]["content"]
-            reason = res["choices"][0].get("finish_reason")
-            ans = _clean_think_tags(ans)
-            print(f"[Ingestion] Описание получено ({len(ans)} симв.). Причина завершения: {reason}")
-            return ans
-        except Exception as e: 
-            print(f"[Ingestion] Исключение при запросе к GGUF: {e}")
-            return "Ошибка связи с GGUF."
+                payload = {
+                    "messages": [{"role":"user","content":[{"type":"text","text":prompt},{"type":"image_url","image_url":{"url":f"data:image/jpeg;base64,{get_image_base64(image_path)}"}}]}],
+                    "temperature": v_temp, 
+                    "max_tokens": v_max,
+                    "repeat_penalty": v_r_pen,
+                    "top_p": v_top_p,
+                    "min_p": v_min_p,
+                    "presence_penalty": v_pres,
+                    "frequency_penalty": v_freq
+                }
+                r = requests.post(f"{existing_llm_url}/v1/chat/completions", json=payload, timeout=300)
+                if r.status_code == 200:
+                    res = r.json()
+                    if "choices" in res:
+                        ans = res["choices"][0]["message"]["content"]
+                        reason = res["choices"][0].get("finish_reason")
+                        ans = _clean_think_tags(ans)
+                        print(f"[Ingestion] Описание получено ({len(ans)} симв.). Причина завершения: {reason}")
+                        return ans
+                elif r.status_code == 500:
+                    print(f"[Ingestion] GGUF 500 (Attempt {attempt+1}). Retrying...")
+                    time.sleep(2)
+                    continue
+                else:
+                    print(f"[Ingestion] Ошибка GGUF {r.status_code}: {r.text}")
+            except Exception as e:
+                print(f"[Ingestion] Ошибка запроса (Attempt {attempt+1}): {e}")
+                time.sleep(1)
+        return "Ошибка анализа после попыток повтора"
 
     # Fallback на LM Studio или другой OpenAI API
     api_url = (llm_settings.get("llm_url") if llm_settings else None) or config.LM_STUDIO_URL
@@ -312,9 +317,10 @@ def process_audio_video(file_path, images_dir, is_video=False, progress_cb=None,
         json.dump(metadata_json, f, ensure_ascii=False, indent=2)
     return nodes
 
-def process_pdf(file_path, images_dir, llm_settings=None, shared_llm_url=None, original_filename=None):
+def process_pdf(file_path, images_dir, llm_settings=None, shared_llm_url=None, original_filename=None, progress_cb=None):
     nodes = []; file_name = original_filename or os.path.basename(file_path); doc = fitz.open(file_path)
     frame_data = []
+    frame_list = []
     splitter = SentenceSplitter(chunk_size=1024, chunk_overlap=128)
     for page_num in range(len(doc)):
         page = doc.load_page(page_num); text = page.get_text()
@@ -359,30 +365,60 @@ def process_pdf(file_path, images_dir, llm_settings=None, shared_llm_url=None, o
                     has_real_graphics = True
 
         if has_real_graphics:
-            # Ленивый запуск сервера
-            if shared_llm_url is None:
-                shared_llm_url = get_vision_url(llm_settings)
+            image_path = os.path.join(images_dir, f"p_{page_num+1}_{uuid.uuid4().hex[:6]}.png")
+            page.get_pixmap(dpi=150).save(image_path)
+            # Добавляем в очередь на обработку
+            frame_list.append({"page": page_num+1, "path": image_path})
+        else:
+            # Текстовая страница без графики
+            pass
+
+    if frame_list:
+        # Ленивый запуск сервера
+        if shared_llm_url is None:
+            shared_llm_url = get_vision_url(llm_settings)
+        
+        if shared_llm_url:
+            v_conc = int(llm_settings.get("vision_concurrency") or config.VISION_CONCURRENCY)
+            n = len(frame_list)
+            if progress_cb: progress_cb(65, f"Анализ {n} страниц PDF ({'параллельно' if v_conc > 1 else 'последовательно'})...")
             
-            if shared_llm_url:
-                image_path = os.path.join(images_dir, f"p_{page_num+1}_{uuid.uuid4().hex[:6]}.png")
-                page.get_pixmap(dpi=150).save(image_path)
-                desc = describe_image_with_lmstudio(image_path, llm_settings, shared_llm_url)
-                if desc and "Изображение без описания" not in desc:
-                    nodes.append(TextNode(text=f"Изображение PDF {file_name} стр {page_num+1}: {desc}", metadata={"file_name":file_name, "image_path":image_path, "page":page_num+1}))
-                    frame_data.append({"page": page_num+1, "image_path": image_path, "description": desc})
-                else:
-                    try: os.remove(image_path)
-                    except: pass
-    
+            with ThreadPoolExecutor(max_workers=v_conc) as executor:
+                futures = {executor.submit(describe_image_with_lmstudio, f["path"], llm_settings, shared_llm_url): f for f in frame_list}
+                
+                done_count = 0
+                for future in as_completed(futures):
+                    frame_info = futures[future]
+                    desc = future.result()
+                    done_count += 1
+                    
+                    if desc and "Изображение без описания" not in desc:
+                        nodes.append(TextNode(
+                            text=f"Изображение PDF {file_name} стр {frame_info['page']}: {desc}", 
+                            metadata={"file_name":file_name, "image_path":frame_info["path"], "page":frame_info["page"]}
+                        ))
+                        frame_data.append({
+                            "page": frame_info["page"], 
+                            "image_path": frame_info["path"], 
+                            "description": desc
+                        })
+                    else:
+                        try: os.remove(frame_info["path"])
+                        except: pass
+                    
+                    if progress_cb: progress_cb(65 + int(done_count/n*25), f"Описание PDF: {done_count}/{n}")
+
     # Сохраняем метаданные для PDF (как для видео), чтобы фронтенд мог показать картинки
     if frame_data:
+        # Сортируем по номеру страницы
+        frame_data.sort(key=lambda x: x["page"])
         metadata_json = {"file_name": file_name, "is_video": False, "transcript": [], "frames": frame_data}
         with open(os.path.join(os.path.dirname(file_path), f"{file_name}.json"), "w", encoding="utf-8") as f:
             json.dump(metadata_json, f, ensure_ascii=False, indent=2)
             
     return nodes
 
-def process_pptx(file_path, images_dir, llm_settings=None, shared_llm_url=None):
+def process_pptx(file_path, images_dir, llm_settings=None, shared_llm_url=None, progress_cb=None):
     nodes = []; file_name = os.path.basename(file_path); pdf_path = os.path.splitext(file_path)[0] + ".pdf"
     import win32com.client, pythoncom
     try:
@@ -394,7 +430,7 @@ def process_pptx(file_path, images_dir, llm_settings=None, shared_llm_url=None):
         if os.path.exists(pdf_path):
             if os.path.exists(file_path): os.remove(file_path)
             # Метаданные сохраняем уже для нового PDF
-            nodes = process_pdf(pdf_path, images_dir, llm_settings, shared_llm_url, original_filename=os.path.basename(pdf_path))
+            nodes = process_pdf(pdf_path, images_dir, llm_settings, shared_llm_url, original_filename=os.path.basename(pdf_path), progress_cb=progress_cb)
         else:
             raise Exception("PDF conversion failed")
     except:
@@ -403,7 +439,7 @@ def process_pptx(file_path, images_dir, llm_settings=None, shared_llm_url=None):
             nodes.append(TextNode(text="\n".join([sh.text for sh in slide.shapes if hasattr(sh, "text")]), metadata={"file_name":file_name, "page":i+1}))
     return nodes
 
-def process_docx(file_path, images_dir, llm_settings=None, shared_llm_url=None):
+def process_docx(file_path, images_dir, llm_settings=None, shared_llm_url=None, progress_cb=None):
     nodes = []; file_name = os.path.basename(file_path); pdf_path = os.path.splitext(file_path)[0] + ".pdf"
     import win32com.client, pythoncom
     try:
@@ -415,7 +451,7 @@ def process_docx(file_path, images_dir, llm_settings=None, shared_llm_url=None):
         if os.path.exists(pdf_path):
             if os.path.exists(file_path): os.remove(file_path)
             # Метаданные сохраняем уже для нового PDF
-            nodes = process_pdf(pdf_path, images_dir, llm_settings, shared_llm_url, original_filename=os.path.basename(pdf_path))
+            nodes = process_pdf(pdf_path, images_dir, llm_settings, shared_llm_url, original_filename=os.path.basename(pdf_path), progress_cb=progress_cb)
         else:
             raise Exception("PDF conversion failed")
     except:
@@ -489,9 +525,9 @@ def ingest_file(file_path, notebook_id, progress_cb=None, llm_settings=None):
     shared_llm_url = None
 
     try:
-        if ext == '.pdf': nodes = process_pdf(file_path, images_dir, llm_settings, shared_llm_url)
-        elif ext == '.pptx': nodes = process_pptx(file_path, images_dir, llm_settings, shared_llm_url)
-        elif ext == '.docx': nodes = process_docx(file_path, images_dir, llm_settings, shared_llm_url)
+        if ext == '.pdf': nodes = process_pdf(file_path, images_dir, llm_settings, shared_llm_url, progress_cb=progress_cb)
+        elif ext == '.pptx': nodes = process_pptx(file_path, images_dir, llm_settings, shared_llm_url, progress_cb=progress_cb)
+        elif ext == '.docx': nodes = process_docx(file_path, images_dir, llm_settings, shared_llm_url, progress_cb=progress_cb)
         else:
             try:
                 with open(file_path, 'r', encoding='utf-8') as f: text = f.read()

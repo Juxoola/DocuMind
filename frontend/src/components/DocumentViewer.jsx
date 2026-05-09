@@ -240,7 +240,7 @@ export default function DocumentViewer({ file, notebook, onClose }) {
             ))}
           </div>
         ) : showRawText ? (
-          <div className="h-full p-8 overflow-y-auto prose prose-invert prose-sm max-w-none">
+          <div className="flex-1 p-8 overflow-y-auto custom-scrollbar prose prose-invert prose-sm max-w-none min-h-0">
             <pre className="whitespace-pre-wrap font-sans text-xs leading-loose text-foreground/80">
               {content || 'Текст пуст или извлекается...'}
             </pre>

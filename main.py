@@ -25,6 +25,9 @@ from contextlib import asynccontextmanager
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # При запуске - на всякий случай чистим мусор
+    kill_stray_servers()
+    
     # Фоновая предзагрузка моделей (сервер запустится мгновенно)
     import threading
     from src.rag_pipeline import preload_all_models
@@ -35,6 +38,13 @@ async def lifespan(app: FastAPI):
     # Shutdown: Выгрузка
     print("[SERVER] Остановка системы...")
     unload_all_models()
+    kill_stray_servers()
+
+# Регистрация atexit для надежности на Windows
+import atexit
+from src.gguf_direct import unload_all_models, kill_stray_servers
+atexit.register(unload_all_models)
+atexit.register(kill_stray_servers)
 
 app = FastAPI(title="NotebookLM Local Clone", lifespan=lifespan)
 
