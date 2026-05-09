@@ -202,7 +202,7 @@ export default function DocumentViewer({ file, notebook, onClose }) {
       </div>
 
       {/* Body */}
-      <div className="flex-1 overflow-hidden relative">
+      <div className="flex-1 overflow-hidden relative flex flex-col">
         {loading ? (
           <div className="h-full flex flex-col items-center justify-center gap-4 text-muted-foreground">
              <div className="w-10 h-10 border-2 border-primary border-t-transparent rounded-full animate-spin shadow-[0_0_15px_rgba(var(--primary),0.3)]" />
