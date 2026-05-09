@@ -55,10 +55,10 @@ GGUF_GPU_LAYERS = int(os.getenv("GGUF_GPU_LAYERS", -1))
 
 # Настройки генерации Vision (строгие)
 VISION_TEMPERATURE = float(os.getenv("VISION_TEMPERATURE", 0.1))
-VISION_REPEAT_PENALTY = float(os.getenv("VISION_REPEAT_PENALTY", 1.2))
+VISION_REPEAT_PENALTY = float(os.getenv("VISION_REPEAT_PENALTY", 1.3))
 VISION_TOP_P = float(os.getenv("VISION_TOP_P", 0.9))
 VISION_MIN_P = float(os.getenv("VISION_MIN_P", 0.05))
-VISION_CONCURRENCY = int(os.getenv("VISION_CONCURRENCY", 1)) # Количество параллельных потоков анализа
+VISION_CONCURRENCY = int(os.getenv("VISION_CONCURRENCY", 4)) # Количество параллельных потоков анализа
 
 # Настройки генерации Chat (творческие)
 CHAT_TEMPERATURE = float(os.getenv("CHAT_TEMPERATURE", 0.7))
