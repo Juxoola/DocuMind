@@ -48,10 +48,23 @@ GGUF_SERVER_HOST = os.getenv("GGUF_SERVER_HOST", "127.0.0.1")
 GGUF_THREADS = int(os.getenv("GGUF_THREADS", 0))
 
 # Контекст (токенов)
-GGUF_CTX_SIZE = int(os.getenv("GGUF_CTX_SIZE", 4096))
+GGUF_CTX_SIZE = int(os.getenv("GGUF_CTX_SIZE", 8192))
 
 # GPU слоёв (-1 = все на GPU, 0 = только CPU)
 GGUF_GPU_LAYERS = int(os.getenv("GGUF_GPU_LAYERS", -1))
+
+# Настройки генерации Vision (строгие)
+VISION_TEMPERATURE = float(os.getenv("VISION_TEMPERATURE", 0.1))
+VISION_REPEAT_PENALTY = float(os.getenv("VISION_REPEAT_PENALTY", 1.2))
+VISION_TOP_P = float(os.getenv("VISION_TOP_P", 0.9))
+VISION_MIN_P = float(os.getenv("VISION_MIN_P", 0.05))
+VISION_CONCURRENCY = int(os.getenv("VISION_CONCURRENCY", 1)) # Количество параллельных потоков анализа
+
+# Настройки генерации Chat (творческие)
+CHAT_TEMPERATURE = float(os.getenv("CHAT_TEMPERATURE", 0.7))
+CHAT_REPEAT_PENALTY = float(os.getenv("CHAT_REPEAT_PENALTY", 1.1))
+CHAT_TOP_P = float(os.getenv("CHAT_TOP_P", 0.95))
+CHAT_MIN_P = float(os.getenv("CHAT_MIN_P", 0.05))
 
 # ── Сохранение настроек ──
 

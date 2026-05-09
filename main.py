@@ -17,7 +17,7 @@ from src.rag_pipeline import build_index, retrieve_nodes, build_file_context, ma
 from src.gguf_manager import scan_gguf_dirs
 from src.gguf_direct import (
     get_gguf_llm, unload_all_models, get_loaded_models,
-    detect_model_family, stream_gguf_chat
+    detect_model_family, stream_gguf_chat, kill_stray_servers
 )
 from fastapi.middleware.cors import CORSMiddleware
 from llama_index.core import Settings
@@ -45,6 +45,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Принудительная очистка старых процессов llama-server при запуске приложения
+kill_stray_servers()
 
 # Монтируем статику
 os.makedirs(os.path.join(config.BASE_DIR, "static"), exist_ok=True)
@@ -164,14 +167,18 @@ async def upload_file(
     gguf_mmproj_path: Optional[str] = None,
     vision_model_path: Optional[str] = None,
     vision_mmproj_path: Optional[str] = None,
-    vision_temperature: Optional[float] = 0.2,
+    vision_temperature: Optional[float] = 0.1,
     vision_ctx_size: Optional[int] = 8192,
     vision_gpu_layers: Optional[int] = -1,
     vision_threads: Optional[int] = 8,
     vision_batch_size: Optional[int] = 2048,
     vision_flash_attn: Optional[str] = "true",
-    vision_max_tokens: Optional[int] = 1024,
-    vision_repeat_penalty: Optional[float] = 1.1,
+    vision_max_tokens: Optional[int] = 4096,
+    vision_repeat_penalty: Optional[float] = 1.2,
+    vision_top_p: Optional[float] = 0.9,
+    vision_min_p: Optional[float] = 0.05,
+    vision_presence_penalty: Optional[float] = 0.0,
+    vision_frequency_penalty: Optional[float] = 0.0,
     vision_concurrency: Optional[int] = 1,
     vision_kv_quant: Optional[int] = 2,
 ):
@@ -217,6 +224,10 @@ async def upload_file(
         "vision_flash_attn": vision_flash_attn,
         "vision_max_tokens": vision_max_tokens,
         "vision_repeat_penalty": vision_repeat_penalty,
+        "vision_top_p": vision_top_p,
+        "vision_min_p": vision_min_p,
+        "vision_presence_penalty": vision_presence_penalty,
+        "vision_frequency_penalty": vision_frequency_penalty,
         "vision_concurrency": vision_concurrency,
         "vision_kv_quant": vision_kv_quant,
     }
@@ -425,13 +436,13 @@ class ChatRequest(BaseModel):
     presence_penalty: Optional[float] = 0.0
     frequency_penalty: Optional[float] = 0.0
     repeat_penalty: Optional[float] = 1.1
-    top_p: Optional[float] = 0.9
+    top_p: Optional[float] = 0.95
     min_p: Optional[float] = 0.05
     # GGUF параметры
     use_gguf: Optional[str] = None
     gguf_model_path: Optional[str] = None
     gguf_mmproj_path: Optional[str] = None
-    gguf_temperature: Optional[float] = 0.1
+    gguf_temperature: Optional[float] = 0.7
     gguf_ctx_size: Optional[int] = 8192
     gguf_gpu_layers: Optional[int] = -1
     gguf_threads: Optional[int] = 8

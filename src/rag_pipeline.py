@@ -78,7 +78,7 @@ def init_settings(max_tokens=1024):
         api_base=config.LM_STUDIO_URL,
         api_key="lm-studio",
         model="gpt-4o",
-        temperature=0.1,
+        temperature=config.CHAT_TEMPERATURE,
         max_tokens=max_tokens
     )
 

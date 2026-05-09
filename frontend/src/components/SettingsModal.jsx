@@ -426,8 +426,8 @@ export default function SettingsModal({ isOpen, onClose, settings, onSave }) {
                                                     <label className="flex flex-col gap-1 text-[10px] text-muted-foreground" title="Сжатие памяти кэша для Vision модели. Помогает при анализе длинных видео.">
                                                         KV Cache Quant ℹ️
                                                         <select 
-                                                            value={localSettings.gguf_kv_quant || 2}
-                                                            onChange={(e) => setLocalSettings({...localSettings, gguf_kv_quant: parseInt(e.target.value)})}
+                                                            value={localSettings.vision_kv_quant || 2}
+                                                            onChange={(e) => setLocalSettings({...localSettings, vision_kv_quant: parseInt(e.target.value)})}
                                                             className="bg-background border border-border rounded px-2 py-1 text-foreground"
                                                         >
                                                             <option value={1}>F16</option>
@@ -438,19 +438,23 @@ export default function SettingsModal({ isOpen, onClose, settings, onSave }) {
                                                     </label>
                                                     <label className="flex flex-col gap-1 text-[10px] text-muted-foreground" title="Штраф за повторения для Vision модели.">
                                                         Repeat Pen. ℹ️
-                                                        <input type="number" step="0.1" value={localSettings.repeat_penalty || 1.1} onChange={e => setLocalSettings({...localSettings, repeat_penalty: parseFloat(e.target.value)})} className="bg-background border border-border rounded px-2 py-1 text-foreground" />
+                                                        <input type="number" step="0.1" value={localSettings.vision_repeat_penalty || 1.2} onChange={e => setLocalSettings({...localSettings, vision_repeat_penalty: parseFloat(e.target.value)})} className="bg-background border border-border rounded px-2 py-1 text-foreground" />
                                                     </label>
                                                     <label className="flex flex-col gap-1 text-[10px] text-muted-foreground" title="Штраф за упоминание тем для Vision модели.">
                                                         Presence Pen. ℹ️
-                                                        <input type="number" step="0.1" value={localSettings.presence_penalty || 0.0} onChange={e => setLocalSettings({...localSettings, presence_penalty: parseFloat(e.target.value)})} className="bg-background border border-border rounded px-2 py-1 text-foreground" />
+                                                        <input type="number" step="0.1" value={localSettings.vision_presence_penalty || 0.0} onChange={e => setLocalSettings({...localSettings, vision_presence_penalty: parseFloat(e.target.value)})} className="bg-background border border-border rounded px-2 py-1 text-foreground" />
                                                     </label>
                                                     <label className="flex flex-col gap-1 text-[10px] text-muted-foreground" title="Вероятностная фильтрация для Vision модели.">
                                                         Top-P ℹ️
-                                                        <input type="number" step="0.05" value={localSettings.top_p || 0.9} onChange={e => setLocalSettings({...localSettings, top_p: parseFloat(e.target.value)})} className="bg-background border border-border rounded px-2 py-1 text-foreground" />
+                                                        <input type="number" step="0.05" value={localSettings.vision_top_p || 0.9} onChange={e => setLocalSettings({...localSettings, vision_top_p: parseFloat(e.target.value)})} className="bg-background border border-border rounded px-2 py-1 text-foreground" />
                                                     </label>
                                                     <label className="flex flex-col gap-1 text-[10px] text-muted-foreground" title="Минимальный порог вероятности для Vision модели.">
                                                         Min-P ℹ️
-                                                        <input type="number" step="0.01" value={localSettings.min_p || 0.05} onChange={e => setLocalSettings({...localSettings, min_p: parseFloat(e.target.value)})} className="bg-background border border-border rounded px-2 py-1 text-foreground" />
+                                                        <input type="number" step="0.01" value={localSettings.vision_min_p || 0.05} onChange={e => setLocalSettings({...localSettings, vision_min_p: parseFloat(e.target.value)})} className="bg-background border border-border rounded px-2 py-1 text-foreground" />
+                                                    </label>
+                                                    <label className="flex flex-col gap-1 text-[10px] text-muted-foreground" title="Количество параллельных потоков анализа изображений. Ускоряет обработку видео.">
+                                                        Concurrency ℹ️
+                                                        <input type="number" min="1" max="8" value={localSettings.vision_concurrency || 1} onChange={e => setLocalSettings({...localSettings, vision_concurrency: parseInt(e.target.value)})} className="bg-background border border-border rounded px-2 py-1 text-foreground" />
                                                     </label>
                                                 </div>
                                             </div>

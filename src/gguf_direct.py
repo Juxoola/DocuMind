@@ -44,8 +44,8 @@ def is_server_ready(port: int) -> bool:
 def get_gguf_llm(
     gguf_path: str,
     mmproj_path: str = None,
-    temperature: float = 0.3,
-    ctx_size: int = 8192,
+    temperature: float = 0.1,
+    ctx_size: int = None,
     gpu_layers: int = -1,
     n_threads: int = None,
     n_batch: int = 2048,
@@ -54,6 +54,7 @@ def get_gguf_llm(
     type_k: int = 2,
     type_v: int = 2,
     enable_thinking: bool = True,
+    n_parallel: int = 1,
     custom_args: Optional[List[str]] = None,
 ) -> str:
     """
@@ -69,7 +70,7 @@ def get_gguf_llm(
     # Нормализуем значения (None -> default), чтобы избежать ложных перезапусков
     current_config = {
         "mmproj": mmproj_path or None,
-        "ctx_size": int(ctx_size or 8192),
+        "ctx_size": int(ctx_size or config.GGUF_CTX_SIZE),
         "gpu_layers": int(gpu_layers if gpu_layers is not None else -1),
         "n_batch": int(n_batch or 2048),
         "flash_attn": bool(flash_attn),
@@ -77,6 +78,7 @@ def get_gguf_llm(
         "type_k": int(type_k or 2),
         "type_v": int(type_v or 2),
         "enable_thinking": bool(enable_thinking),
+        "n_parallel": int(n_parallel or 1),
         "custom_args": custom_args if custom_args is not None else []
     }
 
@@ -105,14 +107,18 @@ def get_gguf_llm(
         port = s.getsockname()[1]
         s.close()
 
+    # Для параллельной работы нужно расширить общий контекст, чтобы каждому слоту хватило места
+    total_ctx = current_config["ctx_size"] * current_config["n_parallel"]
+    
     cmd = [
         SERVER_EXE,
         "-m", gguf_path,
         "--port", str(port),
-        "-c", str(current_config["ctx_size"]),
+        "-c", str(total_ctx),
         "-ngl", str(current_config["gpu_layers"]),
         "-b", str(current_config["n_batch"]),
-        "--parallel", "1",
+        "--parallel", str(current_config["n_parallel"]),
+        "--cont-batching",
         "--no-context-shift",
         "--jinja",
         "-n", str(current_config["max_tokens"])
@@ -164,6 +170,7 @@ def get_gguf_llm(
                 "type_k": type_k,
                 "type_v": type_v,
                 "enable_thinking": enable_thinking,
+                "n_parallel": n_parallel,
                 "custom_args": custom_args
             }
             return f"http://127.0.0.1:{port}"
@@ -225,6 +232,18 @@ def stream_gguf_chat(
     except Exception as e:
         print(f"[GGUF Stream] Ошибка: {e}")
         yield f"Ошибка связи с сервером: {e}"
+
+def kill_stray_servers():
+    """Убивает все запущенные процессы llama-server.exe в системе (Windows/Linux)."""
+    print("[GGUF Server] Поиск и завершение сторонних процессов llama-server...")
+    try:
+        if os.name == 'nt':
+            # /F - принудительно, /IM - по имени образа, /T - дерево процессов
+            subprocess.run(["taskkill", "/F", "/IM", "llama-server.exe", "/T"], capture_output=True)
+        else:
+            subprocess.run(["pkill", "-9", "llama-server"], capture_output=True)
+    except Exception as e:
+        print(f"[GGUF Server] Ошибка при очистке процессов: {e}")
 
 def unload_all_models():
     """Убивает все процессы серверов максимально надежно."""

@@ -80,44 +80,62 @@ def describe_image_with_lmstudio(image_path, llm_settings=None, existing_llm_url
         text = re.sub(r'<start_of_turn>|<end_of_turn>', '', text)
         return text.strip()
 
-    prompt = ("Опиши ТОЛЬКО основное содержимое экрана (слайд, доску, рисунки, схемы, формулы, рукописный текст или код). ПОЛНОСТЬЮ ИГНОРИРУЙ интерфейс браузера, видеозвонка, чат, панель задач Windows и спикеров. Напиши кратко суть того, что написано или нарисовано на самой презентации или доске, на русском языке."
-     )
+    prompt = """Проведи глубокий технический анализ изображения. 
+1. СТРУКТУРА: Опиши основные окна, их заголовки и расположение.
+2. OCR (ТЕКСТ): Извлеки весь значимый текст, данные, адреса и названия. Сохраняй структуру (таблицы, списки).
+3. СХЕМЫ И ГРАФИКИ: Опиши компоненты, связи и ключевые показатели на схемах.
+Пиши сразу результат, четко и структурировано. Избегай вступлений и лишних рассуждений."""
 
     # Если передан URL запущенного сервера llama-server
     if existing_llm_url:
         try:
-            v_temp = float(llm_settings.get("vision_temperature") or 0.2)
+            v_temp = float(llm_settings.get("vision_temperature") or config.VISION_TEMPERATURE)
             v_max = int(llm_settings.get("vision_max_tokens") or 4096)
-            r_pen = float(llm_settings.get("vision_repeat_penalty") or 1.1)
+            v_r_pen = float(llm_settings.get("vision_repeat_penalty") or config.VISION_REPEAT_PENALTY)
+            v_top_p = float(llm_settings.get("vision_top_p") or config.VISION_TOP_P)
+            v_min_p = float(llm_settings.get("vision_min_p") or config.VISION_MIN_P)
+            v_pres = float(llm_settings.get("vision_presence_penalty") or 0.0)
+            v_freq = float(llm_settings.get("vision_frequency_penalty") or 0.0)
             
             payload = {
                 "messages": [{"role":"user","content":[{"type":"text","text":prompt},{"type":"image_url","image_url":{"url":f"data:image/jpeg;base64,{get_image_base64(image_path)}"}}]}],
-                "temperature": 0.0, 
+                "temperature": v_temp, 
                 "max_tokens": v_max,
-                "repeat_penalty": r_pen,
-                "frequency_penalty": 0.5,
-                "stop": ["***", "###", "---"]
+                "repeat_penalty": v_r_pen,
+                "top_p": v_top_p,
+                "min_p": v_min_p,
+                "presence_penalty": v_pres,
+                "frequency_penalty": v_freq
             }
             r = requests.post(f"{existing_llm_url}/v1/chat/completions", json=payload, timeout=300)
+            if r.status_code != 200:
+                print(f"[Ingestion] Сервер GGUF вернул ошибку {r.status_code}: {r.text}")
+                return f"Ошибка сервера GGUF: {r.status_code}"
+            
             res = r.json()
+            if "choices" not in res:
+                print(f"[Ingestion] В ответе GGUF нет 'choices': {res}")
+                return "Ошибка формата ответа GGUF."
+                
             ans = res["choices"][0]["message"]["content"]
             reason = res["choices"][0].get("finish_reason")
             ans = _clean_think_tags(ans)
             print(f"[Ingestion] Описание получено ({len(ans)} симв.). Причина завершения: {reason}")
             return ans
         except Exception as e: 
-            print(f"[Ingestion] Ошибка сервера GGUF: {e}")
-            return "Ошибка анализа кадра (GGUF)."
+            print(f"[Ingestion] Исключение при запросе к GGUF: {e}")
+            return "Ошибка связи с GGUF."
 
     # Fallback на LM Studio или другой OpenAI API
     api_url = (llm_settings.get("llm_url") if llm_settings else None) or config.LM_STUDIO_URL
     api_key = (llm_settings.get("llm_api_key") if llm_settings else None) or "lm-studio"
     model_name = (llm_settings.get("llm_model") if llm_settings else None) or "gpt-4o"
     try:
+        v_temp = float(llm_settings.get("vision_temperature") or 0.2)
         payload = {
             "model": model_name, 
             "messages": [{"role":"user","content":[{"type":"text","text":prompt},{"type":"image_url","image_url":{"url":f"data:image/jpeg;base64,{get_image_base64(image_path)}"}}]}], 
-            "temperature": 0.2
+            "temperature": v_temp
         }
         r = requests.post(f"{api_url.rstrip('/')}/chat/completions", headers={"Authorization":f"Bearer {api_key}"}, json=payload, timeout=30)
         ans = r.json()["choices"][0]["message"]["content"]
@@ -239,11 +257,12 @@ def process_audio_video(file_path, images_dir, is_video=False, progress_cb=None,
                     v_mmproj = llm_settings.get("vision_mmproj_path") or llm_settings.get("gguf_mmproj_path")
                     g_path = config.resolve_model_path(v_model)
                     m_path = config.resolve_model_path(v_mmproj)
-                    v_ctx = int(llm_settings.get("vision_ctx_size") or 8192)
+                    v_ctx = int(llm_settings.get("vision_ctx_size") or config.GGUF_CTX_SIZE)
                     v_gl = int(llm_settings.get("vision_gpu_layers") or -1)
                     v_b = int(llm_settings.get("vision_batch_size") or 2048)
                     v_fa = llm_settings.get("vision_flash_attn") == "true"
                     v_kv = int(llm_settings.get("vision_kv_quant") or 2)
+                    v_conc = int(llm_settings.get("vision_concurrency") or config.VISION_CONCURRENCY)
                     
                     shared_llm_url = get_gguf_llm(
                         gguf_path=g_path, 
@@ -251,17 +270,29 @@ def process_audio_video(file_path, images_dir, is_video=False, progress_cb=None,
                         ctx_size=v_ctx, gpu_layers=v_gl, n_batch=v_b,
                         flash_attn=v_fa,
                         type_k=v_kv, type_v=v_kv,
+                        n_parallel=v_conc,
                         custom_args=["--ignore-eos"]
                     )
                 except Exception as e: print(f"Init Vision Server Error: {e}")
 
-        prog(65, f"Описание {n} кадров (последовательно)...")
-        for idx, (path, t) in enumerate(frame_list):
-            desc = describe_image_with_lmstudio(path, llm_settings, shared_llm_url)
-            nodes.append(TextNode(text=f"Кадр {file_name} [{format_seconds(t)}]: {desc}", metadata={"file_name":file_name, "image_path":path, "time":t}))
-            frame_data.append({"time":t, "image_path":path, "description":desc})
-            done = idx + 1
-            prog(65 + int(done/n*22) if n else 87, f"Описание: {done}/{n}")
+        prog(65, f"Описание {n} кадров ({'параллельно' if (int(llm_settings.get('vision_concurrency') or config.VISION_CONCURRENCY)) > 1 else 'последовательно'})...")
+        v_conc = int(llm_settings.get("vision_concurrency") or config.VISION_CONCURRENCY)
+        
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=v_conc) as executor:
+            # Создаем список задач
+            futures = []
+            for idx, (path, t) in enumerate(frame_list):
+                futures.append(executor.submit(describe_image_with_lmstudio, path, llm_settings, shared_llm_url))
+            
+            # Собираем результаты по мере готовности для обновления прогресса
+            for idx, future in enumerate(futures):
+                desc = future.result()
+                path, t = frame_list[idx]
+                nodes.append(TextNode(text=f"Кадр {file_name} [{format_seconds(t)}]: {desc}", metadata={"file_name":file_name, "image_path":path, "time":t}))
+                frame_data.append({"time":t, "image_path":path, "description":desc})
+                done = idx + 1
+                prog(65 + int(done/n*22) if n else 87, f"Описание: {done}/{n}")
             
         if shared_llm_url:
             unload_all_models()
@@ -384,7 +415,7 @@ def ingest_file(file_path, notebook_id, progress_cb=None, llm_settings=None):
                 v_mmproj = llm_settings.get("vision_mmproj_path") or llm_settings.get("gguf_mmproj_path")
                 g_path = config.resolve_model_path(v_model)
                 m_path = config.resolve_model_path(v_mmproj)
-                v_ctx = int(llm_settings.get("vision_ctx_size") or 8192)
+                v_ctx = int(llm_settings.get("vision_ctx_size") or config.GGUF_CTX_SIZE)
                 v_gl = int(llm_settings.get("vision_gpu_layers") or -1)
                 v_b = int(llm_settings.get("vision_batch_size") or 2048)
                 v_fa = llm_settings.get("vision_flash_attn") == "true"
