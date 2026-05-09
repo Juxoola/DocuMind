@@ -1,5 +1,9 @@
 import os
 import json
+import logging
+from functools import lru_cache
+
+logger = logging.getLogger(__name__)
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 NOTEBOOKS_DIR = os.path.join(BASE_DIR, "notebooks")
@@ -66,6 +70,24 @@ CHAT_REPEAT_PENALTY = float(os.getenv("CHAT_REPEAT_PENALTY", 1.1))
 CHAT_TOP_P = float(os.getenv("CHAT_TOP_P", 0.95))
 CHAT_MIN_P = float(os.getenv("CHAT_MIN_P", 0.05))
 
+# ── Системный промпт (единый для всех LLM) ──
+
+SYSTEM_PROMPT = (
+    "Ты — умный и точный AI-помощник. ОТВЕЧАЙ СТРОГО НА РУССКОМ ЯЗЫКЕ.\n"
+    "Используй Markdown для форматирования.\n\n"
+    "ПРАВИЛА ОТВЕТА:\n"
+    "1. Всегда отвечай на вопрос СРАЗУ, в самом начале ответа.\n"
+    "2. Если вопрос содержит варианты ответа (тест) — СНАЧАЛА напиши правильный вариант (букву и текст).\n"
+    "3. После прямого ответа приведи подробное объяснение на основе источников.\n\n"
+    "ПРАВИЛО ЦИТИРОВАНИЯ (КРИТИЧЕСКИ ДЛЯ СИСТЕМЫ):\n"
+    "- Каждое утверждение ДОЛЖНО завершаться ссылкой в формате [N].\n"
+    "- ПРИМЕР: «Поток нельзя запустить дважды [1].»\n"
+    "- НИКОГДА не пиши цифру источника без квадратных скобок.\n"
+    "- Если одно утверждение основано на нескольких источниках, пиши [1, 2].\n"
+    "- Все формулы пиши внутри $...$ или $$...$$.\n"
+    "- Если ответа нет в источниках — скажи \"В документах этого нет\".\n"
+)
+
 # ── Сохранение настроек ──
 
 LAST_MODELS_FILE = os.path.join(BASE_DIR, "last_models.json")
@@ -75,14 +97,16 @@ def save_last_model(gguf_path, mmproj_path):
     try:
         with open(LAST_MODELS_FILE, "w", encoding="utf-8") as f:
             json.dump({"gguf": gguf_path, "mmproj": mmproj_path}, f)
-    except: pass
+    except Exception as e:
+        logger.warning(f"Не удалось сохранить last_models: {e}")
 
 def load_last_model():
     try:
         if os.path.exists(LAST_MODELS_FILE):
             with open(LAST_MODELS_FILE, "r", encoding="utf-8") as f:
                 return json.load(f)
-    except: pass
+    except Exception as e:
+        logger.warning(f"Не удалось загрузить last_models: {e}")
     return {"gguf": None, "mmproj": None}
 
 def save_rag_config():
@@ -99,7 +123,8 @@ def save_rag_config():
     try:
         with open(RAG_CONFIG_FILE, "w", encoding="utf-8") as f:
             json.dump(config_data, f, indent=2, ensure_ascii=False)
-    except: pass
+    except Exception as e:
+        logger.warning(f"Не удалось сохранить RAG config: {e}")
 
 def load_rag_config():
     global EMBEDDING_MODEL_NAME, RERANKER_MODEL_NAME, QUANTIZATION, RAG_TOP_K_PER_FILE, RAG_RERANK_POOL, RAG_FINAL_TOP_N, USE_RERANKER, GGUF_SEARCH_DIRS
@@ -115,11 +140,13 @@ def load_rag_config():
                 RAG_FINAL_TOP_N = data.get("final_top_n", RAG_FINAL_TOP_N)
                 USE_RERANKER = data.get("use_reranker", USE_RERANKER)
                 GGUF_SEARCH_DIRS = data.get("gguf_search_dirs", GGUF_SEARCH_DIRS)
-    except: pass
+    except Exception as e:
+        logger.warning(f"Не удалось загрузить RAG config: {e}")
 
 # Загружаем настройки при старте
 load_rag_config()
 
+@lru_cache(maxsize=64)
 def resolve_model_path(path_or_filename: str) -> str:
     """
     Если путь абсолютный и существует — возвращает его.

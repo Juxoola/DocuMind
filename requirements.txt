@@ -1,9 +1,15 @@
 # --- Core RAG & LLM ---
 llama-index-core
-llama-index-llms-llama-cpp
 llama-index-embeddings-huggingface
 llama-index-readers-file
-llama-index-postprocessor-cohere-rerank
+llama-index-llms-openai
+llama-index-vector-stores-chroma
+chromadb
+sentence-transformers
+
+# --- Quantization ---
+transformers
+bitsandbytes
 
 # --- Speech & Audio ---
 torch
@@ -28,9 +34,7 @@ imageio-ffmpeg
 pymupdf
 python-pptx
 python-docx
-pywin32
+pywin32  # Windows only
 
 # --- Utils ---
 watchfiles
-gc-utils
-uuid

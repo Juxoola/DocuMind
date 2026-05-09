@@ -49,7 +49,7 @@ def get_server_status() -> Dict:
         r = requests.get(url, timeout=1)
         if r.status_code == 200:
             return {"running": True, "info": _server_info}
-    except: pass
+    except Exception: pass
     return {"running": True, "info": _server_info, "status": "initializing"}
 
 def start_gguf_server(
@@ -107,7 +107,7 @@ def start_gguf_server(
             if requests.get(f"http://127.0.0.1:{port}/health").status_code == 200:
                 print(f"[GGUF Manager] Сервер готов на порту {port}")
                 return {"status": "ok", "url": f"http://127.0.0.1:{port}/v1", "info": _server_info}
-        except: pass
+        except Exception: pass
         if _server_process.poll() is not None:
             return {"status": "error", "msg": "Процесс сервера завершился ошибкой"}
             

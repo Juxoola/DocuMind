@@ -168,7 +168,13 @@ export default function MainApp({ notebook, onExit }) {
       const data = await res.json();
       const files = data.files || [];
       setSources(files);
-      setSelectedSources(files);
+      // Сохраняем выбор пользователя: автоматически выбираем только НОВЫЕ файлы, не сбрасывая текущий выбор
+      setSelectedSources(prev => {
+        if (prev.length === 0) return files; // Первая загрузка — выбираем все
+        const newFiles = files.filter(f => !prev.includes(f) && !sources.includes(f));
+        const kept = prev.filter(f => files.includes(f)); // Убираем удалённые файлы из выбора
+        return [...kept, ...newFiles];
+      });
     } catch (err) {
       console.error(err);
     }
@@ -187,7 +193,7 @@ export default function MainApp({ notebook, onExit }) {
 
   return (
     <div className="flex h-screen w-full overflow-hidden bg-background relative">
-      {/* Sidebar with fixed positioning to avoid squishing chat */}
+      {/* Боковая панель с фиксированным позиционированием */}
       <AnimatePresence initial={false}>
         {isSidebarOpen && (
           <motion.div
@@ -213,7 +219,7 @@ export default function MainApp({ notebook, onExit }) {
               onUpload={handleUpload}
             />
 
-            {/* Sidebar Resizer */}
+            {/* Ресайзер боковой панели */}
             <div 
               className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize z-50 group/s-resizer hover:bg-primary/30 transition-colors"
               onMouseDown={(e) => {
@@ -238,7 +244,7 @@ export default function MainApp({ notebook, onExit }) {
         )}
       </AnimatePresence>
 
-      {/* Toggle Button for Hidden Sidebar */}
+      {/* Кнопка переключения скрытой панели */}
       {!isSidebarOpen && (
         <motion.button 
           initial={{ opacity: 0, x: -20 }}
@@ -250,7 +256,7 @@ export default function MainApp({ notebook, onExit }) {
         </motion.button>
       )}
 
-      {/* Main Chat Area - Always centered relative to the window, Sidebar is now an overlay */}
+      {/* Основная зона чата */}
       <main className="flex-1 flex flex-col min-w-0 bg-background relative z-0">
         <ChatArea 
           notebook={notebook}
@@ -264,7 +270,7 @@ export default function MainApp({ notebook, onExit }) {
         />
       </main>
 
-      {/* Document Viewer Overlay */}
+      {/* Оверлей просмотра документа */}
       <AnimatePresence>
         {isViewerOpen && (
           <>
@@ -283,10 +289,10 @@ export default function MainApp({ notebook, onExit }) {
               style={{ width: viewerWidth }}
               className="fixed right-0 top-0 bottom-0 glass z-50 border-l flex flex-col shadow-2xl"
             >
-              {/* Global Invisible Overlay while resizing to capture mouse events outside */}
+              {/* Глобальный невидимый оверлей при ресайзе */}
               {isResizing && <div className="fixed inset-0 z-[100] cursor-col-resize" />}
 
-              {/* Viewer Resizer */}
+              {/* Ресайзер просмотрщика */}
               <div 
                 className="absolute left-0 top-0 bottom-0 w-4 -left-2 cursor-col-resize z-[60] group/resizer"
                 onMouseDown={(e) => {
@@ -324,7 +330,7 @@ export default function MainApp({ notebook, onExit }) {
         )}
       </AnimatePresence>
 
-      {/* Global Floating Upload Card - Visible even when Sidebar is closed */}
+      {/* Глобальная плавающая карточка загрузки */}
       <AnimatePresence>
         {uploadState.isUploading && (
           <motion.div
@@ -333,7 +339,7 @@ export default function MainApp({ notebook, onExit }) {
             exit={{ opacity: 0, y: 50, scale: 0.9 }}
             className="fixed bottom-6 right-6 z-[1000] w-72 glass border border-primary/20 rounded-3xl p-5 shadow-[0_20px_50px_rgba(0,0,0,0.3)] overflow-hidden"
           >
-            {/* Background Glow */}
+            {/* Фоновое свечение */}
             <div className="absolute -top-10 -right-10 w-24 h-24 bg-primary/20 blur-[40px] rounded-full pointer-events-none" />
             
             <div className="relative z-10">
@@ -347,7 +353,7 @@ export default function MainApp({ notebook, onExit }) {
                 </span>
               </div>
 
-              {/* Progress Bars */}
+              {/* Полосы прогресса */}
               <div className="space-y-4">
                 <div>
                   <div className="flex justify-between items-center mb-1.5">

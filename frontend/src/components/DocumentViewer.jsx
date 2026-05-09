@@ -150,7 +150,7 @@ export default function DocumentViewer({ file, notebook, onClose }) {
 
   return (
     <div className="flex flex-col h-full overflow-hidden bg-background">
-      {/* Header */}
+      {/* Шапка */}
       <div className="p-4 border-b flex items-center justify-between bg-card/50 backdrop-blur-md z-20">
         <div className="flex items-center gap-3">
           <div className="p-2 bg-primary/10 text-primary rounded-xl shadow-inner">
@@ -201,7 +201,7 @@ export default function DocumentViewer({ file, notebook, onClose }) {
         </div>
       </div>
 
-      {/* Body */}
+      {/* Тело */}
       <div className="flex-1 overflow-hidden relative flex flex-col">
         {loading ? (
           <div className="h-full flex flex-col items-center justify-center gap-4 text-muted-foreground">
@@ -253,7 +253,7 @@ export default function DocumentViewer({ file, notebook, onClose }) {
           />
         ) : isMedia ? (
           <div className="h-full flex flex-col overflow-hidden">
-            {/* Media Player Area */}
+            {/* Зона медиаплеера */}
             <div className="relative p-6 pb-0 group">
               {/* Эффект подложки (Glow) */}
               <div className="absolute inset-0 bg-gradient-to-b from-primary/5 to-transparent pointer-events-none opacity-50" />
@@ -292,7 +292,7 @@ export default function DocumentViewer({ file, notebook, onClose }) {
               </div>
             </div>
             
-            {/* Intellectual Feed */}
+            {/* Интеллектуальная лента */}
             <div className="flex-1 overflow-hidden flex flex-col mt-6">
                <div className="px-6 mb-3 flex items-center justify-between">
                   <h4 className="text-[10px] font-black uppercase text-primary tracking-[0.2em]">Интеллектуальная лента</h4>

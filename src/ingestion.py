@@ -1,5 +1,6 @@
 import os
 import sys
+import logging
 import types
 import warnings
 import subprocess
@@ -7,7 +8,7 @@ import shutil
 import cv2
 import uuid
 import numpy as np
-import fitz  # PyMuPDF
+import fitz  # библиотека PyMuPDF
 from pptx import Presentation
 import concurrent.futures
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -20,6 +21,8 @@ import time
 import gc
 from llama_index.core.node_parser import SentenceSplitter
 from src.gguf_direct import detect_model_family, get_gguf_llm, unload_all_models
+
+logger = logging.getLogger(__name__)
 
 # Подавляем шумные предупреждения
 warnings.filterwarnings("ignore", message="Module 'speechbrain")
@@ -46,7 +49,8 @@ try:
     import torch
     lib_dir = os.path.join(os.path.dirname(torch.__file__), 'lib')
     if os.path.exists(lib_dir): os.add_dll_directory(lib_dir)
-except: pass
+except Exception:
+    pass
 
 import whisperx
 import config
@@ -167,17 +171,17 @@ def describe_image_with_lmstudio(image_path, llm_settings=None, existing_llm_url
                         print(f"[Ingestion] Описание получено ({len(ans)} симв.). Причина завершения: {reason}")
                         return ans
                 elif r.status_code == 500:
-                    print(f"[Ingestion] GGUF 500 (Attempt {attempt+1}). Retrying...")
+                    print(f"[Ingestion] GGUF 500 (попытка {attempt+1}). Повтор...")
                     time.sleep(2)
                     continue
                 else:
                     print(f"[Ingestion] Ошибка GGUF {r.status_code}: {r.text}")
             except Exception as e:
-                print(f"[Ingestion] Ошибка запроса (Attempt {attempt+1}): {e}")
+                print(f"[Ingestion] Ошибка запроса (попытка {attempt+1}): {e}")
                 time.sleep(1)
-        return "Ошибка анализа после попыток повтора"
+        return "Ошибка анализа после всех попыток"
 
-    # Fallback на LM Studio или другой OpenAI API
+    # Резервный вариант через LM Studio или другой OpenAI API
     api_url = (llm_settings.get("llm_url") if llm_settings else None) or config.LM_STUDIO_URL
     api_key = (llm_settings.get("llm_api_key") if llm_settings else None) or "lm-studio"
     model_name = (llm_settings.get("llm_model") if llm_settings else None) or "gpt-4o"
@@ -191,20 +195,23 @@ def describe_image_with_lmstudio(image_path, llm_settings=None, existing_llm_url
         r = requests.post(f"{api_url.rstrip('/')}/chat/completions", headers={"Authorization":f"Bearer {api_key}"}, json=payload, timeout=30)
         ans = r.json()["choices"][0]["message"]["content"]
         return _clean_think_tags(ans)
-    except: return "Изображение без описания."
+    except Exception as e:
+        logger.warning(f"Ошибка резервного Vision через LM Studio: {e}")
+        return "Изображение без описания."
 
 def save_high_res_frame(video_path, time_sec, output_path):
     try:
         from imageio_ffmpeg import get_ffmpeg_exe
         cmd = [get_ffmpeg_exe(), "-y", "-hwaccel", "cuda", "-ss", str(time_sec), "-i", video_path, "-vframes", "1", "-vf", "scale=-2:720", "-q:v", "4", output_path]
         subprocess.run(cmd, capture_output=True)
-    except: pass
+    except Exception as e:
+        logger.warning(f"Ошибка FFmpeg при сохранении кадра: {e}")
 
 def process_audio_video(file_path, images_dir, is_video=False, progress_cb=None, llm_settings=None):
     file_name = os.path.basename(file_path)
     def prog(pct, msg):
         try: print(f"  [{pct}%] {msg}")
-        except: pass
+        except Exception: pass
         if progress_cb: progress_cb(pct, msg)
     
     nodes = []
@@ -285,7 +292,7 @@ def process_audio_video(file_path, images_dir, is_video=False, progress_cb=None,
                                     else:
                                         if frame_list: 
                                             try: os.remove(frame_list[-1][0])
-                                            except: pass
+                                            except Exception: pass
                                             frame_list[-1] = (img_path, current_sec)
                                     prev_saved_thumb = thumb
                             stable_since_sec = current_sec
@@ -416,7 +423,7 @@ def process_pdf(file_path, images_dir, llm_settings=None, shared_llm_url=None, o
                         })
                     else:
                         try: os.remove(frame_info["path"])
-                        except: pass
+                        except Exception: pass
                     
                     if progress_cb: progress_cb(65 + int(done_count/n*25), f"Описание PDF: {done_count}/{n}")
 
@@ -445,7 +452,8 @@ def process_pptx(file_path, images_dir, llm_settings=None, shared_llm_url=None, 
             nodes = process_pdf(pdf_path, images_dir, llm_settings, shared_llm_url, original_filename=os.path.basename(pdf_path), progress_cb=progress_cb)
         else:
             raise Exception("PDF conversion failed")
-    except:
+    except Exception as e:
+        logger.warning(f"COM-конвертация PPTX не удалась, резерв через python-pptx: {e}")
         prs = Presentation(file_path)
         for i, slide in enumerate(prs.slides):
             nodes.append(TextNode(text="\n".join([sh.text for sh in slide.shapes if hasattr(sh, "text")]), metadata={"file_name":file_name, "page":i+1}))
@@ -466,7 +474,8 @@ def process_docx(file_path, images_dir, llm_settings=None, shared_llm_url=None, 
             nodes = process_pdf(pdf_path, images_dir, llm_settings, shared_llm_url, original_filename=os.path.basename(pdf_path), progress_cb=progress_cb)
         else:
             raise Exception("PDF conversion failed")
-    except:
+    except Exception as e:
+        logger.warning(f"COM-конвертация DOCX не удалась, резерв через python-docx: {e}")
         import docx
         nodes.append(TextNode(text="\n".join([p.text for p in docx.Document(file_path).paragraphs]), metadata={"file_name":file_name}))
     return nodes
@@ -486,7 +495,7 @@ def ensure_720p_video(file_path, prog_cb=None):
                 if "Duration" in line:
                     time_str = line.split("Duration: ")[1].split(",")[0]
                     h, m, s = time_str.split(":"); return float(h)*3600 + float(m)*60 + float(s)
-        except: pass
+        except Exception: pass
         return 0
     duration = get_duration(file_path); temp_final = file_path + ".720p.mp4"
     if duration < 120:
@@ -508,7 +517,7 @@ def ensure_720p_video(file_path, prog_cb=None):
         merge_cmd = [ffmpeg, "-y", "-f", "concat", "-safe", "0", "-i", list_path, "-i", file_path, "-map", "0:v", "-map", "1:a?", "-c", "copy", "-movflags", "+faststart", temp_final]
         subprocess.run(merge_cmd, capture_output=True)
         try: shutil.rmtree(temp_dir)
-        except: pass
+        except Exception: pass
     if os.path.exists(temp_final) and os.path.getsize(temp_final) > 1000:
         if os.path.exists(file_path): os.remove(file_path)
         new_path = os.path.splitext(file_path)[0] + ".mp4"
@@ -543,7 +552,7 @@ def ingest_file(file_path, notebook_id, progress_cb=None, llm_settings=None):
         else:
             try:
                 with open(file_path, 'r', encoding='utf-8') as f: text = f.read()
-            except:
+            except UnicodeDecodeError:
                 with open(file_path, 'r', encoding='cp1251') as f: text = f.read()
             nodes = SentenceSplitter(chunk_size=512).get_nodes_from_documents([TextNode(text=text, metadata={"file_name":os.path.basename(file_path)})])
     finally:

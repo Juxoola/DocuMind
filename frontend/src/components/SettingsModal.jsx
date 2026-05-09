@@ -156,7 +156,7 @@ export default function SettingsModal({ isOpen, onClose, settings, onSave }) {
                     exit={{ scale: 0.9, opacity: 0, y: 20 }}
                     className="relative w-full max-w-lg bg-card border border-border shadow-2xl rounded-3xl overflow-hidden max-h-[90vh] flex flex-col"
                 >
-                    {/* Header */}
+                    {/* Шапка */}
                     <div className="flex items-center justify-between p-6 border-b border-border/50 flex-shrink-0">
                         <h2 className="text-xl font-bold flex items-center gap-2">
                             <span className="p-2 bg-primary/10 rounded-xl text-primary">
@@ -169,7 +169,7 @@ export default function SettingsModal({ isOpen, onClose, settings, onSave }) {
                         </button>
                     </div>
 
-                    {/* Tabs */}
+                    {/* Вкладки */}
                     <div className="flex border-b border-border/50 flex-shrink-0">
                         <button
                             onClick={() => setActiveTab('api')}
@@ -206,7 +206,7 @@ export default function SettingsModal({ isOpen, onClose, settings, onSave }) {
                         </button>
                     </div>
 
-                    {/* Content */}
+                    {/* Содержимое */}
                     <div className="flex-1 overflow-y-auto">
                         {/* API Tab */}
                         {activeTab === 'api' && (
@@ -256,7 +256,7 @@ export default function SettingsModal({ isOpen, onClose, settings, onSave }) {
                         {/* GGUF Tab */}
                         {activeTab === 'gguf' && (
                             <div className="p-6 space-y-4">
-                                {/* Loaded Models Status */}
+                                {/* Статус загруженных моделей */}
                                 {ggufLoadedModels.length > 0 && (
                                     <div className="rounded-2xl border border-primary/20 bg-primary/5 p-4">
                                         <div className="flex items-center justify-between mb-2">
@@ -281,7 +281,7 @@ export default function SettingsModal({ isOpen, onClose, settings, onSave }) {
                                     </div>
                                 )}
 
-                                {/* Current Selection */}
+                                {/* Текущий выбор */}
                                 {localSettings.use_gguf === 'true' && (
                                     <div className="space-y-3">
                                         {localSettings.gguf_model_path && (
@@ -463,7 +463,7 @@ export default function SettingsModal({ isOpen, onClose, settings, onSave }) {
                                     </div>
                                 )}
 
-                                {/* Model List */}
+                                {/* Список моделей */}
                                 <div className="space-y-2">
                                     <div className="flex items-center justify-between">
                                         <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest flex items-center gap-1.5">
@@ -496,7 +496,7 @@ export default function SettingsModal({ isOpen, onClose, settings, onSave }) {
                                     <div className="space-y-1.5 max-h-[40vh] overflow-y-auto custom-scrollbar">
                                         {ggufModels.map((modelGroup) => (
                                             <div key={modelGroup.dir} className="border border-border/30 rounded-xl overflow-hidden">
-                                                {/* Directory Header */}
+                                                {/* Заголовок директории */}
                                                 <button
                                                     onClick={() => toggleDir(modelGroup.dir)}
                                                     className="w-full flex items-center justify-between p-3 hover:bg-muted/30 transition-all text-left"
@@ -516,7 +516,7 @@ export default function SettingsModal({ isOpen, onClose, settings, onSave }) {
                                                     </div>
                                                 </button>
 
-                                                {/* Expanded Content */}
+                                                {/* Развернутое содержимое */}
                                                 <AnimatePresence>
                                                     {expandedDirs[modelGroup.dir] && (
                                                         <motion.div
@@ -711,7 +711,7 @@ export default function SettingsModal({ isOpen, onClose, settings, onSave }) {
                         )}
                     </div>
 
-                    {/* Footer */}
+                    {/* Подвал */}
                     <div className="p-6 bg-muted/30 flex gap-3 flex-shrink-0">
                         <button 
                             onClick={onClose}

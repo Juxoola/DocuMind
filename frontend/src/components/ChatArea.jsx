@@ -347,20 +347,31 @@ export default function ChatArea({ notebook, selectedSources, onOpenSource, llmS
         .replace(/\\\[([\s\S]*?)\\\]/g, '$$$$$1$$$$')
         .replace(/\\\(([\s\S]*?)\\\)/g, '$$$1$$');
 
-      processed = processed.replace(/\[(\d+(?:,\s*\d+)*)\]/g, (match, nums) => {
+      // Защищаем математические блоки от ложного срабатывания цитат
+      // (например, [0,1] в LaTeX не должен стать ссылкой)
+      const mathBlocks = [];
+      processed = processed.replace(/(\$\$[\s\S]*?\$\$|\$[^\$\n]+?\$)/g, (m) => {
+        mathBlocks.push(m);
+        return `%%MATH_${mathBlocks.length - 1}%%`;
+      });
+
+      processed = processed.replace(/(?<!\\in|\\subset|\\subseteq|\\supset)\[(\d+(?:,\s*\d+)*)\]/g, (match, nums) => {
         return nums.split(',').map(n => {
           const num = n.trim();
           return `[${num}](#cite:${num})`;
         }).join('');
       });
 
+      // Возвращаем математические блоки на место
+      processed = processed.replace(/%%MATH_(\d+)%%/g, (_, idx) => mathBlocks[parseInt(idx)]);
+
       // Обработка всех форматов thinking-тегов:
       // <think>...</think>       — Qwen/DeepSeek
       // <|think|>...</|think|>  — старый вариант (Gemma 4 ошибочный)
       // <channel|>...<|channel> — Gemma 4 (настоящий формат)
       const thinkFormats = [
-        { open: '<|channel>', close: '<channel|>' },   // Gemma 4
-        { open: '<think>', close: '</think>' },     // Qwen/DeepSeek
+        { open: '<|channel|>', close: '<channel|>' },   // Gemma 4 (рус)
+        { open: '<think>', close: '</think>' },     // Qwen/DeepSeek (рус)
         { open: '<|think|>', close: '<|/think|>' },  // запасной
       ];
       for (const { open, close } of thinkFormats) {
@@ -515,7 +526,7 @@ export default function ChatArea({ notebook, selectedSources, onOpenSource, llmS
         )}
       </AnimatePresence>
 
-      {/* Header */}
+      {/* Шапка */}
       <div className="flex items-center justify-between p-4 border-b bg-background/80 backdrop-blur-md sticky top-0 z-10">
         <div className="flex items-center gap-2">
           <FileText className="text-muted-foreground" size={18} />
@@ -577,7 +588,7 @@ export default function ChatArea({ notebook, selectedSources, onOpenSource, llmS
         </div>
       </div>
 
-      {/* Messages Area */}
+      {/* Область сообщений */}
       <div className="flex-1 overflow-y-auto p-6 space-y-8">
         <AnimatePresence initial={false}>
           {messages.map((msg, i) => (
@@ -602,7 +613,7 @@ export default function ChatArea({ notebook, selectedSources, onOpenSource, llmS
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Input Area */}
+      {/* Область ввода */}
       <div className="p-6 pt-0">
         {imagePreview && (
           <motion.div
@@ -674,7 +685,7 @@ export default function ChatArea({ notebook, selectedSources, onOpenSource, llmS
           </div>
         </div>
 
-        {/* Stats */}
+        {/* Статистика */}
         <AnimatePresence>
           {stats && (
             <motion.div
@@ -703,7 +714,7 @@ export default function ChatArea({ notebook, selectedSources, onOpenSource, llmS
           )}
         </AnimatePresence>
       </div>
-      {/* Settings Modal */}
+      {/* Модальное окно настроек */}
       <SettingsModal
         isOpen={isSettingsOpen}
         onClose={() => setIsSettingsOpen(false)}
@@ -714,7 +725,7 @@ export default function ChatArea({ notebook, selectedSources, onOpenSource, llmS
         }}
       />
 
-      {/* Global Tooltip Portal (Stacking Context Fix) */}
+      {/* Глобальный портал для тултипов */}
       <AnimatePresence>
         {hoveredSource && (
           <motion.div

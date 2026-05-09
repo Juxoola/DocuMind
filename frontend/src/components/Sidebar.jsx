@@ -75,7 +75,7 @@ export default function Sidebar({
 
   return (
     <div style={{ width }} className="h-full border-r glass flex flex-col z-10 overflow-hidden">
-      {/* Header */}
+      {/* Шапка */}
       <div className="p-4 border-b flex items-center justify-between flex-shrink-0 bg-background/50 backdrop-blur-sm">
         <div className="flex items-center gap-3 min-w-0">
           <div className="w-8 h-8 bg-primary/10 rounded-xl flex-shrink-0 flex items-center justify-center text-primary shadow-sm">
@@ -95,7 +95,7 @@ export default function Sidebar({
         </button>
       </div>
 
-      {/* Upload Zone */}
+      {/* Зона загрузки */}
       <div className="p-4 flex-shrink-0">
         <label 
           onDragOver={onDragOver}
@@ -166,7 +166,7 @@ export default function Sidebar({
         </label>
       </div>
 
-      {/* Sources List */}
+      {/* Список источников */}
       <div className="flex-1 overflow-y-auto px-4 py-2 space-y-2 custom-scrollbar">
         {(() => {
           const filtered = sources.filter(s => {

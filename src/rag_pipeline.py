@@ -1,4 +1,5 @@
 import os
+import logging
 import chromadb
 from llama_index.core import VectorStoreIndex, Settings
 from llama_index.vector_stores.chroma import ChromaVectorStore
@@ -11,6 +12,8 @@ from llama_index.core.schema import TextNode
 import config
 import torch
 from transformers import BitsAndBytesConfig
+
+logger = logging.getLogger(__name__)
 
 _client_cache = {}
 _model_cache = {}
@@ -88,8 +91,8 @@ def close_all_clients():
     for path, client in _client_cache.items():
         try:
             client.close()
-        except:
-            pass
+        except Exception as e:
+            logger.debug(f"Ошибка закрытия ChromaDB клиента {path}: {e}")
     _client_cache.clear()
 
 def get_vector_store(notebook_id: str):
@@ -218,20 +221,7 @@ def make_messages(query: str, context_str: str) -> list:
     return [
         {
             "role": "system",
-            "content": (
-                "Ты — умный и точный AI-помощник. ОТВЕЧАЙ СТРОГО НА РУССКОМ ЯЗЫКЕ.\n"
-                "Используй Markdown для форматирования.\n\n"
-                "ПРАВИЛА ОТВЕТА:\n"
-                "1. Всегда отвечай на вопрос СРАЗУ, в самом начале ответа.\n"
-                "2. Если вопрос содержит варианты ответа (тест) — СНАЧАЛА напиши правильный вариант (букву и текст).\n"
-                "3. После прямого ответа приведи подробное объяснение на основе источников.\n\n"
-                "ПРАВИЛО ЦИТИРОВАНИЯ (КРИТИЧЕСКИ ДЛЯ СИСТЕМЫ):\n"
-                "- Каждое утверждение ДОЛЖНО завершаться ссылкой в формате [N].\n"
-                "- ПРИМЕР: «Поток нельзя запустить дважды [1].»\n"
-                "- НИКОГДА не пиши цифру источника без квадратных скобок.\n"
-                "- Если одно утверждение основано на нескольких источниках, пиши [1, 2].\n"
-                "- Если ответа нет в источниках — скажи \"В документах этого нет\"."
-            )
+            "content": config.SYSTEM_PROMPT
         },
         {
             "role": "user",
@@ -240,24 +230,8 @@ def make_messages(query: str, context_str: str) -> list:
     ]
 
 def make_prompt(query: str, context_str: str, thinking_mode: bool = False, max_tokens: int = 1024) -> str:
-
-
     return (
-        "Ты — умный и точный AI-помощник. ОТВЕЧАЙ СТРОГО НА РУССКОМ ЯЗЫКЕ.\n"
-        "Используй Markdown для форматирования.\n\n"
-
-        "ПРАВИЛА ОТВЕТА:\n"
-        "1. Всегда отвечай на вопрос СРАЗУ, в самом начале ответа (после тегов think, если они есть).\n"
-        "2. Если вопрос содержит варианты ответа (тест) — СНАЧАЛА напиши правильный вариант (букву и текст).\n"
-        "3. После прямого ответа приведи подробное объяснение на основе источников.\n\n"
-        "ВАЖНОЕ ПРАВИЛО ЦИТИРОВАНИЯ (КРИТИЧЕСКИ ДЛЯ СИСТЕМЫ):\n"
-        "- Каждое утверждение ДОЛЖНО завершаться ссылкой в формате [N].\n"
-        "- ПРИМЕР: «Поток нельзя запустить дважды [1].»\n"
-        "- ОШИБКА: «Поток нельзя запустить дважды 1.» (так писать ЗАПРЕЩЕНО)\n"
-        "- НИКОГДА не пиши цифру источника без квадратных скобок.\n"
-        "- Если одно утверждение основано на нескольких источниках, пиши [1, 2].\n"
-        "- Все формулы пиши внутри $...$ или $$...$$.\n"
-        "- Если ответа нет в источниках — скажи \"В документах этого нет\".\n\n"
+        config.SYSTEM_PROMPT + "\n"
         "ОТВЕЧАЙ СТРОГО С ИСПОЛЬЗОВАНИЕМ [N] ДЛЯ ССЫЛОК.\n\n"
         f"Доступные источники:\n{context_str}\n\n"
         f"Вопрос пользователя: {query}\n\n"

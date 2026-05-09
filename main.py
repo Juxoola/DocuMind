@@ -3,8 +3,12 @@ import shutil
 import json
 import time
 import uuid
-from fastapi import FastAPI, UploadFile, File, HTTPException, Header, Query
-from fastapi.responses import HTMLResponse, StreamingResponse
+import logging
+import requests
+import traceback
+from pathlib import Path
+from fastapi import FastAPI, UploadFile, File, HTTPException, Query
+from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from typing import List, Optional
@@ -13,6 +17,8 @@ import gc
 import stat
 
 import asyncio
+
+logger = logging.getLogger(__name__)
 from src.ingestion import ingest_file
 from src.rag_pipeline import build_index, retrieve_nodes, build_file_context, make_prompt, make_messages, close_all_clients, preload_all_models
 from src.gguf_manager import scan_gguf_dirs
@@ -36,7 +42,7 @@ async def lifespan(app: FastAPI):
     
     yield
     
-    # Shutdown: Выгрузка
+    # Завершение: выгрузка моделей
     print("[SERVER] Остановка системы...")
     unload_all_models()
     kill_stray_servers()
@@ -51,11 +57,18 @@ app = FastAPI(title="NotebookLM Local Clone", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173", "http://localhost:8000", "http://127.0.0.1:8000"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+def safe_filename(filename: str) -> str:
+    """Валидация имени файла для защиты от path traversal."""
+    clean = Path(filename).name
+    if clean != filename or not clean or clean.startswith('.'):
+        raise HTTPException(status_code=400, detail=f"Недопустимое имя файла: {filename}")
+    return clean
 
 # Принудительная очистка старых процессов llama-server при запуске приложения
 kill_stray_servers()
@@ -94,10 +107,10 @@ def robust_rmtree(path, max_retries=5, delay=0.5):
     for root, dirs, files in os.walk(path):
         for f in files:
             try: os.chmod(os.path.join(root, f), stat.S_IWRITE)
-            except: pass
+            except Exception: pass
         for d in dirs:
             try: os.chmod(os.path.join(root, d), stat.S_IWRITE)
-            except: pass
+            except Exception: pass
 
     for i in range(max_retries):
         try:
@@ -134,7 +147,7 @@ async def async_gen_wrapper(sync_gen):
         yield res
 
 
-# ── Notebook Management ──
+# ── Управление блокнотами ──
 
 @app.get("/api/notebooks")
 async def get_notebooks():
@@ -171,7 +184,7 @@ async def delete_notebook(nb_id: str):
         robust_rmtree(paths["base"])
     return {"status": "ok"}
 
-# ── File Operations ──
+# ── Операции с файлами ──
 
 @app.get("/api/files")
 async def get_files(notebook_id: str):
@@ -218,7 +231,7 @@ async def upload_file(
     vision_concurrency: Optional[int] = 1,
     vision_kv_quant: Optional[int] = 2,
 ):
-    print(f"[API] New upload request for notebook {notebook_id}. File: {file.filename} ({current_idx}/{total_count})")
+    print(f"[API] Новый запрос загрузки для блокнота {notebook_id}. Файл: {file.filename} ({current_idx}/{total_count})")
     paths = config.get_notebook_paths(notebook_id)
     os.makedirs(paths["data"], exist_ok=True)
     file_path = os.path.join(paths["data"], file.filename)
@@ -336,8 +349,8 @@ async def upload_file(
 
 @app.delete("/api/files/{filename}")
 async def delete_file(filename: str, notebook_id: str):
-    import gc, time
     import cv2
+    filename = safe_filename(filename)
     paths = config.get_notebook_paths(notebook_id)
     file_path = os.path.join(paths["data"], filename)
     
@@ -370,6 +383,7 @@ async def delete_file(filename: str, notebook_id: str):
 
 @app.get("/api/source_content")
 async def get_source_content(filename: str, notebook_id: str):
+    filename = safe_filename(filename)
     try:
         from src.rag_pipeline import get_vector_store
         vector_store = await asyncio.to_thread(get_vector_store, notebook_id)
@@ -385,12 +399,13 @@ async def get_source_content(filename: str, notebook_id: str):
 
 @app.get("/api/video_metadata")
 async def get_video_metadata(filename: str, notebook_id: str):
+    filename = safe_filename(filename)
     paths = config.get_notebook_paths(notebook_id)
     json_path = os.path.join(paths["data"], f"{filename}.json")
     if os.path.exists(json_path):
         with open(json_path, "r", encoding="utf-8") as f:
             return json.load(f)
-    return {"error": "Metadata not found"}
+    return {"error": "Метаданные не найдены"}
 
 @app.delete("/api/clear")
 async def clear_notebook(notebook_id: str):
@@ -403,7 +418,7 @@ async def clear_notebook(notebook_id: str):
         os.makedirs(p, exist_ok=True)
     return {"status": "ok"}
 
-# ── GGUF Model Management ──
+# ── Управление GGUF моделями ──
 
 @app.get("/api/gguf-models")
 async def api_scan_gguf_models():
@@ -446,7 +461,7 @@ async def update_model_dirs(req: UpdateModelDirsRequest):
     config.save_rag_config() # Сохраняем на диск
     return {"status": "ok", "new_dirs": config.GGUF_SEARCH_DIRS}
 
-# ── RAG Configuration ──
+# ── Настройки RAG ──
 
 @app.get("/api/rag-config")
 async def get_rag_config():
@@ -483,7 +498,7 @@ async def update_rag_config(req: UpdateRagConfigRequest):
     unload_rag_models() # Выгружаем старые модели, чтобы новые загрузились при следующем запросе
     return {"status": "ok"}
 
-# ── Chat ──
+# ── Чат ──
 
 class ChatRequest(BaseModel):
     query: str
@@ -494,7 +509,7 @@ class ChatRequest(BaseModel):
     llm_url: Optional[str] = None
     llm_api_key: Optional[str] = "lm-studio"
     llm_model: Optional[str] = "gpt-4o"
-    image_base64: Optional[str] = None # Новое поле для фото
+    image_base64: Optional[str] = None # Поле для фото
     
     # Расширенные параметры
     gguf_kv_quant: Optional[int] = 2 # 2=Q4_K, 8=Q8_0
@@ -540,7 +555,7 @@ async def chat(request: ChatRequest):
         # Выполняем тяжелый поиск в отдельном потоке, чтобы не блокировать Event Loop
         nodes = await asyncio.to_thread(retrieve_nodes, query_for_rag, request.notebook_id, request.allowed_files)
         sources, context = await asyncio.to_thread(build_file_context, nodes, request.notebook_id)
-        print(f"DEBUG: RAG нашел {len(nodes)} фрагментов.")
+        print(f"DEBUG: RAG нашёл {len(nodes)} фрагментов.")
 
     # 2. Теперь определяем, какой LLM использовать и загружаем его
     active_llm = None
@@ -606,7 +621,7 @@ async def chat(request: ChatRequest):
                     query_for_rag = extracted
                     nodes = await asyncio.to_thread(retrieve_nodes, query_for_rag, request.notebook_id, request.allowed_files)
                     sources, context = await asyncio.to_thread(build_file_context, nodes, request.notebook_id)
-                except Exception as ve: print(f"DEBUG: OCR Error: {ve}")
+                except Exception as ve: print(f"DEBUG: Ошибка OCR: {ve}")
 
             if not query_for_rag or not query_for_rag.strip():
                 query_for_rag = request.query or "Опиши содержимое"
@@ -614,18 +629,7 @@ async def chat(request: ChatRequest):
             yield f"data: {json.dumps({'type': 'sources', 'sources': sources}, ensure_ascii=False)}\n\n"
 
             if use_direct_gguf:
-                sys_prompt = (
-                    "Ты — умный и точный AI-помощник. ОТВЕЧАЙ СТРОГО НА РУССКОМ ЯЗЫКЕ.\n"
-                    "Используй Markdown для форматирования.\n\n"
-                    "ПРАВИЛА ОТВЕТА:\n"
-                    "1. Всегда отвечай на вопрос СРАЗУ.\n"
-                    "2. Если вопрос содержит варианты ответа — СНАЧАЛА напиши правильный вариант.\n"
-                    "3. После прямого ответа приведи подробное объяснение на основе источников.\n\n"
-                    "ПРАВИЛО ЦИТИРОВАНИЯ:\n"
-                    "- Каждое утверждение ДОЛЖНО завершаться ссылкой [N].\n"
-                    "- Если ответа нет в источниках — скажи \"В документах этого нет\".\n\n"
-                    f"Доступные источники:\n{context}"
-                )
+                sys_prompt = config.SYSTEM_PROMPT + f"\n\nДоступные источники:\n{context}"
                 messages_for_chat = [{"role": "system", "content": sys_prompt}, {"role": "user", "content": query_for_rag}]
                 model_family = detect_model_family(request.gguf_model_path)
                 OPEN_TAG, CLOSE_TAG = ("<|channel|>", "<channel|>") if model_family == "gemma4" else ("<think>", "</think>")
@@ -695,7 +699,8 @@ async def chat(request: ChatRequest):
 
             else:
                 # Для API (LM Studio) используем стандартный prompt
-                prompt = make_prompt(request.query, context_str, thinking_mode=request.thinking_mode, max_tokens=request.max_tokens)
+                full_response = ""
+                prompt = make_prompt(request.query, context, thinking_mode=request.thinking_mode, max_tokens=request.max_tokens)
                 for chunk in active_llm.stream_complete(prompt):
                     if chunk.delta:
                         token_count += 1 
@@ -714,14 +719,13 @@ async def chat(request: ChatRequest):
             yield "data: [DONE]\n\n"
 
         except Exception as e:
-            import traceback
             traceback.print_exc()
             yield f"data: {json.dumps({'type': 'error', 'text': str(e)}, ensure_ascii=False)}\n\n"
             yield "data: [DONE]\n\n"
 
     return StreamingResponse(generate(), media_type="text/event-stream")
 
-# Убрали старый shutdown
+# Старый shutdown удалён
 
 if __name__ == "__main__":
     import uvicorn

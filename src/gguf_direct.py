@@ -6,8 +6,11 @@ import requests
 import json
 import signal
 import threading
+import logging
 from typing import Dict, Optional, Tuple, List
 import config
+
+logger = logging.getLogger(__name__)
 import torch
 
 # Глобальный кэш запущенных серверов
@@ -38,7 +41,7 @@ def is_server_ready(port: int) -> bool:
     try:
         r = requests.get(f"http://127.0.0.1:{port}/health", timeout=1)
         return r.status_code == 200
-    except:
+    except Exception:
         return False
 
 def get_gguf_llm(
@@ -189,19 +192,7 @@ def get_gguf_llm(
             print(f"[GGUF Server] Готов!")
             _server_processes[gguf_path] = process
             _server_ports[gguf_path] = port
-            _server_configs[gguf_path] = {
-                "mmproj": mmproj_path,
-                "ctx_size": ctx_size,
-                "gpu_layers": gpu_layers,
-                "n_batch": n_batch,
-                "flash_attn": flash_attn,
-                "max_tokens": max_tokens,
-                "type_k": type_k,
-                "type_v": type_v,
-                "enable_thinking": enable_thinking,
-                "n_parallel": n_parallel,
-                "custom_args": custom_args
-            }
+            _server_configs[gguf_path] = current_config
             return f"http://127.0.0.1:{port}"
         
         if process.poll() is not None:
@@ -211,7 +202,7 @@ def get_gguf_llm(
         time.sleep(0.5)
     
     process.terminate()
-    raise TimeoutError("Сервер не ответил за 30 секунд")
+    raise TimeoutError("Сервер не ответил за 60 секунд")
 
 def stream_gguf_chat(
     llm_url: str,
@@ -274,7 +265,8 @@ def stream_gguf_chat(
                                 yield CLOSE_TAG
                                 is_thinking = False
                             yield content
-                    except:
+                    except Exception as e:
+                        logger.debug(f"Ошибка парсинга SSE: {e}")
                         continue
         
         # На всякий случай закрываем тег в конце
