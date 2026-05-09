@@ -53,7 +53,7 @@
 
 /* Markdown Table Styles */
 .prose table {
-  @apply w-full border-collapse my-4 text-sm;
+  @apply block w-full overflow-x-auto border-collapse my-4 text-sm;
 }
 .prose th {
   @apply border border-border bg-muted/50 px-3 py-2 text-left font-bold;
@@ -67,6 +67,7 @@
 
 ::-webkit-scrollbar {
   width: 6px;
+  height: 6px;
 }
 ::-webkit-scrollbar-track {
   @apply bg-transparent;

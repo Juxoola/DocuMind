@@ -222,6 +222,7 @@ def stream_gguf_chat(
     repeat_penalty: float,
     top_p: float,
     min_p: float,
+    model_family: str = "generic"
 ):
     """Стриминг через OpenAI-совместимый API сервера llama.cpp."""
     payload = {
@@ -234,8 +235,8 @@ def stream_gguf_chat(
         "min_p": min_p,
     }
     
-    # Если модель поддерживает thinking, и это не Gemma 4 (где она через системный промпт),
-    # сервер может сам обрабатывать теги, если они прописаны в шаблоне.
+    # Определяем теги на основе семейства
+    OPEN_TAG, CLOSE_TAG = ("<|channel|>", "<channel|>") if model_family == "gemma4" else ("<think>", "</think>")
     
     try:
         r = requests.post(
@@ -245,6 +246,7 @@ def stream_gguf_chat(
             timeout=60
         )
         
+        is_thinking = False
         for line in r.iter_lines():
             if line:
                 line_str = line.decode("utf-8")
@@ -253,11 +255,32 @@ def stream_gguf_chat(
                         break
                     try:
                         data = json.loads(line_str[6:])
-                        delta = data["choices"][0]["delta"].get("content", "")
-                        if delta:
-                            yield delta
+                        delta = data["choices"][0]["delta"]
+                        
+                        # 1. Проверяем наличие reasoning_content (новый формат llama.cpp / OpenAI)
+                        reasoning = delta.get("reasoning_content", "")
+                        if reasoning:
+                            if not is_thinking:
+                                yield OPEN_TAG
+                                is_thinking = True
+                            yield reasoning
+                            continue
+                            
+                        # 2. Проверяем наличие обычного контента
+                        content = delta.get("content", "")
+                        if content:
+                            # Если пошел текст, но мы еще "думали" — закрываем тег
+                            if is_thinking:
+                                yield CLOSE_TAG
+                                is_thinking = False
+                            yield content
                     except:
                         continue
+        
+        # На всякий случай закрываем тег в конце
+        if is_thinking:
+            yield CLOSE_TAG
+
     except Exception as e:
         print(f"[GGUF Stream] Ошибка: {e}")
         yield f"Ошибка связи с сервером: {e}"

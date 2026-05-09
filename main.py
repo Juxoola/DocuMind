@@ -12,6 +12,7 @@ import config
 import gc
 import stat
 
+import asyncio
 from src.ingestion import ingest_file
 from src.rag_pipeline import build_index, retrieve_nodes, build_file_context, make_prompt, make_messages, close_all_clients, preload_all_models
 from src.gguf_manager import scan_gguf_dirs
@@ -114,7 +115,23 @@ def robust_rmtree(path, max_retries=5, delay=0.5):
                 time.sleep(delay)
             else:
                 raise
+async def async_gen_wrapper(sync_gen):
+    """Обертка для превращения синхронного генератора в асинхронный через потоки."""
+    def safe_next(g):
+        try:
+            return next(g)
+        except StopIteration:
+            return None
+        except Exception as e:
+            return e
 
+    while True:
+        res = await asyncio.to_thread(safe_next, sync_gen)
+        if res is None:
+            break
+        if isinstance(res, Exception):
+            raise res
+        yield res
 
 
 # ── Notebook Management ──
@@ -355,9 +372,10 @@ async def delete_file(filename: str, notebook_id: str):
 async def get_source_content(filename: str, notebook_id: str):
     try:
         from src.rag_pipeline import get_vector_store
-        vector_store = get_vector_store(notebook_id)
+        vector_store = await asyncio.to_thread(get_vector_store, notebook_id)
         collection = vector_store._collection
-        result = collection.get(where={"file_name": filename})
+        # Выполняем тяжелый запрос к БД в потоке
+        result = await asyncio.to_thread(collection.get, where={"file_name": filename})
         if result and result.get("documents"):
             full_text = "\n\n---\n\n".join(result["documents"])
             return {"text": full_text}
@@ -519,8 +537,9 @@ async def chat(request: ChatRequest):
     
     if query_for_rag.strip():
         print(f"DEBUG: Запуск RAG поиска для: {query_for_rag[:50]}...")
-        nodes = retrieve_nodes(query_for_rag, request.notebook_id, request.allowed_files)
-        sources, context = build_file_context(nodes, request.notebook_id)
+        # Выполняем тяжелый поиск в отдельном потоке, чтобы не блокировать Event Loop
+        nodes = await asyncio.to_thread(retrieve_nodes, query_for_rag, request.notebook_id, request.allowed_files)
+        sources, context = await asyncio.to_thread(build_file_context, nodes, request.notebook_id)
         print(f"DEBUG: RAG нашел {len(nodes)} фрагментов.")
 
     # 2. Теперь определяем, какой LLM использовать и загружаем его
@@ -531,7 +550,8 @@ async def chat(request: ChatRequest):
         use_direct_gguf = True
         try:
             print(f"DEBUG: Подготовка GGUF модели: {os.path.basename(request.gguf_model_path)}")
-            active_llm = get_gguf_llm(
+            active_llm = await asyncio.to_thread(
+                get_gguf_llm,
                 gguf_path=request.gguf_model_path,
                 mmproj_path=request.gguf_mmproj_path if request.gguf_mmproj_path else None,
                 temperature=request.gguf_temperature,
@@ -581,11 +601,11 @@ async def chat(request: ChatRequest):
                 ]
                 try:
                     v_payload = {"messages": vision_messages, "stream": False, "max_tokens": 300}
-                    r_vision = requests.post(f"{active_llm}/v1/chat/completions", json=v_payload, timeout=60)
+                    r_vision = await asyncio.to_thread(requests.post, f"{active_llm}/v1/chat/completions", json=v_payload, timeout=60)
                     extracted = r_vision.json()["choices"][0]["message"]["content"].strip()
                     query_for_rag = extracted
-                    nodes = retrieve_nodes(query_for_rag, request.notebook_id, request.allowed_files)
-                    sources, context = build_file_context(nodes, request.notebook_id)
+                    nodes = await asyncio.to_thread(retrieve_nodes, query_for_rag, request.notebook_id, request.allowed_files)
+                    sources, context = await asyncio.to_thread(build_file_context, nodes, request.notebook_id)
                 except Exception as ve: print(f"DEBUG: OCR Error: {ve}")
 
             if not query_for_rag or not query_for_rag.strip():
@@ -609,15 +629,22 @@ async def chat(request: ChatRequest):
                 messages_for_chat = [{"role": "system", "content": sys_prompt}, {"role": "user", "content": query_for_rag}]
                 model_family = detect_model_family(request.gguf_model_path)
                 OPEN_TAG, CLOSE_TAG = ("<|channel|>", "<channel|>") if model_family == "gemma4" else ("<think>", "</think>")
-                phase = "thinking" if request.thinking_mode and model_family in ("qwen", "deepseek", "generic") else "think_detect"
-                if phase == "thinking": yield f"data: {json.dumps({'type': 'thinking_start'}, ensure_ascii=False)}\n\n"
+                
+                # ВСЕГДА начинаем с режима детекции, чтобы не пропустить начало ответа, 
+                # если модель решила не рассуждать или если теги приходят позже.
+                phase = "think_detect"
                 
                 buf = ""
-                for delta in stream_gguf_chat(
+                # Запускаем стриминг в потоке и оборачиваем в асинхронный генератор
+                sync_gen = await asyncio.to_thread(
+                    stream_gguf_chat,
                     llm_url=active_llm, messages=messages_for_chat, enable_thinking=request.thinking_mode,
                     max_tokens=request.max_tokens, temperature=request.gguf_temperature,
-                    repeat_penalty=request.repeat_penalty, top_p=request.top_p, min_p=request.min_p
-                ):
+                    repeat_penalty=request.repeat_penalty, top_p=request.top_p, min_p=request.min_p,
+                    model_family=model_family
+                )
+                
+                async for delta in async_gen_wrapper(sync_gen):
                     if not delta: continue
                     token_count += 1
                     buf += delta
