@@ -26,6 +26,7 @@ from src.gguf_direct import (
     get_gguf_llm, unload_all_models, get_loaded_models,
     detect_model_family, stream_gguf_chat, kill_stray_servers
 )
+from src.rag_pipeline import unload_rag_models # Импортируем для очистки
 from fastapi.middleware.cors import CORSMiddleware
 from llama_index.core import Settings
 from contextlib import asynccontextmanager
@@ -333,6 +334,12 @@ async def upload_file(
             traceback.print_exc()
             ingestion_status[notebook_id] = {"is_uploading": False, "error": str(e)}
             q.put({"type": "error", "msg": str(e)})
+        finally:
+            # После загрузки файла оставляем модели в памяти, но чистим кэш
+            import gc, torch
+            gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
 
     threading.Thread(target=process_task, daemon=True).start()
 
@@ -722,6 +729,21 @@ async def chat(request: ChatRequest):
             traceback.print_exc()
             yield f"data: {json.dumps({'type': 'error', 'text': str(e)}, ensure_ascii=False)}\n\n"
             yield "data: [DONE]\n\n"
+        finally:
+            # Очистка только временных объектов и кэша CUDA, не выгружая модели
+            if use_direct_gguf and active_llm:
+                try:
+                    # Пытаемся сбросить состояние слота в llama-server, чтобы контекст не копился
+                    # но НЕ убиваем сам процесс сервера.
+                    requests.post(f"{active_llm}/slots/0/clear", timeout=1)
+                except: pass
+
+            import gc
+            gc.collect()
+            import torch
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            print(f"[MEMORY] Кэш очищен, модели остались в VRAM.")
 
     return StreamingResponse(generate(), media_type="text/event-stream")
 
