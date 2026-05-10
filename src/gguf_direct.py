@@ -57,7 +57,7 @@ def get_gguf_llm(
     type_k: int = 2,
     type_v: int = 2,
     enable_thinking: bool = True,
-    thinking_budget: int = -1,
+    thinking_budget: int = 1024,
     n_parallel: int = 1,
     custom_args: Optional[List[str]] = None,
 ) -> str:
@@ -82,7 +82,7 @@ def get_gguf_llm(
         "type_k": int(type_k or 2),
         "type_v": int(type_v or 2),
         "enable_thinking": bool(enable_thinking),
-        "thinking_budget": int(thinking_budget if thinking_budget is not None else -1),
+        "thinking_budget": int(thinking_budget if thinking_budget is not None else 1024),
         "n_parallel": int(n_parallel or 1),
         "custom_args": custom_args if custom_args is not None else []
     }

@@ -119,7 +119,7 @@ export default function ChatArea({ notebook, selectedSources, onOpenSource, llmS
   const [maxTokens, setMaxTokens] = useState(1024);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [thinkingMode, setThinkingMode] = useState(false);
-  const [thinkingBudget, setThinkingBudget] = useState(-1); // -1 = no limit
+  const [thinkingBudget, setThinkingBudget] = useState(1024); // -1 = no limit
   const [hoveredSource, setHoveredSource] = useState(null);
   const [tooltipCoords, setTooltipCoords] = useState({ x: 0, y: 0 });
   const [abortController, setAbortController] = useState(null);

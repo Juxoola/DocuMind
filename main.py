@@ -528,7 +528,7 @@ class ChatRequest(BaseModel):
     gguf_threads: Optional[int] = 8
     gguf_batch_size: Optional[int] = 2048
     gguf_flash_attn: Optional[str] = "true"
-    thinking_budget: Optional[int] = -1 # -1 = без ограничений
+    thinking_budget: Optional[int] = 1024 # -1 = без ограничений
 
 @app.post("/api/chat")
 async def chat(request: ChatRequest):
