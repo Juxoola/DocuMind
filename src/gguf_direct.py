@@ -101,7 +101,8 @@ def get_gguf_llm(
         # НО: делаем это только если мы РЕАЛЬНО запускаем новый сервер
         from src.rag_pipeline import unload_rag_models
         unload_rag_models()
-        unload_all_models()
+        kill_stray_servers() # Принудительно чистим всё перед запуском нового
+        unload_all_models() # Сбрасываем внутренний стейт
 
         if not os.path.exists(gguf_path):
             raise FileNotFoundError(f"GGUF модель не найдена: {gguf_path}")
@@ -288,6 +289,18 @@ def kill_stray_servers():
             subprocess.run(["pkill", "-9", "llama-server"], capture_output=True)
     except Exception as e:
         print(f"[GGUF Server] Ошибка при очистке процессов: {e}")
+
+def count_running_servers() -> int:
+    """Считает количество запущенных процессов llama-server.exe в системе."""
+    try:
+        if os.name == 'nt':
+            output = subprocess.check_output(['tasklist', '/FI', 'IMAGENAME eq llama-server.exe', '/NH'], text=True)
+            return output.count("llama-server.exe")
+        else:
+            output = subprocess.check_output(['pgrep', '-c', 'llama-server'], text=True)
+            return int(output.strip())
+    except Exception:
+        return 0
 
 def unload_all_models():
     """Убивает все процессы серверов максимально надежно."""

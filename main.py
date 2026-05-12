@@ -24,7 +24,7 @@ from src.rag_pipeline import build_index, retrieve_nodes, build_file_context, ma
 from src.gguf_manager import scan_gguf_dirs
 from src.gguf_direct import (
     get_gguf_llm, unload_all_models, get_loaded_models,
-    detect_model_family, stream_gguf_chat, kill_stray_servers
+    detect_model_family, stream_gguf_chat, kill_stray_servers, count_running_servers
 )
 from src.rag_pipeline import unload_rag_models # Импортируем для очистки
 from fastapi.middleware.cors import CORSMiddleware
@@ -442,11 +442,24 @@ async def api_gguf_loaded_models():
     loaded = get_loaded_models()
     return {"loaded_models": [os.path.basename(p) for p in loaded]}
 
+@app.get("/api/gguf-status")
+async def api_gguf_status():
+    """Возвращает количество запущенных серверов."""
+    count = count_running_servers()
+    return {"running_count": count}
+
 @app.post("/api/gguf-unload")
 async def api_gguf_unload_all():
     """Выгружает все GGUF модели из памяти."""
     unload_all_models()
     return {"status": "ok", "msg": "Все модели выгружены"}
+
+@app.post("/api/gguf-kill-all")
+async def api_gguf_kill_all():
+    """Принудительно завершает все процессы llama-server.exe в системе."""
+    kill_stray_servers()
+    unload_all_models() # Очищаем внутренний стейт тоже
+    return {"status": "ok", "msg": "Все процессы llama-server завершены"}
 
 @app.get("/api/gguf-config")
 async def api_get_gguf_config():

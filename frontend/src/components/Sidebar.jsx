@@ -9,7 +9,9 @@ import {
   CheckCircle2, 
   AlertCircle,
   Database,
-  Trash2
+  Trash2,
+  Cpu,
+  PowerOff
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import axios from 'axios';
@@ -29,6 +31,30 @@ export default function Sidebar({
   onUpload
 }) {
   const [isDragging, setIsDragging] = useState(false);
+  const [llamaCount, setLlamaCount] = useState(0);
+
+  React.useEffect(() => {
+    const checkLlama = async () => {
+      try {
+        const res = await axios.get('/api/gguf-status');
+        setLlamaCount(res.data.running_count);
+      } catch (err) {}
+    };
+    checkLlama();
+    const timer = setInterval(checkLlama, 5000);
+    return () => clearInterval(timer);
+  }, []);
+
+  const killAllLlama = async () => {
+    if (!confirm('Принудительно завершить ВСЕ процессы llama-server? Это освободит VRAM, но может прервать текущую генерацию.')) return;
+    try {
+      await axios.post('/api/gguf-kill-all');
+      const res = await axios.get('/api/gguf-status');
+      setLlamaCount(res.data.running_count);
+    } catch (err) {
+      alert('Ошибка при завершении процессов');
+    }
+  };
 
   const handleUpload = (files) => {
     onUpload(files);
@@ -250,6 +276,28 @@ export default function Sidebar({
       </div>
 
       <div className="mt-auto flex flex-col border-t bg-muted/5">
+        {/* Мониторинг Llama CPP */}
+        <div className="px-4 py-2 flex items-center justify-between border-b border-border/40">
+          <div className="flex items-center gap-2">
+            <div className={cn(
+              "w-2 h-2 rounded-full",
+              llamaCount > 0 ? "bg-green-500 animate-pulse" : "bg-muted-foreground/30"
+            )} />
+            <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-tight">
+              Llama-CPP: {llamaCount} {llamaCount === 1 ? 'активен' : llamaCount > 1 ? 'активно' : 'спит'}
+            </span>
+          </div>
+          {llamaCount > 0 && (
+            <button 
+              onClick={killAllLlama}
+              className="p-1.5 hover:bg-destructive/10 text-destructive rounded-lg transition-all"
+              title="Убить все процессы llama-server"
+            >
+              <PowerOff size={14} />
+            </button>
+          )}
+        </div>
+
         <div className="p-4 flex items-center justify-between">
           <div className="flex flex-col">
              <span className="text-[8px] text-muted-foreground/40 uppercase tracking-widest font-bold">Хранилище</span>
