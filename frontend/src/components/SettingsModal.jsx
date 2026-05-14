@@ -617,31 +617,113 @@ export default function SettingsModal({ isOpen, onClose, settings, onSave }) {
                                     </button>
                                 </div>
 
-                                <div className="space-y-2">
-                                    <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest flex items-center gap-2">
-                                        <Globe size={12} /> Embedding Model (HuggingFace)
-                                    </label>
-                                    <input 
-                                        type="text"
-                                        value={ragConfig.embedding_model}
-                                        onChange={(e) => setRagConfig({...ragConfig, embedding_model: e.target.value})}
-                                        className="w-full bg-muted/30 border border-border/50 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all"
-                                    />
-                                    <p className="text-[10px] text-muted-foreground/60 italic">Например: Qwen/Qwen3-Embedding-0.6B</p>
-                                </div>
+                                {(() => {
+                                    const isEmbedGguf = ragConfig.embedding_model?.toLowerCase().endsWith('.gguf');
+                                    const allGgufFiles = ggufModels?.flatMap(g => g.gguf_files.map(f => ({ name: f, path: g.dir + '/' + f }))) || [];
+                                    
+                                    return (
+                                        <div className="space-y-2">
+                                            <div className="flex items-center justify-between">
+                                                <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest flex items-center gap-2">
+                                                    <Globe size={12} /> Embedding Model
+                                                </label>
+                                                <div className="flex bg-muted/30 rounded-lg p-0.5 border border-border/50">
+                                                    <button 
+                                                        onClick={() => setRagConfig({...ragConfig, embedding_model: 'Qwen/Qwen3-Embedding-0.6B'})}
+                                                        className={cn("px-2 py-1 text-[9px] font-bold rounded-md transition-all", !isEmbedGguf ? "bg-primary text-white shadow-sm" : "text-muted-foreground hover:text-foreground")}
+                                                    >
+                                                        HuggingFace
+                                                    </button>
+                                                    <button 
+                                                        onClick={() => setRagConfig({...ragConfig, embedding_model: allGgufFiles[0]?.path || ''})}
+                                                        className={cn("px-2 py-1 text-[9px] font-bold rounded-md transition-all", isEmbedGguf ? "bg-primary text-white shadow-sm" : "text-muted-foreground hover:text-foreground")}
+                                                    >
+                                                        Local GGUF
+                                                    </button>
+                                                </div>
+                                            </div>
+                                            
+                                            {!isEmbedGguf ? (
+                                                <>
+                                                    <input 
+                                                        type="text"
+                                                        value={ragConfig.embedding_model}
+                                                        onChange={(e) => setRagConfig({...ragConfig, embedding_model: e.target.value})}
+                                                        className="w-full bg-muted/30 border border-border/50 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all"
+                                                    />
+                                                    <p className="text-[10px] text-muted-foreground/60 italic">Например: Qwen/Qwen3-Embedding-0.6B</p>
+                                                </>
+                                            ) : (
+                                                <select
+                                                    value={ragConfig.embedding_model}
+                                                    onChange={(e) => setRagConfig({...ragConfig, embedding_model: e.target.value})}
+                                                    className="w-full bg-muted/30 border border-border/50 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all"
+                                                >
+                                                    <option value="" disabled>Выберите GGUF модель...</option>
+                                                    {allGgufFiles.map(f => (
+                                                        <option key={f.path} value={f.path}>
+                                                            {f.name}
+                                                        </option>
+                                                    ))}
+                                                </select>
+                                            )}
+                                        </div>
+                                    );
+                                })()}
 
-                                <div className="space-y-2">
-                                    <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest flex items-center gap-2">
-                                        <RefreshCw size={12} /> Reranker Model (HuggingFace)
-                                    </label>
-                                    <input 
-                                        type="text"
-                                        value={ragConfig.reranker_model}
-                                        onChange={(e) => setRagConfig({...ragConfig, reranker_model: e.target.value})}
-                                        className="w-full bg-muted/30 border border-border/50 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all"
-                                    />
-                                    <p className="text-[10px] text-muted-foreground/60 italic">Например: Qwen/Qwen3-Reranker-0.6B</p>
-                                </div>
+                                {(() => {
+                                    const isRerankGguf = ragConfig.reranker_model?.toLowerCase().endsWith('.gguf');
+                                    const allGgufFiles = ggufModels?.flatMap(g => g.gguf_files.map(f => ({ name: f, path: g.dir + '/' + f }))) || [];
+                                    
+                                    return (
+                                        <div className="space-y-2">
+                                            <div className="flex items-center justify-between">
+                                                <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest flex items-center gap-2">
+                                                    <RefreshCw size={12} /> Reranker Model
+                                                </label>
+                                                <div className="flex bg-muted/30 rounded-lg p-0.5 border border-border/50">
+                                                    <button 
+                                                        onClick={() => setRagConfig({...ragConfig, reranker_model: 'Qwen/Qwen3-Reranker-0.6B'})}
+                                                        className={cn("px-2 py-1 text-[9px] font-bold rounded-md transition-all", !isRerankGguf ? "bg-primary text-white shadow-sm" : "text-muted-foreground hover:text-foreground")}
+                                                    >
+                                                        HuggingFace
+                                                    </button>
+                                                    <button 
+                                                        onClick={() => setRagConfig({...ragConfig, reranker_model: allGgufFiles[0]?.path || ''})}
+                                                        className={cn("px-2 py-1 text-[9px] font-bold rounded-md transition-all", isRerankGguf ? "bg-primary text-white shadow-sm" : "text-muted-foreground hover:text-foreground")}
+                                                    >
+                                                        Local GGUF
+                                                    </button>
+                                                </div>
+                                            </div>
+                                            
+                                            {!isRerankGguf ? (
+                                                <>
+                                                    <input 
+                                                        type="text"
+                                                        value={ragConfig.reranker_model}
+                                                        onChange={(e) => setRagConfig({...ragConfig, reranker_model: e.target.value})}
+                                                        className="w-full bg-muted/30 border border-border/50 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all"
+                                                    />
+                                                    <p className="text-[10px] text-muted-foreground/60 italic">Например: Qwen/Qwen3-Reranker-0.6B</p>
+                                                </>
+                                            ) : (
+                                                <select
+                                                    value={ragConfig.reranker_model}
+                                                    onChange={(e) => setRagConfig({...ragConfig, reranker_model: e.target.value})}
+                                                    className="w-full bg-muted/30 border border-border/50 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all"
+                                                >
+                                                    <option value="" disabled>Выберите GGUF модель...</option>
+                                                    {allGgufFiles.map(f => (
+                                                        <option key={f.path} value={f.path}>
+                                                            {f.name}
+                                                        </option>
+                                                    ))}
+                                                </select>
+                                            )}
+                                        </div>
+                                    );
+                                })()}
 
                                 <div className="space-y-2">
                                     <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest flex items-center gap-2">

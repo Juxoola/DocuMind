@@ -129,23 +129,7 @@ def robust_rmtree(path, max_retries=5, delay=0.5):
                 time.sleep(delay)
             else:
                 raise
-async def async_gen_wrapper(sync_gen):
-    """Обертка для превращения синхронного генератора в асинхронный через потоки."""
-    def safe_next(g):
-        try:
-            return next(g)
-        except StopIteration:
-            return None
-        except Exception as e:
-            return e
 
-    while True:
-        res = await asyncio.to_thread(safe_next, sync_gen)
-        if res is None:
-            break
-        if isinstance(res, Exception):
-            raise res
-        yield res
 
 
 # ── Управление блокнотами ──
@@ -218,10 +202,10 @@ async def upload_file(
     vision_model_path: Optional[str] = None,
     vision_mmproj_path: Optional[str] = None,
     vision_temperature: Optional[float] = 0.1,
-    vision_ctx_size: Optional[int] = 8192,
+    vision_ctx_size: Optional[int] = 4096,
     vision_gpu_layers: Optional[int] = -1,
     vision_threads: Optional[int] = 8,
-    vision_batch_size: Optional[int] = 2048,
+    vision_batch_size: Optional[int] = 512,
     vision_flash_attn: Optional[str] = "true",
     vision_max_tokens: Optional[int] = 4096,
     vision_repeat_penalty: Optional[float] = 1.2,
@@ -236,12 +220,15 @@ async def upload_file(
     paths = config.get_notebook_paths(notebook_id)
     os.makedirs(paths["data"], exist_ok=True)
     file_path = os.path.join(paths["data"], file.filename)
-    with open(file_path, "wb") as f:
-        shutil.copyfileobj(file.file, f)
+    def save_upload():
+        with open(file_path, "wb") as f:
+            shutil.copyfileobj(file.file, f)
+            
+    await asyncio.to_thread(save_upload)
 
     import threading
     import queue
-    import asyncio
+    
 
     q = queue.Queue()
     
@@ -341,7 +328,7 @@ async def upload_file(
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
 
-    threading.Thread(target=process_task, daemon=True).start()
+    asyncio.create_task(asyncio.to_thread(process_task))
 
     async def event_generator():
         while True:
@@ -660,15 +647,14 @@ async def chat(request: ChatRequest):
                 
                 buf = ""
                 # Запускаем стриминг в потоке и оборачиваем в асинхронный генератор
-                sync_gen = await asyncio.to_thread(
-                    stream_gguf_chat,
+                async_gen = stream_gguf_chat(
                     llm_url=active_llm, messages=messages_for_chat, enable_thinking=request.thinking_mode,
                     max_tokens=request.max_tokens, temperature=request.gguf_temperature,
                     repeat_penalty=request.repeat_penalty, top_p=request.top_p, min_p=request.min_p,
                     model_family=model_family
                 )
                 
-                async for delta in async_gen_wrapper(sync_gen):
+                async for delta in async_gen:
                     if not delta: continue
                     token_count += 1
                     buf += delta

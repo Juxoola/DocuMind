@@ -59,7 +59,7 @@ def cleanup_gpu():
     """Принудительная очистка всей видеопамяти перед тяжелыми задачами."""
     try:
         from src.rag_pipeline import unload_rag_models
-        unload_rag_models()
+        unload_rag_models(hard=False)
         # Мы НЕ выгружаем GGUF модели здесь, так как get_gguf_llm сам решит, 
         # нужно ли перезапускать сервер или использовать текущий.
         import gc, torch
@@ -320,16 +320,25 @@ def process_audio_video(file_path, images_dir, is_video=False, progress_cb=None,
                 futures.append(executor.submit(describe_image_with_lmstudio, path, llm_settings, shared_llm_url))
             
             # Собираем результаты по мере готовности для обновления прогресса
+            # Используем большой chunk_size, чтобы описания не разрывались
+            splitter = SentenceSplitter(chunk_size=2048, chunk_overlap=128)
             for idx, future in enumerate(futures):
                 desc = future.result()
                 path, t = frame_list[idx]
-                nodes.append(TextNode(text=f"Кадр {file_name} [{format_seconds(t)}]: {desc}", metadata={"file_name":file_name, "image_path":path, "time":t}))
+                
+                # Принудительно пропускаем описание через сплиттер, чтобы не превысить контекст эмбеддингов
+                desc_nodes = splitter.get_nodes_from_documents([
+                    TextNode(text=f"Кадр {file_name} [{format_seconds(t)}]: {desc}", 
+                             metadata={"file_name":file_name, "image_path":path, "time":t})
+                ])
+                nodes.extend(desc_nodes)
+                
                 frame_data.append({"time":t, "image_path":path, "description":desc})
                 done = idx + 1
                 prog(65 + int(done/n*22) if n else 87, f"Описание: {done}/{n}")
             
         if shared_llm_url:
-            unload_all_models()
+            unload_all_models(role="llm")
 
     metadata_json = {"file_name": file_name, "is_video": is_video, "transcript": transcript_data, "frames": frame_data}
     with open(os.path.join(os.path.dirname(file_path), f"{file_name}.json"), "w", encoding="utf-8") as f:
@@ -340,7 +349,9 @@ def process_pdf(file_path, images_dir, llm_settings=None, shared_llm_url=None, o
     nodes = []; file_name = original_filename or os.path.basename(file_path); doc = fitz.open(file_path)
     frame_data = []
     frame_list = []
-    splitter = SentenceSplitter(chunk_size=1024, chunk_overlap=128)
+    splitter = SentenceSplitter(chunk_size=1024, chunk_overlap=256)
+    # Сплиттер для описаний (более крупный)
+    v_splitter = SentenceSplitter(chunk_size=2048, chunk_overlap=128)
     for page_num in range(len(doc)):
         page = doc.load_page(page_num); text = page.get_text()
         if text.strip(): 
@@ -412,10 +423,15 @@ def process_pdf(file_path, images_dir, llm_settings=None, shared_llm_url=None, o
                     done_count += 1
                     
                     if desc and "Изображение без описания" not in desc:
-                        nodes.append(TextNode(
-                            text=f"Изображение PDF {file_name} стр {frame_info['page']}: {desc}", 
-                            metadata={"file_name":file_name, "image_path":frame_info["path"], "page":frame_info["page"]}
-                        ))
+                        # Принудительно пропускаем описание через v_splitter (большой размер чанка)
+                        desc_nodes = v_splitter.get_nodes_from_documents([
+                            TextNode(
+                                text=f"Изображение PDF {file_name} стр {frame_info['page']}: {desc}", 
+                                metadata={"file_name":file_name, "image_path":frame_info["path"], "page":frame_info["page"]}
+                            )
+                        ])
+                        nodes.extend(desc_nodes)
+                        
                         frame_data.append({
                             "page": frame_info["page"], 
                             "image_path": frame_info["path"], 
@@ -426,6 +442,9 @@ def process_pdf(file_path, images_dir, llm_settings=None, shared_llm_url=None, o
                         except Exception: pass
                     
                     if progress_cb: progress_cb(65 + int(done_count/n*25), f"Описание PDF: {done_count}/{n}")
+
+        if shared_llm_url:
+            unload_all_models(role="llm")
 
     # Сохраняем метаданные для PDF (как для видео), чтобы фронтенд мог показать картинки
     if frame_data:
@@ -554,7 +573,9 @@ def ingest_file(file_path, notebook_id, progress_cb=None, llm_settings=None):
                 with open(file_path, 'r', encoding='utf-8') as f: text = f.read()
             except UnicodeDecodeError:
                 with open(file_path, 'r', encoding='cp1251') as f: text = f.read()
-            nodes = SentenceSplitter(chunk_size=512).get_nodes_from_documents([TextNode(text=text, metadata={"file_name":os.path.basename(file_path)})])
+                
+            doc = TextNode(text=text, metadata={"file_name":os.path.basename(file_path)})
+            nodes = SentenceSplitter(chunk_size=1024, chunk_overlap=256).get_nodes_from_documents([doc])
     finally:
         # Мы НЕ выгружаем модели в finally, чтобы они оставались в памяти для следующего файла в батче.
         # Модели будут выгружены автоматически, если потребуется память для другого типа моделей.

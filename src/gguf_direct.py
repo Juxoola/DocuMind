@@ -17,6 +17,7 @@ import torch
 _server_processes: Dict[str, subprocess.Popen] = {}
 _server_ports: Dict[str, int] = {}
 _server_configs: Dict[str, Dict] = {}
+_server_roles: Dict[str, str] = {} # gguf_path -> role
 _lock = threading.Lock()
 
 SERVER_EXE = os.path.join(config.BASE_DIR, "bin", "llama-server.exe")
@@ -97,12 +98,11 @@ def get_gguf_llm(
                 # Мы не удаляем его из _server_processes здесь, 
                 # чтобы unload_all_models() ниже гарантированно его прибил.
 
-        # Выгружаем другие модели ПЕРЕД запуском новой (экономия VRAM)
+        # Выгружаем другие LLM модели ПЕРЕД запуском новой (экономия VRAM)
         # НО: делаем это только если мы РЕАЛЬНО запускаем новый сервер
         from src.rag_pipeline import unload_rag_models
-        unload_rag_models()
-        kill_stray_servers() # Принудительно чистим всё перед запуском нового
-        unload_all_models() # Сбрасываем внутренний стейт
+        unload_rag_models(hard=False)
+        unload_all_models(role="llm") # Сбрасываем только другие LLM
 
         if not os.path.exists(gguf_path):
             raise FileNotFoundError(f"GGUF модель не найдена: {gguf_path}")
@@ -194,6 +194,7 @@ def get_gguf_llm(
             _server_processes[gguf_path] = process
             _server_ports[gguf_path] = port
             _server_configs[gguf_path] = current_config
+            _server_roles[gguf_path] = "llm"
             return f"http://127.0.0.1:{port}"
         
         if process.poll() is not None:
@@ -205,7 +206,86 @@ def get_gguf_llm(
     process.terminate()
     raise TimeoutError("Сервер не ответил за 60 секунд")
 
-def stream_gguf_chat(
+def get_gguf_embedding_url(gguf_path: str, n_threads: int = None, is_reranker: bool = False) -> str:
+    """Запускает llama-server для эмбеддингов или реранкера и возвращает URL."""
+    global _server_processes, _server_ports, _server_configs, _server_roles
+    
+    role = "reranker" if is_reranker else "embedding"
+    
+    current_config = {
+        "n_threads": n_threads,
+        "is_reranker": is_reranker
+    }
+
+    with _lock:
+        if gguf_path in _server_processes:
+            if _server_processes[gguf_path].poll() is None and _server_configs.get(gguf_path) == current_config:
+                return f"http://127.0.0.1:{_server_ports[gguf_path]}"
+            else:
+                print(f"[GGUF Server] Перезапуск {role} {os.path.basename(gguf_path)}...")
+                
+        # Выгружаем другие модели ТОЙ ЖЕ РОЛИ ПЕРЕД запуском новой
+        from src.rag_pipeline import unload_rag_models
+        unload_rag_models(hard=False)
+        unload_all_models(role=role)
+
+        if not os.path.exists(gguf_path):
+            raise FileNotFoundError(f"GGUF модель не найдена: {gguf_path}")
+
+        import socket
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.bind(('', 0))
+        port = s.getsockname()[1]
+        s.close()
+
+        cmd = [SERVER_EXE, "-m", gguf_path, "--port", str(port)]
+        
+        # Эмбеддинги требуют --embedding
+        if not is_reranker:
+            cmd.extend(["--embedding"])
+        else:
+            cmd.extend(["--reranking"])
+            
+        # Для вспомогательных моделей контекст небольшой, GPU можно использовать по умолчанию
+        cmd.extend(["-c", "4096", "-b", "512", "-ub", "512"])
+        
+        # Добавляем флаги оптимизации, как у LLM
+        if config.GGUF_GPU_LAYERS != 0:
+            cmd.extend(["-ngl", str(config.GGUF_GPU_LAYERS)])
+        cmd.extend(["--flash-attn", "on"])
+        
+        if n_threads and n_threads > 0:
+            cmd.extend(["-t", str(n_threads)])
+
+        print(f"[GGUF Server] Запуск {role}: {os.path.basename(gguf_path)} на порту {port}...")
+        
+        creationflags = 0x08000000 # CREATE_NO_WINDOW
+        process = subprocess.Popen(
+            cmd,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            creationflags=creationflags
+        )
+        
+        start_wait = time.time()
+        while time.time() - start_wait < 60:
+            if is_server_ready(port):
+                print(f"[GGUF Server] {role.capitalize()} готов!")
+                _server_processes[gguf_path] = process
+                _server_ports[gguf_path] = port
+                _server_configs[gguf_path] = current_config
+                _server_roles[gguf_path] = role
+                return f"http://127.0.0.1:{port}"
+            
+            if process.poll() is not None:
+                raise RuntimeError(f"{role.capitalize()} сервер упал при запуске")
+                
+            time.sleep(0.5)
+        
+        process.terminate()
+        raise TimeoutError(f"{role.capitalize()} сервер не ответил за 60 секунд")
+
+async def stream_gguf_chat(
     llm_url: str,
     messages: list,
     enable_thinking: bool,
@@ -216,7 +296,9 @@ def stream_gguf_chat(
     min_p: float,
     model_family: str = "generic"
 ):
-    """Стриминг через OpenAI-совместимый API сервера llama.cpp."""
+    """Асинхронный стриминг через OpenAI-совместимый API сервера llama.cpp."""
+    import httpx
+    
     payload = {
         "messages": messages,
         "stream": True,
@@ -231,48 +313,45 @@ def stream_gguf_chat(
     OPEN_TAG, CLOSE_TAG = ("<|channel|>", "<channel|>") if model_family == "gemma4" else ("<think>", "</think>")
     
     try:
-        r = requests.post(
-            f"{llm_url}/v1/chat/completions",
-            json=payload,
-            stream=True,
-            timeout=60
-        )
-        
-        is_thinking = False
-        for line in r.iter_lines():
-            if line:
-                line_str = line.decode("utf-8")
-                if line_str.startswith("data: "):
-                    if line_str == "data: [DONE]":
-                        break
-                    try:
-                        data = json.loads(line_str[6:])
-                        delta = data["choices"][0]["delta"]
-                        
-                        # 1. Проверяем наличие reasoning_content (новый формат llama.cpp / OpenAI)
-                        reasoning = delta.get("reasoning_content", "")
-                        if reasoning:
-                            if not is_thinking:
-                                yield OPEN_TAG
-                                is_thinking = True
-                            yield reasoning
-                            continue
-                            
-                        # 2. Проверяем наличие обычного контента
-                        content = delta.get("content", "")
-                        if content:
-                            # Если пошел текст, но мы еще "думали" — закрываем тег
-                            if is_thinking:
-                                yield CLOSE_TAG
-                                is_thinking = False
-                            yield content
-                    except Exception as e:
-                        logger.debug(f"Ошибка парсинга SSE: {e}")
-                        continue
-        
-        # На всякий случай закрываем тег в конце
-        if is_thinking:
-            yield CLOSE_TAG
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            async with client.stream("POST", f"{llm_url}/v1/chat/completions", json=payload) as r:
+                r.raise_for_status()
+                is_thinking = False
+                
+                async for line in r.aiter_lines():
+                    if line:
+                        line_str = line
+                        if line_str.startswith("data: "):
+                            if line_str == "data: [DONE]":
+                                break
+                            try:
+                                data = json.loads(line_str[6:])
+                                delta = data["choices"][0]["delta"]
+                                
+                                # 1. Проверяем наличие reasoning_content (новый формат llama.cpp / OpenAI)
+                                reasoning = delta.get("reasoning_content", "")
+                                if reasoning:
+                                    if not is_thinking:
+                                        yield OPEN_TAG
+                                        is_thinking = True
+                                    yield reasoning
+                                    continue
+                                    
+                                # 2. Проверяем наличие обычного контента
+                                content = delta.get("content", "")
+                                if content:
+                                    # Если пошел текст, но мы еще "думали" — закрываем тег
+                                    if is_thinking:
+                                        yield CLOSE_TAG
+                                        is_thinking = False
+                                    yield content
+                            except Exception as e:
+                                logger.debug(f"Ошибка парсинга SSE: {e}")
+                                continue
+                
+                # На всякий случай закрываем тег в конце
+                if is_thinking:
+                    yield CLOSE_TAG
 
     except Exception as e:
         print(f"[GGUF Stream] Ошибка: {e}")
@@ -302,15 +381,20 @@ def count_running_servers() -> int:
     except Exception:
         return 0
 
-def unload_all_models():
-    """Убивает все процессы серверов максимально надежно."""
-    global _server_processes, _server_ports, _server_configs
+def unload_all_models(role: str = None):
+    """Убивает процессы серверов. Если указан role, выгружает только серверы с этой ролью."""
+    global _server_processes, _server_ports, _server_configs, _server_roles
     if not _server_processes:
         return
 
-    print(f"[GGUF Server] Выгрузка всех моделей: {list(map(os.path.basename, _server_processes.keys()))}")
-    
+    to_remove = []
     for path, process in _server_processes.items():
+        if role is not None and _server_roles.get(path) != role:
+            continue
+            
+        print(f"[GGUF Server] Выгрузка модели ({_server_roles.get(path, 'unknown')}): {os.path.basename(path)}")
+        to_remove.append(path)
+        
         if process.poll() is None: # Если еще живой
             try:
                 process.terminate()
@@ -321,10 +405,11 @@ def unload_all_models():
                     process.wait(timeout=2)
             except Exception as e:
                 print(f"[GGUF Server] Ошибка при остановке {os.path.basename(path)}: {e}")
-    
-    _server_processes = {}
-    _server_ports = {}
-    _server_configs = {}
+    for path in to_remove:
+        _server_processes.pop(path, None)
+        _server_ports.pop(path, None)
+        _server_configs.pop(path, None)
+        _server_roles.pop(path, None)
     
     # На Windows иногда процессы зависают, пробуем почистить по имени порта если нужно, 
     # но пока ограничимся gc.
@@ -334,5 +419,5 @@ def unload_all_models():
         torch.cuda.empty_cache()
 
 def get_loaded_models():
-    """Возвращает список путей к запущенным моделям."""
-    return list(_server_processes.keys())
+    """Возвращает список путей к запущенным LLM моделям (без эмбеддингов)."""
+    return [path for path in _server_processes.keys() if _server_roles.get(path, "llm") == "llm"]

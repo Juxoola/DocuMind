@@ -3,6 +3,9 @@ import json
 import logging
 from functools import lru_cache
 
+# Отключаем онлайн-проверки Hugging Face (используем только локальный кэш)
+os.environ["HF_HUB_OFFLINE"] = os.getenv("HF_HUB_OFFLINE", "1")
+
 logger = logging.getLogger(__name__)
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -27,8 +30,8 @@ PORT = int(os.getenv("PORT", 8000))
 LM_STUDIO_URL = os.getenv("LM_STUDIO_URL", "http://localhost:1234/v1")
 
 # Настройки эмбеддингов
-EMBEDDING_MODEL_NAME = os.getenv("EMBEDDING_MODEL_NAME", "Qwen/Qwen3-Embedding-0.6B")
-RERANKER_MODEL_NAME = os.getenv("RERANKER_MODEL_NAME", "Qwen/Qwen3-Reranker-0.6B")
+EMBEDDING_MODEL_NAME = os.getenv("EMBEDDING_MODEL_NAME", "Qwen3-Embedding-0.6B-v2.Q8_0.gguf")
+RERANKER_MODEL_NAME = os.getenv("RERANKER_MODEL_NAME", "Qwen3-Reranker-0.6B-v2.Q8_0.gguf")
 # Квантование: 'fp16', 'int8' или '4bit'
 QUANTIZATION = os.getenv("QUANTIZATION", "4bit")
 
@@ -42,7 +45,7 @@ USE_RERANKER = os.getenv("USE_RERANKER", "true").lower() == "true"
 
 # Базовая директория для поиска GGUF моделей (можно указать несколько через ;)
 # Например: "F:/llm/mradermacher;D:/models"
-GGUF_SEARCH_DIRS = os.getenv("GGUF_SEARCH_DIRS", "F:/llm")
+GGUF_SEARCH_DIRS = os.getenv("GGUF_SEARCH_DIRS", "F:/llm;C:/test/models")
 
 # Дефолтный порт для llama-server.exe (если не выбран свободный автоматически)
 GGUF_SERVER_PORT = int(os.getenv("GGUF_SERVER_PORT", 8081))
@@ -51,8 +54,8 @@ GGUF_SERVER_HOST = os.getenv("GGUF_SERVER_HOST", "127.0.0.1")
 # Количество потоков для инференса (0 = авто)
 GGUF_THREADS = int(os.getenv("GGUF_THREADS", 0))
 
-# Контекст (токенов)
-GGUF_CTX_SIZE = int(os.getenv("GGUF_CTX_SIZE", 32768))
+# Контекст (токенов) - 16к это разумный баланс для 3080/4080
+GGUF_CTX_SIZE = int(os.getenv("GGUF_CTX_SIZE", 16384))
 
 # GPU слоёв (-1 = все на GPU, 0 = только CPU)
 GGUF_GPU_LAYERS = int(os.getenv("GGUF_GPU_LAYERS", -1))
