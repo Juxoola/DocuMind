@@ -557,7 +557,11 @@ async def chat(request: ChatRequest):
     sources = []
     context = ""
     
-    if query_for_rag.strip():
+    # Пропускаем ранний RAG если есть картинка (чтобы не грузить RAG-модели дважды),
+    # так как после OCR мы всё равно выполним RAG-поиск с объединенным запросом.
+    skip_initial_rag = request.image_base64 and request.use_gguf == "true" and request.gguf_model_path
+    
+    if query_for_rag.strip() and not skip_initial_rag:
         print(f"DEBUG: Запуск RAG поиска для: {query_for_rag[:50]}...")
         # Выполняем тяжелый поиск в отдельном потоке, чтобы не блокировать Event Loop
         nodes = await asyncio.to_thread(retrieve_nodes, query_for_rag, request.notebook_id, request.allowed_files)
@@ -613,8 +617,8 @@ async def chat(request: ChatRequest):
         nonlocal query_for_rag, sources, context
         token_count = 0
         try:
-            # Обработка изображения (OCR), если текста не было
-            if not query_for_rag.strip() and request.image_base64 and use_direct_gguf:
+            # Обработка изображения (OCR), всегда добавляем текст с картинки в запрос
+            if request.image_base64 and use_direct_gguf:
                 vision_messages = [
                     {"role": "user", "content": [
                         {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{request.image_base64}"}},
@@ -625,8 +629,16 @@ async def chat(request: ChatRequest):
                     v_payload = {"messages": vision_messages, "stream": False, "max_tokens": 300}
                     r_vision = await asyncio.to_thread(requests.post, f"{active_llm}/v1/chat/completions", json=v_payload, timeout=60)
                     extracted = r_vision.json()["choices"][0]["message"]["content"].strip()
-                    query_for_rag = extracted
-                    nodes = await asyncio.to_thread(retrieve_nodes, query_for_rag, request.notebook_id, request.allowed_files)
+                    
+                    # Чистый запрос для RAG (без инструкций, чтобы не ломать поиск)
+                    if request.query.strip():
+                        search_query = f"{request.query.strip()} {extracted}"
+                        query_for_rag = f"{request.query.strip()}\n\nТекст на картинке:\n{extracted}"
+                    else:
+                        search_query = extracted
+                        query_for_rag = f"Пожалуйста, подробно ответь на вопросы или выполни задания, которые представлены на изображении. Вот распознанный текст для удобства:\n{extracted}"
+                        
+                    nodes = await asyncio.to_thread(retrieve_nodes, search_query, request.notebook_id, request.allowed_files)
                     sources, context = await asyncio.to_thread(build_file_context, nodes, request.notebook_id)
                 except Exception as ve: print(f"DEBUG: Ошибка OCR: {ve}")
 
@@ -637,7 +649,18 @@ async def chat(request: ChatRequest):
 
             if use_direct_gguf:
                 sys_prompt = config.SYSTEM_PROMPT + f"\n\nДоступные источники:\n{context}"
-                messages_for_chat = [{"role": "system", "content": sys_prompt}, {"role": "user", "content": query_for_rag}]
+                
+                if request.image_base64:
+                    user_content = [
+                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{request.image_base64}"}},
+                        {"type": "text", "text": query_for_rag}
+                    ]
+                    messages_for_chat = [
+                        {"role": "system", "content": sys_prompt},
+                        {"role": "user", "content": user_content}
+                    ]
+                else:
+                    messages_for_chat = [{"role": "system", "content": sys_prompt}, {"role": "user", "content": query_for_rag}]
                 model_family = detect_model_family(request.gguf_model_path)
                 OPEN_TAG, CLOSE_TAG = ("<|channel|>", "<channel|>") if model_family == "gemma4" else ("<think>", "</think>")
                 

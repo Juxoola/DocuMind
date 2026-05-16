@@ -246,8 +246,28 @@ def get_gguf_embedding_url(gguf_path: str, n_threads: int = None, is_reranker: b
         else:
             cmd.extend(["--reranking"])
             
-        # Для вспомогательных моделей контекст небольшой, GPU можно использовать по умолчанию
-        cmd.extend(["-c", "4096", "-b", "512", "-ub", "512"])
+        # Embedding/Reranker не генерируют текст авторегрессивно.
+        # Параметры зависят от роли:
+        #
+        # Embedding: -c 2048, -b 32
+        #   Чанк обрабатывается целиком за один проход, -b 32 достаточно
+        #
+        # Reranker: -c 4096, -b 2048
+        #   /v1/rerank оценивает каждую пару (query + doc) НЕЗАВИСИМО.
+        #   -c 4096: достаточно для query(~50) + doc(2048) = 2100 токенов с запасом
+        #   -b 2048: обрабатывать весь документ за один forward-pass.
+        #   Без этого (-b 32) 2048-токенный чанк делится на 64 микро-части,
+        #   pooling даёт неправильный score (0.0).
+        if is_reranker:
+            ctx, b_size = "4096", "2048"
+        else:
+            ctx, b_size = "2048", "32"
+        cmd.extend(["-c", ctx, "-b", b_size, "-ub", b_size])
+        
+        # Квантование KV-cache: q8_0 = 50% экономии памяти против f16.
+        # Безопасно для embedding/reranker: они не генерируют текст авторегрессивно,
+        # поэтому ошибки квантования не накапливаются от токена к токену.
+        cmd.extend(["--cache-type-k", "q8_0", "--cache-type-v", "q8_0"])
         
         # Добавляем флаги оптимизации, как у LLM
         if config.GGUF_GPU_LAYERS != 0:
@@ -421,3 +441,17 @@ def unload_all_models(role: str = None):
 def get_loaded_models():
     """Возвращает список путей к запущенным LLM моделям (без эмбеддингов)."""
     return [path for path in _server_processes.keys() if _server_roles.get(path, "llm") == "llm"]
+
+def get_active_llm_url() -> str | None:
+    """Возвращает URL первого живого LLM-сервера (роль 'llm'), или None если нет.
+    
+    Используется для Query Expansion: позволяет использовать уже запущенный
+    GGUF-сервер вместо LM Studio.
+    """
+    with _lock:
+        for path, process in _server_processes.items():
+            if _server_roles.get(path) == "llm" and process.poll() is None:
+                port = _server_ports.get(path)
+                if port:
+                    return f"http://127.0.0.1:{port}"
+    return None

@@ -116,10 +116,10 @@ export default function ChatArea({ notebook, selectedSources, onOpenSource, llmS
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [stats, setStats] = useState(null);
-  const [maxTokens, setMaxTokens] = useState(1024);
+  const [maxTokens, setMaxTokens] = useState(() => parseInt(localStorage.getItem('chat_max_tokens')) || 1024);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  const [thinkingMode, setThinkingMode] = useState(false);
-  const [thinkingBudget, setThinkingBudget] = useState(1024); // -1 = no limit
+  const [thinkingMode, setThinkingMode] = useState(() => localStorage.getItem('chat_thinking_mode') === 'true');
+  const [thinkingBudget, setThinkingBudget] = useState(() => parseInt(localStorage.getItem('chat_thinking_budget')) || 1024); // -1 = no limit
   const [hoveredSource, setHoveredSource] = useState(null);
   const [tooltipCoords, setTooltipCoords] = useState({ x: 0, y: 0 });
   const [abortController, setAbortController] = useState(null);
@@ -130,6 +130,13 @@ export default function ChatArea({ notebook, selectedSources, onOpenSource, llmS
   const tooltipTimeoutRef = useRef(null);
   const messagesEndRef = useRef(null);
   const textareaRef = useRef(null);
+
+  // Сохранение настроек при изменении
+  useEffect(() => {
+    localStorage.setItem('chat_max_tokens', maxTokens.toString());
+    localStorage.setItem('chat_thinking_mode', thinkingMode.toString());
+    localStorage.setItem('chat_thinking_budget', thinkingBudget.toString());
+  }, [maxTokens, thinkingMode, thinkingBudget]);
 
   useEffect(() => {
     if (textareaRef.current) {

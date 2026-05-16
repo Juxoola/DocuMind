@@ -40,6 +40,14 @@ RAG_TOP_K_PER_FILE = int(os.getenv("RAG_TOP_K_PER_FILE", 5))
 RAG_RERANK_POOL = int(os.getenv("RAG_RERANK_POOL", 30))
 RAG_FINAL_TOP_N = int(os.getenv("RAG_FINAL_TOP_N", 15))
 USE_RERANKER = os.getenv("USE_RERANKER", "true").lower() == "true"
+# Query Expansion: LLM генерирует 2 доп. формулировки запроса для лучшего recall.
+# Использует активный GGUF LLM-сервер (если запущен) или LM Studio.
+# Если ни то, ни другое не доступно — QE безопасно пропускается.
+RAG_QUERY_EXPANSION = os.getenv("RAG_QUERY_EXPANSION", "true").lower() == "true"
+# Порог score реранкера: чанки ниже этого значения отбрасываются как нерелевантные
+RERANK_SCORE_THRESHOLD = float(os.getenv("RERANK_SCORE_THRESHOLD", "0.05"))
+# Гарантированный минимум чанков даже если они ниже порога
+MIN_FINAL_CHUNKS = int(os.getenv("MIN_FINAL_CHUNKS", "5"))
 
 # ── Настройки локальных GGUF моделей ──
 
@@ -121,7 +129,9 @@ def save_rag_config():
         "rerank_pool": RAG_RERANK_POOL,
         "final_top_n": RAG_FINAL_TOP_N,
         "use_reranker": USE_RERANKER,
-        "gguf_search_dirs": GGUF_SEARCH_DIRS
+        "gguf_search_dirs": GGUF_SEARCH_DIRS,
+        "query_expansion": RAG_QUERY_EXPANSION,
+        "rerank_score_threshold": RERANK_SCORE_THRESHOLD
     }
     try:
         with open(RAG_CONFIG_FILE, "w", encoding="utf-8") as f:
@@ -130,7 +140,7 @@ def save_rag_config():
         logger.warning(f"Не удалось сохранить RAG config: {e}")
 
 def load_rag_config():
-    global EMBEDDING_MODEL_NAME, RERANKER_MODEL_NAME, QUANTIZATION, RAG_TOP_K_PER_FILE, RAG_RERANK_POOL, RAG_FINAL_TOP_N, USE_RERANKER, GGUF_SEARCH_DIRS
+    global EMBEDDING_MODEL_NAME, RERANKER_MODEL_NAME, QUANTIZATION, RAG_TOP_K_PER_FILE, RAG_RERANK_POOL, RAG_FINAL_TOP_N, USE_RERANKER, GGUF_SEARCH_DIRS, RAG_QUERY_EXPANSION, RERANK_SCORE_THRESHOLD
     try:
         if os.path.exists(RAG_CONFIG_FILE):
             with open(RAG_CONFIG_FILE, "r", encoding="utf-8") as f:
@@ -143,6 +153,8 @@ def load_rag_config():
                 RAG_FINAL_TOP_N = data.get("final_top_n", RAG_FINAL_TOP_N)
                 USE_RERANKER = data.get("use_reranker", USE_RERANKER)
                 GGUF_SEARCH_DIRS = data.get("gguf_search_dirs", GGUF_SEARCH_DIRS)
+                RAG_QUERY_EXPANSION = data.get("query_expansion", RAG_QUERY_EXPANSION)
+                RERANK_SCORE_THRESHOLD = float(data.get("rerank_score_threshold", RERANK_SCORE_THRESHOLD))
     except Exception as e:
         logger.warning(f"Не удалось загрузить RAG config: {e}")
 

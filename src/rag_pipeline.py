@@ -11,6 +11,8 @@ from llama_index.core.schema import TextNode
 
 import config
 import torch
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from transformers import BitsAndBytesConfig
 
 logger = logging.getLogger(__name__)
@@ -82,6 +84,10 @@ def init_settings(max_tokens=1024):
                 api_key="sk-local",
                 model="text-embedding-ada-002",
                 timeout=120.0,
+                # Сервер запущен с -c 2048 (= максимальный размер 1 чанка).
+                # Каждый документ обрабатывается независимо, батч не складывает токены.
+                # 16 параллельных запросов — безопасно и ускоряет индексацию в ~16×.
+                embed_batch_size=16,
                 # Инструкция для Qwen3-Embedding, чтобы он понимал задачу поиска
                 query_header="Instruct: Given a web search query, retrieve relevant passages that answer the query\nQuery: "
             )
@@ -140,34 +146,93 @@ def get_vector_store(notebook_id: str):
     chroma_collection = db.get_or_create_collection("multimodal_rag")
     return ChromaVectorStore(chroma_collection=chroma_collection)
 
+# Промпт для генерации альтернативных формулировок запроса (Query Expansion)
+_QUERY_GEN_PROMPT = (
+    "Ты — помощник для поиска информации. Сгенерируй {num_queries} альтернативные "
+    "формулировки следующего вопроса на том же языке. "
+    "Каждая формулировка — отдельная строка, без нумерации и лишних слов.\n"
+    "Вопрос: {query}\n"
+    "Альтернативы:"
+)
+
+def _get_qe_llm():
+    """Returns an LLM instance for Query Expansion.
+    
+    Priority:
+    1. Running GGUF LLM server (get_active_llm_url)
+    2. LM Studio (config.LM_STUDIO_URL)
+    3. None — QE will be skipped silently
+    """
+    from src.gguf_direct import get_active_llm_url
+    url = get_active_llm_url()
+    if url:
+        logger.debug(f"[QE] Используем GGUF LLM для Query Expansion: {url}")
+    else:
+        url = config.LM_STUDIO_URL  # фоллбэк на LM Studio
+        logger.debug(f"[QE] GGUF LLM не найден, пробуем LM Studio: {url}")
+    try:
+        import requests as _req
+        # Быстрая проверка доступности сервера (без ретраев)
+        _req.get(url.replace("/v1", "").rstrip("/") + "/health", timeout=1)
+    except Exception:
+        logger.debug("[QE] LLM-сервер недоступен, Query Expansion пропускается")
+        return None
+    from llama_index.llms.openai import OpenAI as _OpenAI
+    return _OpenAI(
+        api_base=url if url.endswith("/v1") else f"{url}/v1",
+        api_key="sk-local",
+        model="gpt-4o",
+        temperature=0.3,
+        max_tokens=128,       # Нам нужны только две коротких фразы
+        timeout=10.0,          # Не зависаем дольше 10с
+        max_retries=0,         # Без ретраев — если нет ответа, сразу фоллбэк
+    )
+
+def _rebuild_bm25_bg(notebook_id: str, db_path: str):
+    """Перестройка BM25-индекса в фоновом потоке. Не блокирует основной поток."""
+    try:
+        paths = config.get_notebook_paths(notebook_id)
+        bm25_dir = os.path.join(paths["base"], "bm25")
+        os.makedirs(bm25_dir, exist_ok=True)
+        # Отдельный клиент для фонового потока (нельзя использовать общий _client_cache)
+        import chromadb as _chromadb
+        tmp_client = _chromadb.PersistentClient(path=db_path)
+        collection = tmp_client.get_or_create_collection("multimodal_rag")
+        result = collection.get()
+        bm25_nodes = []
+        for i, doc_id in enumerate(result['ids']):
+            text = result['documents'][i]
+            meta = result['metadatas'][i] or {}
+            bm25_nodes.append(TextNode(text=text, id_=doc_id, metadata=meta))
+        if bm25_nodes:
+            from llama_index.retrievers.bm25 import BM25Retriever
+            retriever = BM25Retriever.from_defaults(
+                nodes=bm25_nodes,
+                similarity_top_k=config.RAG_TOP_K_PER_FILE,
+                language="russian"
+            )
+            retriever.persist(bm25_dir)
+            print(f"[RAG] ✅ BM25 обновлён в фоне: {len(bm25_nodes)} узлов.")
+    except Exception as e:
+        logger.warning(f"[RAG] Ошибка фоновой сборки BM25: {e}")
+
 def build_index(nodes, notebook_id: str):
     init_settings()
     vector_store = get_vector_store(notebook_id)
     storage_context = StorageContext.from_defaults(vector_store=vector_store)
     index = VectorStoreIndex(nodes, storage_context=storage_context)
-    
-    # Перестройка индекса BM25
+
+    # Перестройка BM25 в фоне — не блокирует завершение загрузки файла
     paths = config.get_notebook_paths(notebook_id)
-    bm25_dir = os.path.join(paths["base"], "bm25")
-    os.makedirs(bm25_dir, exist_ok=True)
-    
-    try:
-        collection = vector_store._collection
-        result = collection.get()
-        all_nodes = []
-        for i, doc_id in enumerate(result['ids']):
-            text = result['documents'][i]
-            meta = result['metadatas'][i] or {}
-            all_nodes.append(TextNode(text=text, id_=doc_id, metadata=meta))
-        
-        if all_nodes:
-            from llama_index.retrievers.bm25 import BM25Retriever
-            bm25_retriever = BM25Retriever.from_defaults(nodes=all_nodes, similarity_top_k=config.RAG_TOP_K_PER_FILE, language="russian")
-            bm25_retriever.persist(bm25_dir)
-            print(f"[RAG] Обновлен BM25 индекс для {len(all_nodes)} узлов.")
-    except Exception as e:
-        logger.warning(f"Ошибка при сборке BM25: {e}")
-        
+    db_path = paths["chroma_db"]
+    t = threading.Thread(
+        target=_rebuild_bm25_bg,
+        args=(notebook_id, db_path),
+        daemon=True,
+        name=f"bm25-{notebook_id}"
+    )
+    t.start()
+    print(f"[RAG] BM25 перестраивается в фоне...")
     return index
 
 def retrieve_nodes(query: str, notebook_id: str, allowed_files=None, max_tokens=1024):
@@ -196,36 +261,73 @@ def retrieve_nodes(query: str, notebook_id: str, allowed_files=None, max_tokens=
             logger.warning(f"Не удалось загрузить BM25: {e}")
 
     all_nodes = []
-    for fname in allowed_files:
+
+    # Определяем, доступен ли LLM для Query Expansion
+    qe_llm = _get_qe_llm() if config.RAG_QUERY_EXPANSION else None
+    if config.RAG_QUERY_EXPANSION:
+        if qe_llm:
+            print(f"  [RAG] Query Expansion включён (num_queries=3)")
+        else:
+            print(f"  [RAG] Query Expansion отключён (нет доступного LLM-сервера)")
+
+    def _search_one_file(fname):
+        """Поиск по одному файлу. Запускается параллельно для каждого файла."""
         file_filter = MetadataFilters(
             filters=[MetadataFilter(key="file_name", value=fname, operator=FilterOperator.EQ)]
         )
-        
-        vector_retriever = index.as_retriever(similarity_top_k=config.RAG_TOP_K_PER_FILE, filters=file_filter)
-        
+        vector_retriever = index.as_retriever(
+            similarity_top_k=config.RAG_TOP_K_PER_FILE, filters=file_filter
+        )
+        # qe_llm=None → QE отключается, num_queries=1
+        num_q = 3 if qe_llm else 1
+        qprompt = _QUERY_GEN_PROMPT if qe_llm else None
+
         if bm25_retriever:
-            # Обновляем фильтр для BM25 вручную, так как он не поддерживает MetadataFilters напрямую
-            # Мы будем фильтровать результаты после выдачи
             fusion_retriever = QueryFusionRetriever(
                 [vector_retriever, bm25_retriever],
                 similarity_top_k=config.RAG_TOP_K_PER_FILE,
-                num_queries=1,  # Без автоматического Query Expansion
+                num_queries=num_q,
+                query_gen_prompt=qprompt,
+                llm=qe_llm,          # передаем явно, не используем Settings.llm
                 use_async=False
             )
             try:
-                # Получаем сырые ноды и фильтруем по файлу
                 nodes = fusion_retriever.retrieve(query)
-                filtered_nodes = [n for n in nodes if n.node.metadata.get("file_name") == fname]
-                print(f"  [RAG] 🔍 Гибридный поиск (Вектор + BM25) по файлу {fname}: найдено {len(filtered_nodes)} фрагментов")
-                all_nodes.extend(filtered_nodes)
+                filtered = [n for n in nodes if n.node.metadata.get("file_name") == fname]
+                label = f"Гибрид+QE({num_q})" if num_q > 1 else "Гибрид"
+                print(f"  [RAG] 🔍 {label} {fname}: {len(filtered)} фрагм.")
+                return filtered
             except Exception as e:
-                print(f"Ошибка при гибридном поиске в {fname}: {e}")
+                print(f"Ошибка гибридного поиска в {fname}: {e}")
+                return []
         else:
             try:
-                nodes = vector_retriever.retrieve(query)
-                all_nodes.extend(nodes)
+                if qe_llm:
+                    fusion_retriever = QueryFusionRetriever(
+                        [vector_retriever],
+                        similarity_top_k=config.RAG_TOP_K_PER_FILE,
+                        num_queries=3,
+                        query_gen_prompt=_QUERY_GEN_PROMPT,
+                        llm=qe_llm,      # передаем явно
+                        use_async=False
+                    )
+                    nodes = fusion_retriever.retrieve(query)
+                else:
+                    nodes = vector_retriever.retrieve(query)
+                print(f"  [RAG] 🔍 Вектор {fname}: {len(nodes)} фрагм.")
+                return nodes
             except Exception as e:
-                print(f"Ошибка при векторном поиске в {fname}: {e}")
+                print(f"Ошибка векторного поиска в {fname}: {e}")
+                return []
+
+    # Параллельный поиск по всем выбранным файлам (max 4 одновременно)
+    max_parallel = min(len(allowed_files), 4)
+    with ThreadPoolExecutor(max_workers=max_parallel) as executor:
+        futures = {executor.submit(_search_one_file, f): f for f in allowed_files}
+        for future in as_completed(futures):
+            result = future.result()
+            if result:
+                all_nodes.extend(result)
 
     # Переранжирование (Reranking)
     if all_nodes and config.USE_RERANKER:
@@ -252,20 +354,61 @@ def retrieve_nodes(query: str, notebook_id: str, allowed_files=None, max_tokens=
             
             try:
                 import requests
-                resp = requests.post(f"{url}/v1/rerank", json=payload, timeout=60)
-                resp.raise_for_status()
-                results = resp.json().get("results", [])
-                
-                # Применяем скоры из GGUF-сервера
-                scores = [0] * len(all_nodes)
-                for item in results:
-                    scores[item["index"]] = item["relevance_score"]
+                import time as _time
+                _rerank_start = _time.time()
+
+                # Мини-батчевый реранкинг.
+                # llama.cpp /v1/rerank оценивает каждую пару (query + doc) НЕЗАВИСИМО —
+                # контекст нужен только для ОДНОЙ пары, не для суммы всех документов.
+                # Чанк до 2048 токенов + query ~50 = ~2100 токенов → вписывается в -c 4096.
+                #
+                # Мини-батчи (по 10 doc) нужны не из-за контекста, а чтобы:
+                # 1. Держать timeout в разумных пределах (10 doc × 0.3с = 3с на батч)
+                # 2. При ошибке терять только 10 score, а не все 35
+                RERANK_MINI_BATCH_SIZE = 10
+                scores = [0.0] * len(all_nodes)
+                success = True
+
+                for batch_start in range(0, len(documents), RERANK_MINI_BATCH_SIZE):
+                    batch_docs = documents[batch_start: batch_start + RERANK_MINI_BATCH_SIZE]
+                    mini_payload = {
+                        "model": "gguf-reranker",
+                        "query": query,
+                        "documents": batch_docs,
+                        "top_n": len(batch_docs)
+                    }
+                    try:
+                        resp = requests.post(f"{url}/v1/rerank", json=mini_payload, timeout=60)
+                        resp.raise_for_status()
+                        results = resp.json().get("results", [])
+                        if not results:
+                            logger.debug(f"[RAG] Реранкер вернул пустой results для батча {batch_start}: {resp.text[:200]}")
+                        for r in results:
+                            # index — позиция ВНУТРИ мини-батча, нужно сдвинуть на batch_start
+                            orig_idx = batch_start + r.get("index", 0)
+                            if orig_idx < len(scores):
+                                scores[orig_idx] = r.get("relevance_score", 0.0)
+                    except Exception as mini_err:
+                        err_body = ""
+                        if hasattr(mini_err, 'response') and mini_err.response is not None:
+                            err_body = f" body={mini_err.response.text[:200]}"
+                        logger.warning(f"[RAG] Мини-батч {batch_start} не прошёл: {mini_err}{err_body}")
+                        success = False
+
+                elapsed_r = _time.time() - _rerank_start
+                batches = (len(documents) + RERANK_MINI_BATCH_SIZE - 1) // RERANK_MINI_BATCH_SIZE
+                if success:
+                    print(f"  [RAG] ✅ Реранкинг: {len(documents)} doc / {batches} батчей за {elapsed_r:.2f}с")
+                else:
+                    print(f"  [RAG] ⚠️ Реранкинг частичный ({batches} батчей, {elapsed_r:.2f}с) — часть scores = 0.0")
+
             except Exception as e:
-                error_details = ""
+                err_body = ""
                 if hasattr(e, 'response') and e.response is not None:
-                    error_details = f" Details: {e.response.text}"
-                print(f"[RAG] Ошибка GGUF реранкера: {e}{error_details}")
+                    err_body = f" body={e.response.text[:300]}"
+                print(f"[RAG] Ошибка GGUF реранкера: {e}{err_body}")
                 scores = [0] * len(all_nodes)
+
 
             # ПРОВЕРКА: Если все скоры слишком маленькие (например < 1e-6), 
             # значит реранкер "ослеп" и выдает шум. В этом случае лучше сохранить 
@@ -302,8 +445,26 @@ def retrieve_nodes(query: str, notebook_id: str, allowed_files=None, max_tokens=
             node.score = float(score)
             
         all_nodes.sort(key=lambda x: x.score, reverse=True)
-        all_nodes = all_nodes[:config.RAG_FINAL_TOP_N] # Финальный топ-N для контекста
-        print(f"  [RAG] После переранжирования: {len(all_nodes)}")
+        all_nodes = all_nodes[:config.RAG_FINAL_TOP_N]
+
+        # Пороговая фильтрация: убираем нерелевантные чанки
+        above_threshold = [n for n in all_nodes if n.score >= config.RERANK_SCORE_THRESHOLD]
+        
+        # Гарантируем минимум MIN_FINAL_CHUNKS (чтобы не терять контекст для сложных вопросов)
+        min_chunks = min(config.MIN_FINAL_CHUNKS, len(all_nodes))
+        
+        if len(above_threshold) >= min_chunks:
+            # Срезалось достаточно мусора, но осталось нужное количество
+            if len(above_threshold) < len(all_nodes):
+                print(f"  [RAG] 🎯 Порог {config.RERANK_SCORE_THRESHOLD}: убрано {len(all_nodes) - len(above_threshold)} нерелевантных чанков")
+            all_nodes = above_threshold
+        else:
+            # Оказалось слишком мало хороших чанков — добираем до минимума из лучших ниже порога
+            all_nodes = all_nodes[:min_chunks]
+            print(f"  [RAG] ⚠️ Порог оставил <{min_chunks} чанков. Добавлено до {min_chunks} лучших (мин. score: {all_nodes[-1].score:.3f})")
+
+
+        print(f"  [RAG] Итого после реранкинга: {len(all_nodes)} чанков")
 
     return all_nodes
 

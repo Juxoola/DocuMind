@@ -1,4 +1,5 @@
 notebooks/
+models/
 scratch/
 *.json
 *.mp4

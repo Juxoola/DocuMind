@@ -11,8 +11,54 @@ import {
   Database,
   Trash2,
   Cpu,
-  PowerOff
+  PowerOff,
+  Video,
+  Music,
+  FileCode,
+  FileSpreadsheet,
+  File
 } from 'lucide-react';
+
+/** Возвращает иконку и цвет по расширению файла */
+function getFileIcon(filename) {
+  const ext = filename.split('.').pop().toLowerCase();
+  switch (ext) {
+    case 'pdf':
+      return <FileText size={14} className="text-red-400" />;
+    case 'docx':
+    case 'doc':
+      return <FileText size={14} className="text-blue-400" />;
+    case 'pptx':
+    case 'ppt':
+      return <FileText size={14} className="text-orange-400" />;
+    case 'xlsx':
+    case 'xls':
+    case 'csv':
+      return <FileSpreadsheet size={14} className="text-green-400" />;
+    case 'mp4':
+    case 'avi':
+    case 'mov':
+    case 'mkv':
+      return <Video size={14} className="text-purple-400" />;
+    case 'mp3':
+    case 'wav':
+    case 'm4a':
+    case 'ogg':
+      return <Music size={14} className="text-yellow-400" />;
+    case 'py':
+    case 'js':
+    case 'ts':
+    case 'jsx':
+    case 'tsx':
+    case 'json':
+      return <FileCode size={14} className="text-cyan-400" />;
+    case 'txt':
+    case 'md':
+      return <FileText size={14} className="text-muted-foreground" />;
+    default:
+      return <File size={14} className="text-muted-foreground" />;
+  }
+}
 import { cn } from '../lib/utils';
 import axios from 'axios';
 
@@ -227,8 +273,8 @@ export default function Sidebar({
                   onClick={() => onOpenFile(file)}
                 >
                   <div className="flex items-center gap-3 min-w-0 flex-1">
-                    <div className="p-1.5 bg-muted rounded-lg group-hover:bg-primary/10 transition-colors">
-                      <FileText size={14} className="text-muted-foreground group-hover:text-primary" />
+                    <div className="p-1.5 bg-muted rounded-lg group-hover:bg-primary/10 transition-colors flex-shrink-0">
+                      {getFileIcon(file)}
                     </div>
                     <div className="min-w-0 flex-1">
                       <p className="text-xs font-medium truncate group-hover:text-primary transition-colors">{file}</p>
