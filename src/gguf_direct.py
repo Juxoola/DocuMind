@@ -14,11 +14,37 @@ logger = logging.getLogger(__name__)
 import torch
 
 # Глобальный кэш запущенных серверов
+# Глобальный кэш запущенных серверов
 _server_processes: Dict[str, subprocess.Popen] = {}
 _server_ports: Dict[str, int] = {}
 _server_configs: Dict[str, Dict] = {}
 _server_roles: Dict[str, str] = {} # gguf_path -> role
 _lock = threading.Lock()
+
+# Windows Job Object для гарантированного удаления дочерних процессов при выходе
+_win32_job = None
+if os.name == 'nt':
+    try:
+        import ctypes
+        from ctypes import wintypes
+        _win32_job = ctypes.windll.kernel32.CreateJobObjectW(None, None)
+        # ExtendedLimitInformation = 9, LimitFlags offset is 16
+        # JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x2000
+        limit_info = (wintypes.DWORD * 36)() # 144 bytes for x64
+        limit_info[4] = 0x2000 
+        ctypes.windll.kernel32.SetInformationJobObject(_win32_job, 9, ctypes.byref(limit_info), ctypes.sizeof(limit_info))
+    except Exception as e:
+        print(f"[GGUF Server] Ошибка инициализации Windows Job Object: {e}")
+
+def _assign_to_job(process):
+    """Привязывает процесс к Job Object (только для Windows)."""
+    if _win32_job is not None:
+        try:
+            import ctypes
+            from ctypes import wintypes
+            ctypes.windll.kernel32.AssignProcessToJobObject(_win32_job, wintypes.HANDLE(int(process._handle)))
+        except Exception: pass
+
 
 SERVER_EXE = os.path.join(config.BASE_DIR, "bin", "llama-server.exe")
 
@@ -185,6 +211,7 @@ def get_gguf_llm(
         stderr=subprocess.DEVNULL,
         creationflags=creationflags
     )
+    _assign_to_job(process)
     
     # Ждем готовности сервера (до 60 секунд)
     start_wait = time.time()
@@ -286,6 +313,7 @@ def get_gguf_embedding_url(gguf_path: str, n_threads: int = None, is_reranker: b
             stderr=subprocess.DEVNULL,
             creationflags=creationflags
         )
+        _assign_to_job(process)
         
         start_wait = time.time()
         while time.time() - start_wait < 60:
