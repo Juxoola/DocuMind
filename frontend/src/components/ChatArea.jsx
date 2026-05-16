@@ -43,8 +43,8 @@ const ThinkingBlock = ({ content, isStreaming }) => {
           size={12}
           className={cn("text-purple-400 transition-transform duration-200 flex-shrink-0", open && "rotate-90")}
         />
-        <span className="text-[11px] font-bold text-purple-400 flex-1">
-          {isStreaming ? '✨ Модель рассуждает...' : '✨ Рассуждения модели'}
+        <span className="text-[10px] font-black uppercase tracking-widest text-purple-400/80 flex-1">
+          {isStreaming ? 'Рассуждения модели...' : 'Рассуждения'}
         </span>
         {isStreaming && (
           <span className="flex gap-0.5">
@@ -68,7 +68,7 @@ const ThinkingBlock = ({ content, isStreaming }) => {
           >
             <div
               ref={bodyRef}
-              className="px-4 pb-4 pt-1 text-[11px] text-muted-foreground/80 italic border-t border-purple-500/10 whitespace-pre-wrap max-h-72 overflow-y-auto leading-relaxed"
+              className="px-4 pb-4 pt-2 text-[11px] text-muted-foreground/90 italic border-t border-purple-500/10 whitespace-pre-wrap max-h-96 overflow-y-auto leading-relaxed custom-scrollbar bg-purple-500/5"
             >
               {content}
             </div>
@@ -350,27 +350,39 @@ export default function ChatArea({ notebook, selectedSources, onOpenSource, llmS
 
     const preProcessMessage = (text) => {
       if (!text) return "";
+      
+      // Сначала обрабатываем формулы LaTeX
       let processed = text
         .replace(/\\\[([\s\S]*?)\\\]/g, '$$$$$1$$$$')
         .replace(/\\\(([\s\S]*?)\\\)/g, '$$$1$$');
 
-      // Защищаем математические блоки от ложного срабатывания цитат
-      // (например, [0,1] в LaTeX не должен стать ссылкой)
-      const mathBlocks = [];
-      processed = processed.replace(/(\$\$[\s\S]*?\$\$|\$[^\$\n]+?\$)/g, (m) => {
-        mathBlocks.push(m);
-        return `%%MATH_${mathBlocks.length - 1}%%`;
+      // Разделяем текст на части: обычный текст и блоки кода (```...```)
+      const parts = processed.split(/(```[\s\S]*?```)/g);
+      
+      const finalParts = parts.map(part => {
+        // Если это блок кода, возвращаем его как есть (не трогаем цитаты внутри)
+        if (part.startsWith('```')) return part;
+        
+        // В обычном тексте защищаем LaTeX от ссылок
+        const mathBlocks = [];
+        let subPart = part.replace(/(\$\$[\s\S]*?\$\$|\$[^\$\n]+?\$)/g, (m) => {
+          mathBlocks.push(m);
+          return `%%MATH_${mathBlocks.length - 1}%%`;
+        });
+
+        // Заменяем [N] на ссылки только в обычном тексте
+        subPart = subPart.replace(/(?<!\\in|\\subset|\\subseteq|\\supset)\[(\d+(?:,\s*\d+)*)\]/g, (match, nums) => {
+          return nums.split(',').map(n => {
+            const num = n.trim();
+            return `[${num}](#cite:${num})`;
+          }).join('');
+        });
+
+        // Возвращаем LaTeX
+        return subPart.replace(/%%MATH_(\d+)%%/g, (_, idx) => mathBlocks[parseInt(idx)]);
       });
 
-      processed = processed.replace(/(?<!\\in|\\subset|\\subseteq|\\supset)\[(\d+(?:,\s*\d+)*)\]/g, (match, nums) => {
-        return nums.split(',').map(n => {
-          const num = n.trim();
-          return `[${num}](#cite:${num})`;
-        }).join('');
-      });
-
-      // Возвращаем математические блоки на место
-      processed = processed.replace(/%%MATH_(\d+)%%/g, (_, idx) => mathBlocks[parseInt(idx)]);
+      processed = finalParts.join('');
 
       // Обработка всех форматов thinking-тегов:
       // <think>...</think>       — Qwen/DeepSeek
@@ -445,25 +457,30 @@ export default function ChatArea({ notebook, selectedSources, onOpenSource, llmS
               },
               code({ node, inline, className, children, ...props }) {
                 const match = /language-(\w+)/.exec(className || '');
+                const lang = match ? match[1] : '';
                 return !inline && match ? (
-                  <div className="relative group my-4">
-                    <div className="absolute right-3 top-3 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <div className="relative group my-4 rounded-xl overflow-hidden bg-[#0d1117] border border-white/5">
+                    {/* Тонкий индикатор языка и кнопка COPY в одной строке, встроенные в блок */}
+                    <div className="flex items-center justify-between px-4 py-2 opacity-40 group-hover:opacity-100 transition-opacity">
+                      <span className="text-[9px] font-bold text-white/50 uppercase tracking-[0.2em]">{lang}</span>
                       <button
                         onClick={() => navigator.clipboard.writeText(String(children).replace(/\n$/, ''))}
-                        className="p-1.5 bg-white/10 hover:bg-white/20 rounded text-xs text-white/70 flex items-center gap-1"
+                        className="flex items-center gap-1 text-[9px] font-bold text-white/50 hover:text-white transition-colors"
                       >
-                        <Zap size={12} /> Copy
+                        <Zap size={10} /> COPY
                       </button>
                     </div>
-                    <SyntaxHighlighter
-                      style={atomDark}
-                      language={match[1]}
-                      PreTag="div"
-                      className="rounded-lg !bg-slate-900/50 !p-4 border border-white/5"
-                      {...props}
-                    >
-                      {String(children).replace(/\n$/, '')}
-                    </SyntaxHighlighter>
+                    <div className="overflow-x-auto custom-scrollbar">
+                      <SyntaxHighlighter
+                        style={atomDark}
+                        language={lang}
+                        PreTag="div"
+                        className="!bg-transparent !pt-0 !p-4 font-mono text-sm leading-relaxed"
+                        {...props}
+                      >
+                        {String(children).replace(/\n$/, '')}
+                      </SyntaxHighlighter>
+                    </div>
                   </div>
                 ) : (
                   <code className={cn("bg-white/10 px-1.5 py-0.5 rounded text-indigo-300 font-mono text-xs", className)} {...props}>
@@ -609,7 +626,7 @@ export default function ChatArea({ notebook, selectedSources, onOpenSource, llmS
               )}
             >
               <div className={cn(
-                "max-w-[85%] group relative",
+                "max-w-[85%] group relative min-w-0",
                 msg.role === 'user' ? "chat-bubble-user" : "chat-bubble-ai"
               )} style={{ zIndex: messages.length - i }}>
                 {renderMessageContent(msg)}
@@ -759,9 +776,9 @@ export default function ChatArea({ notebook, selectedSources, onOpenSource, llmS
                 </div>
               </div>
             </div>
-            <div className="max-h-48 overflow-y-auto pr-1 custom-scrollbar">
+            <div className="max-h-60 overflow-y-auto pr-2 custom-scrollbar">
               <p className="text-[12px] leading-relaxed text-foreground/90 italic font-medium whitespace-pre-wrap">
-                "{hoveredSource.text.replace(/^Source \d+:\s*/im, '').substring(0, 600)}..."
+                "{hoveredSource.text.replace(/^Source \d+:\s*/im, '')}"
               </p>
             </div>
             <div className="mt-3 pt-2 border-t border-border/40 flex justify-between items-center">

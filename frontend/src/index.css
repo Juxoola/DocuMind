@@ -44,11 +44,11 @@
 }
 
 @utility chat-bubble-ai {
-  @apply bg-muted/30 border border-border/40 rounded-2xl rounded-bl-none px-5 py-4;
+  @apply bg-muted/30 border border-border/40 rounded-2xl rounded-bl-none px-5 py-4 max-w-full overflow-hidden break-words;
 }
 
 @utility chat-bubble-user {
-  @apply bg-muted/80 border border-border/80 text-foreground rounded-2xl rounded-br-none px-5 py-3;
+  @apply bg-muted/80 border border-border/80 text-foreground rounded-2xl rounded-br-none px-5 py-3 max-w-full overflow-hidden break-words;
 }
 
 /* Markdown Table Styles */
@@ -64,14 +64,32 @@
 .prose tr:nth-child(even) {
   @apply bg-muted/20;
 }
+.prose pre {
+  @apply max-w-full overflow-x-auto rounded-lg my-4;
+}
+.prose code {
+  @apply break-words;
+}
+.prose {
+  @apply max-w-full;
+}
 
+/* Custom Scrollbar Styles */
 ::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: 5px;
+  height: 5px;
 }
 ::-webkit-scrollbar-track {
   @apply bg-transparent;
 }
 ::-webkit-scrollbar-thumb {
-  @apply bg-muted-foreground/20 rounded-full hover:bg-muted-foreground/40 transition-colors;
+  @apply bg-primary/20 rounded-full hover:bg-primary/40 transition-colors;
+}
+
+.custom-scrollbar::-webkit-scrollbar {
+  width: 4px;
+  height: 4px;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  @apply bg-primary/30 rounded-full;
 }
