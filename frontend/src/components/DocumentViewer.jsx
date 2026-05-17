@@ -37,44 +37,43 @@ export default function DocumentViewer({ file, notebook, onClose }) {
 
   useEffect(() => {
     if (!filename) return;
-    setLoading(true);
-    
-    if (isMedia) {
-      fetch(`/api/video_metadata?filename=${encodeURIComponent(filename)}&notebook_id=${notebook.id}`)
-        .then(r => r.json())
-        .then(data => {
-          if (!data.error) setVideoMeta(data);
-          setLoading(false);
-        });
-    } else if (isPpt) {
-      fetch(`/api/video_metadata?filename=${encodeURIComponent(filename)}&notebook_id=${notebook.id}`)
-        .then(r => r.json())
-        .then(data => {
-          if (!data.error) setPptxData(data);
-          setLoading(false);
-        });
+
+    // Для медиа и PDF — сразу убираем лоадер, чтобы плеер/iframe
+    // отрисовался мгновенно. Метаданные догружаются в фоне.
+    if (isSpecial) {
+      setLoading(false);
+    } else {
+      setLoading(true);
     }
-    
-    // Всегда загружаем текстовый контент для режима "Сырой текст"
+
+    // Сбрасываем предыдущие метаданные при смене файла
+    setVideoMeta(null);
+    setPptxData(null);
+    setContent(null);
+
+    // Фоновая загрузка метаданных (транскрипт, кадры, слайды)
+    const metaUrl = `/api/video_metadata?filename=${encodeURIComponent(filename)}&notebook_id=${notebook.id}`;
+    if (isMedia || isPdf) {
+      fetch(metaUrl)
+        .then(r => r.json())
+        .then(data => { if (!data.error) setVideoMeta(data); })
+        .catch(() => {});
+    } else if (isPpt) {
+      fetch(metaUrl)
+        .then(r => r.json())
+        .then(data => { if (!data.error) setPptxData(data); })
+        .catch(() => {});
+    }
+
+    // Текстовый контент (для вкладки "Текст") — тоже фоново для спецфайлов
     if (!isMedia) {
       fetch(`/api/source_content?filename=${encodeURIComponent(filename)}&notebook_id=${notebook.id}`)
         .then(r => r.json())
         .then(data => {
           setContent(data.text);
           if (!isSpecial) setLoading(false);
-        });
-    } else {
-      if (isSpecial) setLoading(false);
-    }
-    
-    if (isPdf) {
-      // Пытаемся загрузить метаданные (картинки) для PDF
-      fetch(`/api/video_metadata?filename=${encodeURIComponent(filename)}&notebook_id=${notebook.id}`)
-        .then(r => r.json())
-        .then(data => {
-          if (!data.error) setVideoMeta(data);
-          setLoading(false);
-        });
+        })
+        .catch(() => { if (!isSpecial) setLoading(false); });
     }
   }, [filename, notebook.id]);
 
@@ -378,56 +377,66 @@ export default function DocumentViewer({ file, notebook, onClose }) {
           />
         ) : isPpt ? (
           <div className="h-full overflow-y-auto p-6 space-y-8 custom-scrollbar bg-muted/10">
-            {pptxData?.slides?.map((slide, i) => (
-              <motion.div 
-                key={i}
-                ref={el => itemRefs.current[slide.number] = el}
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                className={cn(
-                  "bg-card border rounded-3xl overflow-hidden shadow-xl transition-all",
-                  page === slide.number ? "ring-2 ring-primary border-primary/50" : "border-border/50"
-                )}
-              >
-                <div className="bg-muted/30 p-4 border-b flex items-center justify-between">
-                  <span className="text-[10px] font-black uppercase tracking-widest text-primary">Слайд {slide.number}</span>
-                  {slide.title && <span className="text-xs font-bold truncate max-w-[70%]">{slide.title}</span>}
-                </div>
-                
-                <div className="p-8 space-y-6">
-                  {slide.images && slide.images.length > 0 && (
-                    <div className="grid grid-cols-1 gap-4">
-                      {slide.images.map((img, imgIdx) => (
-                        <div key={imgIdx} className="group relative rounded-2xl overflow-hidden border border-border shadow-md bg-black">
-                           <img 
-                            src={`/files/${notebook.id}/images/${img.path}`} 
-                            className="w-full h-auto max-h-[400px] object-contain transition-transform duration-500 group-hover:scale-[1.02]"
-                           />
-                           {img.description && (
-                             <div className="absolute bottom-0 left-0 right-0 p-3 bg-black/60 backdrop-blur-md opacity-0 group-hover:opacity-100 transition-opacity">
-                               <p className="text-[10px] text-white/80 leading-relaxed italic">{img.description}</p>
-                             </div>
-                           )}
-                        </div>
-                      ))}
+            {!pptxData ? (
+              // Скелетон пока метаданные летят в фоне
+              <div className="space-y-6">
+                {[1,2,3].map(i => (
+                  <div key={i} className="bg-card border border-border/30 rounded-3xl overflow-hidden animate-pulse">
+                    <div className="bg-muted/40 h-12" />
+                    <div className="p-8 space-y-4">
+                      <div className="h-48 bg-muted/30 rounded-2xl" />
+                      <div className="h-3 bg-muted/30 rounded-full w-3/4" />
+                      <div className="h-3 bg-muted/30 rounded-full w-1/2" />
                     </div>
-                  )}
-                  
-                  {slide.text && (
-                    <div className="prose prose-invert prose-sm max-w-none">
-                      <p className="text-sm leading-relaxed text-foreground/80 whitespace-pre-wrap font-medium">
-                        {slide.text}
-                      </p>
-                    </div>
-                  )}
-                </div>
-              </motion.div>
-            ))}
-            {!pptxData && !loading && (
-               <div className="h-full flex flex-col items-center justify-center py-20 opacity-30 text-center">
-                <AlertCircle size={32} className="mb-4" />
-                <p className="text-xs font-bold uppercase tracking-widest">Презентация обрабатывается...</p>
+                  </div>
+                ))}
               </div>
+            ) : (
+              pptxData.slides?.map((slide, i) => (
+                <motion.div 
+                  key={i}
+                  ref={el => itemRefs.current[slide.number] = el}
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className={cn(
+                    "bg-card border rounded-3xl overflow-hidden shadow-xl transition-all",
+                    page === slide.number ? "ring-2 ring-primary border-primary/50" : "border-border/50"
+                  )}
+                >
+                  <div className="bg-muted/30 p-4 border-b flex items-center justify-between">
+                    <span className="text-[10px] font-black uppercase tracking-widest text-primary">Слайд {slide.number}</span>
+                    {slide.title && <span className="text-xs font-bold truncate max-w-[70%]">{slide.title}</span>}
+                  </div>
+                  
+                  <div className="p-8 space-y-6">
+                    {slide.images && slide.images.length > 0 && (
+                      <div className="grid grid-cols-1 gap-4">
+                        {slide.images.map((img, imgIdx) => (
+                          <div key={imgIdx} className="group relative rounded-2xl overflow-hidden border border-border shadow-md bg-black">
+                             <img 
+                              src={`/files/${notebook.id}/images/${img.path}`} 
+                              className="w-full h-auto max-h-[400px] object-contain transition-transform duration-500 group-hover:scale-[1.02]"
+                             />
+                             {img.description && (
+                               <div className="absolute bottom-0 left-0 right-0 p-3 bg-black/60 backdrop-blur-md opacity-0 group-hover:opacity-100 transition-opacity">
+                                 <p className="text-[10px] text-white/80 leading-relaxed italic">{img.description}</p>
+                               </div>
+                             )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    
+                    {slide.text && (
+                      <div className="prose prose-invert prose-sm max-w-none">
+                        <p className="text-sm leading-relaxed text-foreground/80 whitespace-pre-wrap font-medium">
+                          {slide.text}
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                </motion.div>
+              ))
             )}
           </div>
         ) : (

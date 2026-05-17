@@ -396,9 +396,17 @@ async def get_video_metadata(filename: str, notebook_id: str):
     filename = safe_filename(filename)
     paths = config.get_notebook_paths(notebook_id)
     json_path = os.path.join(paths["data"], f"{filename}.json")
-    if os.path.exists(json_path):
-        with open(json_path, "r", encoding="utf-8") as f:
-            return json.load(f)
+
+    def read_json():
+        if os.path.exists(json_path):
+            with open(json_path, "r", encoding="utf-8") as f:
+                return json.load(f)
+        return None
+
+    data = await asyncio.to_thread(read_json)
+    if data is not None:
+        from fastapi.responses import JSONResponse
+        return JSONResponse(content=data, headers={"Cache-Control": "public, max-age=300"})
     return {"error": "Метаданные не найдены"}
 
 @app.delete("/api/clear")
