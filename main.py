@@ -544,11 +544,13 @@ class ChatRequest(BaseModel):
     gguf_batch_size: Optional[int] = 2048
     gguf_flash_attn: Optional[str] = "true"
     thinking_budget: Optional[int] = 1024 # -1 = без ограничений
+    context_strategy: Optional[str] = "sliding" # sliding | rag_priority
 
 @app.post("/api/chat")
 async def chat(request: ChatRequest):
     import time
     global_start_time = time.time()
+    print(f"DEBUG: Запрос чата. Стратегия контекста: {request.context_strategy}, Лимит токенов: {request.max_tokens}, Бюджет рассуждений: {request.thinking_budget}")
     
     if not request.allowed_files:
         async def no_files():

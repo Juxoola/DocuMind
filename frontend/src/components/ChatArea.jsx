@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Send, Trash2, Sparkles, Clock, Zap, Cpu, FileText, Settings as SettingsIcon, HardDrive, Square, Image as ImageIcon, Plus, X as XIcon, ChevronRight } from 'lucide-react';
+import { Send, Trash2, Sparkles, Clock, Zap, Cpu, FileText, Settings as SettingsIcon, HardDrive, Square, Image as ImageIcon, Plus, X as XIcon, ChevronRight, SlidersHorizontal } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
@@ -109,6 +109,166 @@ const Citation = ({ n, sources, onClick, onHover, onLeave }) => {
   );
 };
 
+// ── Sleek Custom Slider Component ───────────────────────────────────────────
+const SleekSlider = ({
+  label,
+  value,
+  onChange,
+  min,
+  max,
+  step = 1,
+  icon: Icon,
+  presets = [],
+  suffix = "",
+  description,
+  accentColor = "var(--color-primary)",
+  disabled = false,
+  showUnlimited = false,
+  unlimitedChecked = false,
+  onUnlimitedChange = null
+}) => {
+  const [inputValue, setInputValue] = useState(value);
+
+  // Sync internal state when prop changes
+  useEffect(() => {
+    setInputValue(value);
+  }, [value]);
+
+  const handleSliderChange = (e) => {
+    if (disabled) return;
+    const val = parseInt(e.target.value);
+    setInputValue(val);
+    onChange(val);
+  };
+
+  const handleInputChange = (e) => {
+    if (disabled) return;
+    let val = e.target.value === '' ? '' : parseInt(e.target.value);
+    setInputValue(val);
+  };
+
+  const handleInputBlur = () => {
+    if (disabled) return;
+    let val = parseInt(inputValue);
+    if (isNaN(val)) val = min;
+    if (val < min) val = min;
+    if (val > max) val = max;
+    setInputValue(val);
+    onChange(val);
+  };
+
+  const handleKeyDown = (e) => {
+    if (e.key === 'Enter') {
+      handleInputBlur();
+      e.target.blur();
+    }
+  };
+
+  // Calculate percentage for gradient track filling
+  const pct = disabled ? 0 : ((value - min) / (max - min)) * 100;
+
+  return (
+    <div className={cn(
+      "flex flex-col gap-2.5 p-4 rounded-xl border border-white/5 bg-white/[0.01] hover:bg-white/[0.03] transition-all duration-300",
+      disabled && "opacity-60"
+    )}>
+      <div className="flex items-center justify-between gap-4">
+        <div className="flex items-center gap-2.5 flex-wrap sm:flex-nowrap min-w-0">
+          <div className="flex items-center gap-2 min-w-0">
+            {Icon && <Icon className="text-muted-foreground shrink-0" size={14} />}
+            <span className="text-xs font-bold text-foreground/90 leading-tight">{label}</span>
+          </div>
+          {showUnlimited && (
+            <label className={cn(
+              "flex items-center gap-1.5 cursor-pointer select-none text-[9px] font-black uppercase px-2 py-0.5 rounded-md border transition-all pointer-events-auto whitespace-nowrap shrink-0",
+              unlimitedChecked
+                ? "bg-purple-500/10 border-purple-500/30 text-purple-400"
+                : "bg-muted/40 border-border/40 text-muted-foreground hover:border-border/60 hover:text-foreground"
+            )}>
+              <input
+                type="checkbox"
+                checked={unlimitedChecked}
+                onChange={(e) => onUnlimitedChange(e.target.checked)}
+                className="hidden"
+              />
+              <span className="whitespace-nowrap">Без лимита</span>
+            </label>
+          )}
+        </div>
+        
+        {/* Sleek inline number input */}
+        <div className="flex items-center gap-1.5 bg-muted/60 border border-border/40 rounded-lg px-2 py-0.5">
+          <input
+            type="number"
+            value={disabled ? "" : inputValue}
+            onChange={handleInputChange}
+            onBlur={handleInputBlur}
+            onKeyDown={handleKeyDown}
+            min={min}
+            max={max}
+            disabled={disabled}
+            className="w-11 bg-transparent border-none text-[11px] font-black focus:ring-0 p-0 text-right appearance-none tuning-number-input"
+            style={{ color: accentColor }}
+          />
+          <span className="text-[9px] font-bold text-muted-foreground uppercase">{disabled ? "∞" : suffix}</span>
+        </div>
+      </div>
+
+      {description && (
+        <p className="text-[9.5px] text-muted-foreground/80 leading-relaxed font-medium">
+          {description}
+        </p>
+      )}
+
+      {/* Slide range with custom visual background fill */}
+      <div className="relative mt-2.5 flex items-center">
+        <input
+          type="range"
+          min={min}
+          max={max}
+          step={step}
+          value={disabled ? max : value}
+          onChange={handleSliderChange}
+          disabled={disabled}
+          className="tuning-slider"
+          style={{
+            background: `linear-gradient(to right, ${accentColor} 0%, ${accentColor} ${pct}%, var(--color-border) ${pct}%, var(--color-border) 100%)`
+          }}
+        />
+      </div>
+
+      {/* Preset markers */}
+      {presets.length > 0 && (
+        <div className="flex items-center justify-between mt-2.5 flex-wrap gap-1">
+          {presets.map((p) => {
+            const isSelected = !disabled && value === p.value;
+            return (
+              <button
+                key={p.value}
+                onClick={() => {
+                  if (disabled) return;
+                  setInputValue(p.value);
+                  onChange(p.value);
+                }}
+                disabled={disabled}
+                className={cn(
+                  "px-2 py-0.5 text-[9px] font-extrabold rounded-md transition-all border",
+                  isSelected
+                    ? "bg-primary/10 border-primary/20 shadow-sm"
+                    : "bg-transparent text-muted-foreground border-transparent hover:border-border/60 hover:text-foreground"
+                )}
+                style={isSelected ? { color: accentColor, backgroundColor: `${accentColor}12`, borderColor: `${accentColor}25` } : {}}
+              >
+                {p.label}
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+};
+
 export default function ChatArea({ notebook, selectedSources, onOpenSource, llmSettings, setLlmSettings }) {
   const [messages, setMessages] = useState([
     { role: 'ai', content: 'Привет! Я проанализировал ваши источники и готов ответить на любые вопросы. Что вас интересует?' }
@@ -118,6 +278,8 @@ export default function ChatArea({ notebook, selectedSources, onOpenSource, llmS
   const [stats, setStats] = useState(null);
   const [maxTokens, setMaxTokens] = useState(() => parseInt(localStorage.getItem('chat_max_tokens')) || 1024);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isTuningOpen, setIsTuningOpen] = useState(false);
+  const [contextStrategy, setContextStrategy] = useState(() => localStorage.getItem('chat_context_strategy') || 'sliding');
   const [thinkingMode, setThinkingMode] = useState(() => localStorage.getItem('chat_thinking_mode') === 'true');
   const [thinkingBudget, setThinkingBudget] = useState(() => parseInt(localStorage.getItem('chat_thinking_budget')) || 1024); // -1 = no limit
   const [hoveredSource, setHoveredSource] = useState(null);
@@ -136,7 +298,8 @@ export default function ChatArea({ notebook, selectedSources, onOpenSource, llmS
     localStorage.setItem('chat_max_tokens', maxTokens.toString());
     localStorage.setItem('chat_thinking_mode', thinkingMode.toString());
     localStorage.setItem('chat_thinking_budget', thinkingBudget.toString());
-  }, [maxTokens, thinkingMode, thinkingBudget]);
+    localStorage.setItem('chat_context_strategy', contextStrategy);
+  }, [maxTokens, thinkingMode, thinkingBudget, contextStrategy]);
 
   useEffect(() => {
     if (textareaRef.current) {
@@ -240,6 +403,7 @@ export default function ChatArea({ notebook, selectedSources, onOpenSource, llmS
           notebook_id: notebook.id,
           thinking_mode: thinkingMode,
           thinking_budget: thinkingBudget,
+          context_strategy: contextStrategy,
           image_base64: currentImage,
           ...llmSettings
         })
@@ -562,44 +726,58 @@ export default function ChatArea({ notebook, selectedSources, onOpenSource, llmS
           )}
         </div>
         <div className="flex items-center gap-4">
-          <div className="flex bg-muted p-1 rounded-lg">
-            {[512, 1024, 2048].map(tokens => (
-              <button
-                key={tokens}
-                onClick={() => setMaxTokens(tokens)}
-                title={`Макс. токенов: ${tokens}`}
-                className={cn(
-                  "px-3 py-1 text-[10px] font-bold rounded-md transition-all",
-                  maxTokens === tokens ? "bg-background text-primary shadow-sm" : "text-muted-foreground hover:text-foreground"
-                )}
-              >
-                {tokens === 512 ? 'Короткий' : tokens === 1024 ? 'Средний' : 'Длинный'}
-              </button>
-            ))}
+          <div className="flex items-center gap-3 bg-muted/30 p-1.5 rounded-xl border border-white/5 px-2">
+            <button
+              onClick={() => setIsTuningOpen(!isTuningOpen)}
+              title="Открыть параметры генерации"
+              className={cn(
+                "flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition-all text-[10px] font-black uppercase tracking-tight",
+                isTuningOpen
+                  ? "bg-primary/20 text-primary shadow-sm"
+                  : "text-muted-foreground hover:text-foreground"
+              )}
+            >
+              <SlidersHorizontal size={11} />
+              <span>Параметры</span>
+            </button>
+
+            <div className="w-px h-4 bg-white/10 self-center" />
+
+            <button
+              onClick={() => setIsTuningOpen(!isTuningOpen)}
+              className="px-2.5 py-1 text-[10px] font-black text-muted-foreground/80 hover:text-foreground transition-all flex items-center gap-1.5"
+            >
+              <span>Ответ:</span>
+              <span className="text-primary font-black">{maxTokens} t</span>
+            </button>
+
+            {thinkingMode && (
+              <>
+                <div className="w-px h-4 bg-white/10 self-center" />
+                <button
+                  onClick={() => setIsTuningOpen(!isTuningOpen)}
+                  className="px-2.5 py-1 text-[10px] font-black text-muted-foreground/80 hover:text-foreground transition-all flex items-center gap-1.5"
+                >
+                  <span>Бюджет:</span>
+                  <span className="text-purple-400 font-black">{thinkingBudget === -1 ? "∞" : `${thinkingBudget} t`}</span>
+                </button>
+              </>
+            )}
           </div>
+
           <button
             onClick={() => setThinkingMode(!thinkingMode)}
             className={cn(
-              "px-3 py-1.5 text-[10px] font-bold rounded-lg transition-all flex items-center gap-1.5",
-              thinkingMode ? "bg-purple-500/10 text-purple-500 border border-purple-500/20 shadow-sm" : "bg-muted text-muted-foreground hover:text-foreground border border-transparent"
+              "px-3 py-1.5 text-[10px] font-black uppercase tracking-wider rounded-xl transition-all flex items-center gap-1.5 border",
+              thinkingMode
+                ? "bg-purple-500/10 text-purple-400 border-purple-500/20 shadow-sm"
+                : "bg-muted/40 text-muted-foreground hover:text-foreground border-transparent hover:border-border/60"
             )}
           >
-            <Sparkles size={12} />
+            <Sparkles size={11} />
             {thinkingMode ? "Думает" : "Без рассуждений"}
           </button>
           
-          {thinkingMode && (
-            <div className="flex items-center gap-2 bg-purple-500/5 border border-purple-500/20 rounded-lg px-2 py-1">
-              <span className="text-[9px] font-bold text-purple-400 uppercase tracking-tighter">Budget:</span>
-              <input 
-                type="number" 
-                value={thinkingBudget} 
-                onChange={(e) => setThinkingBudget(parseInt(e.target.value))}
-                className="w-12 bg-transparent border-none text-[10px] font-bold text-purple-500 focus:ring-0 p-0"
-                title="Лимит токенов на рассуждения. -1 = без лимита. 0 = отключить."
-              />
-            </div>
-          )}
           <button
             onClick={() => setIsSettingsOpen(true)}
             className="p-2 hover:bg-muted rounded-lg text-muted-foreground transition-colors"
@@ -611,6 +789,129 @@ export default function ChatArea({ notebook, selectedSources, onOpenSource, llmS
           </button>
         </div>
       </div>
+
+      <AnimatePresence>
+        {isTuningOpen && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ type: 'spring', damping: 25, stiffness: 220 }}
+            className="border-b border-border bg-card/25 backdrop-blur-md overflow-hidden z-10"
+          >
+            <div className="p-5 max-w-5xl mx-auto flex flex-col gap-5">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                {/* 1. Response length slider */}
+                <SleekSlider
+                  label="Максимальная длина ответа"
+                  value={maxTokens}
+                  onChange={setMaxTokens}
+                  min={100}
+                  max={32000}
+                  step={100}
+                  icon={Cpu}
+                  suffix="t"
+                  accentColor="var(--color-primary)"
+                  description="Регулирует максимальный лимит токенов, генерируемых моделью за один ответ. Большие значения подходят для развернутых эссе."
+                  presets={[
+                    { label: "512", value: 512 },
+                    { label: "1k", value: 1024 },
+                    { label: "2k", value: 2048 },
+                    { label: "4k", value: 4096 },
+                    { label: "8k", value: 8192 },
+                    { label: "16k", value: 16384 },
+                    { label: "32k", value: 32000 }
+                  ]}
+                />
+
+                {/* 2. Thinking budget slider */}
+                <SleekSlider
+                  label="Бюджет рассуждений"
+                  value={thinkingBudget === -1 ? 32000 : thinkingBudget}
+                  onChange={(val) => {
+                    if (thinkingBudget !== -1) {
+                      setThinkingBudget(val);
+                    }
+                  }}
+                  min={100}
+                  max={32000}
+                  step={100}
+                  icon={Sparkles}
+                  suffix="t"
+                  accentColor="rgb(168, 85, 247)"
+                  disabled={!thinkingMode || thinkingBudget === -1}
+                  showUnlimited={thinkingMode}
+                  unlimitedChecked={thinkingBudget === -1}
+                  onUnlimitedChange={(checked) => {
+                    if (checked) {
+                      setThinkingBudget(-1);
+                    } else {
+                      setThinkingBudget(1024);
+                    }
+                  }}
+                  description="Сколько токенов думающая модель (например, DeepSeek-R1) может потратить на внутренний процесс рассуждений. Отключение лимита дает модели свободу мысли."
+                  presets={[
+                    { label: "512", value: 512 },
+                    { label: "1k", value: 1024 },
+                    { label: "2k", value: 2048 },
+                    { label: "4k", value: 4096 },
+                    { label: "8k", value: 8192 },
+                    { label: "16k", value: 16384 }
+                  ]}
+                />
+
+                {/* 3. Overflow strategy selector */}
+                <div className="flex flex-col gap-2.5 p-4 rounded-xl border border-white/5 bg-white/[0.01] hover:bg-white/[0.03] transition-all duration-300 md:col-span-2">
+                  <div className="flex items-center gap-2">
+                    <SlidersHorizontal className="text-primary" size={14} />
+                    <span className="text-xs font-bold text-foreground/90">Стратегия при переполнении контекста</span>
+                  </div>
+                  <p className="text-[9.5px] text-muted-foreground/80 leading-relaxed font-medium">
+                    Определяет поведение системы, когда размер входного контекста приближается к границам модели.
+                  </p>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-1.5">
+                    <button
+                      onClick={() => setContextStrategy('sliding')}
+                      className={cn(
+                        "flex flex-col text-left p-3.5 rounded-xl border transition-all duration-300",
+                        contextStrategy === 'sliding'
+                          ? "bg-primary/5 border-primary text-foreground shadow-sm"
+                          : "bg-transparent border-border/40 text-muted-foreground hover:border-border/80"
+                      )}
+                    >
+                      <span className="text-xs font-black flex items-center gap-1.5">
+                        <span className={cn("w-1.5 h-1.5 rounded-full", contextStrategy === 'sliding' ? "bg-primary animate-pulse" : "bg-muted-foreground")} />
+                        «Скользящее окно» (Sliding Window)
+                      </span>
+                      <span className="text-[9px] font-medium mt-1.5 opacity-80 leading-normal">
+                        Автоматически вытесняет старые сообщения из истории чата, освобождая место для новых ответов. Держит RAG-источники в приоритете.
+                      </span>
+                    </button>
+
+                    <button
+                      onClick={() => setContextStrategy('rag_priority')}
+                      className={cn(
+                        "flex flex-col text-left p-3.5 rounded-xl border transition-all duration-300",
+                        contextStrategy === 'rag_priority'
+                          ? "bg-purple-500/5 border-purple-500 text-purple-300 shadow-sm"
+                          : "bg-transparent border-border/40 text-muted-foreground hover:border-border/80"
+                      )}
+                    >
+                      <span className="text-xs font-black flex items-center gap-1.5">
+                        <span className={cn("w-1.5 h-1.5 rounded-full", contextStrategy === 'rag_priority' ? "bg-purple-500 animate-pulse" : "bg-muted-foreground")} />
+                        «Приоритет документов» (Document Priority)
+                      </span>
+                      <span className="text-[9px] font-medium mt-1.5 opacity-80 leading-normal">
+                        Жестко удерживает все прикрепленные фрагменты документов в контексте. При нехватке памяти история чата мгновенно очищается.
+                      </span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Область сообщений */}
       <div className="flex-1 overflow-y-auto p-6 space-y-8">
