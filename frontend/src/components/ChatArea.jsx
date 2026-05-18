@@ -109,228 +109,6 @@ const Citation = ({ n, sources, onClick, onHover, onLeave }) => {
   );
 };
 
-// ── Memoized Chat Message Component (Prevents heavy markdown/math re-rendering lag) ──
-const ChatMessage = React.memo(({
-  msg,
-  index,
-  totalMessages,
-  onOpenSource,
-  setHoveredSource,
-  setTooltipCoords,
-  tooltipTimeoutRef
-}) => {
-  const preProcessMessage = (text) => {
-    if (!text) return "";
-    
-    // Сначала обрабатываем формулы LaTeX
-    let processed = text
-      .replace(/\\\[([\s\S]*?)\\\]/g, '$$$$$1$$$$')
-      .replace(/\\\(([\s\S]*?)\\\)/g, '$$$1$$');
-
-    // Разделяем текст на части: обычный текст и блоки кода (```...```)
-    const parts = processed.split(/(```[\s\S]*?```)/g);
-    
-    const finalParts = parts.map(part => {
-      // Если это блок кода, возвращаем его как есть (не трогаем цитаты внутри)
-      if (part.startsWith('```')) return part;
-      
-      // В обычном тексте защищаем LaTeX от ссылок
-      const mathBlocks = [];
-      let subPart = part.replace(/(\$\$[\s\S]*?\$\$|\$[^\$\n]+?\$)/g, (m) => {
-        mathBlocks.push(m);
-        return `%%MATH_${mathBlocks.length - 1}%%`;
-      });
-
-      // Заменяем [N] на ссылки только в обычном тексте
-      subPart = subPart.replace(/(?<!\\in|\\subset|\\subseteq|\\supset)\[(\d+(?:,\s*\d+)*)\]/g, (match, nums) => {
-        return nums.split(',').map(n => {
-          const num = n.trim();
-          return `[${num}](#cite:${num})`;
-        }).join('');
-      });
-
-      // Возвращаем LaTeX
-      return subPart.replace(/%%MATH_(\d+)%%/g, (_, idx) => mathBlocks[parseInt(idx)]);
-    });
-
-    processed = finalParts.join('');
-
-    // Обработка всех форматов thinking-тегов
-    const thinkFormats = [
-      { open: '<|channel|>', close: '<channel|>' },   // Gemma 4 (рус)
-      { open: '<think>', close: '</think>' },     // Qwen/DeepSeek (рус)
-      { open: '<|think|>', close: '<|/think|>' },  // запасной
-    ];
-    for (const { open, close } of thinkFormats) {
-      if (!processed.includes(open)) continue;
-      const parts = processed.split(open);
-      const beforeThink = parts[0];
-      const thinkContent = parts[1];
-      if (thinkContent && thinkContent.includes(close)) {
-        const thinkParts = thinkContent.split(close);
-        processed = `${beforeThink}<details class="mb-4 rounded-xl border border-purple-500/20 bg-purple-500/5 overflow-hidden"><summary class="cursor-pointer px-4 py-2 text-[11px] font-bold text-purple-500 hover:bg-purple-500/10 transition-colors select-none">✨ Рассуждения</summary><div class="p-4 text-xs text-muted-foreground/80 italic border-t border-purple-500/10 whitespace-pre-wrap">${thinkParts[0]}</div></details>\n${thinkParts.slice(1).join(close)}`;
-      } else if (thinkContent) {
-        processed = `${beforeThink}<div class="mb-4 rounded-xl border border-purple-500/20 bg-purple-500/5 overflow-hidden"><div class="px-4 py-2 text-[11px] font-bold text-purple-500 flex items-center gap-2"><span class="animate-pulse">✨ Модель рассуждает...</span></div><div class="p-4 text-xs text-muted-foreground/80 italic border-t border-purple-500/10 whitespace-pre-wrap">${thinkContent}</div></div>`;
-      }
-      break;
-    }
-    return processed;
-  };
-
-  const renderContent = () => {
-    if (msg.loading) return (
-      <div className="flex gap-1 py-2">
-        <span className="w-1.5 h-1.5 bg-primary/40 rounded-full animate-bounce" />
-        <span className="w-1.5 h-1.5 bg-primary/40 rounded-full animate-bounce [animation-delay:0.2s]" />
-        <span className="w-1.5 h-1.5 bg-primary/40 rounded-full animate-bounce [animation-delay:0.4s]" />
-      </div>
-    );
-
-    return (
-      <div className="flex flex-col gap-2">
-        {msg.image && (
-          <div className="mb-2 rounded-lg overflow-hidden border border-border/40 max-w-sm">
-            <img src={msg.image} alt="User upload" className="w-full h-auto object-cover" />
-          </div>
-        )}
-
-        {/* Блок рассуждений — рендерится отдельно, до ответа */}
-        {msg.thinkingContent && (
-          <ThinkingBlock
-            content={msg.thinkingContent}
-            isStreaming={!msg.thinkingDone}
-          />
-        )}
-        <div className="prose prose-invert prose-sm max-w-none">
-          <ReactMarkdown
-            remarkPlugins={[remarkGfm, remarkMath]}
-            rehypePlugins={[rehypeRaw, rehypeKatex]}
-            components={{
-              a: ({ href, children }) => {
-                if (href?.startsWith('#cite:')) {
-                  const num = href.split(':')[1];
-                  return (
-                    <span className="inline-block ml-1 no-underline">
-                      <Citation
-                        n={parseInt(num)}
-                        sources={msg.sources}
-                        onClick={(src) => {
-                          setHoveredSource(null);
-                          onOpenSource(src);
-                        }}
-                        onHover={(src, coords) => {
-                          clearTimeout(tooltipTimeoutRef.current);
-                          setHoveredSource(src);
-                          setTooltipCoords(coords);
-                        }}
-                        onLeave={() => {
-                          tooltipTimeoutRef.current = setTimeout(() => setHoveredSource(null), 100);
-                        }}
-                      />
-                    </span>
-                  );
-                }
-                return <a href={href} target="_blank" rel="noopener noreferrer">{children}</a>;
-              },
-              code({ node, inline, className, children, ...props }) {
-                const match = /language-(\w+)/.exec(className || '');
-                const lang = match ? match[1] : '';
-                return !inline && match ? (
-                  <div className="relative group my-4 rounded-xl overflow-hidden bg-[#0d1117] border border-white/5">
-                    <div className="flex items-center justify-between px-4 py-2 opacity-40 group-hover:opacity-100 transition-opacity">
-                      <span className="text-[9px] font-bold text-white/50 uppercase tracking-[0.2em]">{lang}</span>
-                      <button
-                        onClick={() => navigator.clipboard.writeText(String(children).replace(/\n$/, ''))}
-                        className="flex items-center gap-1 text-[9px] font-bold text-white/50 hover:text-white transition-colors"
-                      >
-                        <Zap size={10} /> COPY
-                      </button>
-                    </div>
-                    <div className="overflow-x-auto custom-scrollbar">
-                      <SyntaxHighlighter
-                        style={atomDark}
-                        language={lang}
-                        PreTag="div"
-                        className="!bg-transparent !pt-0 !p-4 font-mono text-sm leading-relaxed"
-                        {...props}
-                      >
-                        {String(children).replace(/\n$/, '')}
-                      </SyntaxHighlighter>
-                    </div>
-                  </div>
-                ) : (
-                  <code className={cn("bg-white/10 px-1.5 py-0.5 rounded text-indigo-300 font-mono text-xs", className)} {...props}>
-                    {children}
-                  </code>
-                );
-              }
-            }}
-          >
-            {preProcessMessage(msg.content)}
-          </ReactMarkdown>
-
-          {msg.sources && msg.sources.length > 0 && (
-            <div className="mt-4 flex flex-wrap gap-2 pt-4 border-t border-border/20">
-              {msg.sources.map((src, idx) => (
-                <button
-                  key={idx}
-                  title={`${src.file_name} ${src.page ? '(стр. ' + src.page + ')' : ''}`}
-                  onClick={() => {
-                    setHoveredSource(null);
-                    onOpenSource(src);
-                  }}
-                  onMouseEnter={(e) => {
-                    const rect = e.currentTarget.getBoundingClientRect();
-                    clearTimeout(tooltipTimeoutRef.current);
-                    setHoveredSource(src);
-                    setTooltipCoords({ x: rect.left + rect.width / 2, y: rect.top });
-                  }}
-                  onMouseLeave={() => {
-                    tooltipTimeoutRef.current = setTimeout(() => setHoveredSource(null), 100);
-                  }}
-                  className="flex items-center gap-2 bg-muted/30 hover:bg-primary/10 border border-border/40 hover:border-primary/30 px-2.5 py-1 rounded-full text-[9px] transition-all"
-                >
-                  <span className="w-3.5 h-3.5 flex items-center justify-center bg-primary/20 text-primary rounded-full text-[8px] font-bold">
-                    {idx + 1}
-                  </span>
-                  <span className="truncate max-w-[140px] opacity-70 hover:opacity-100">{src.file_name}</span>
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-      </div>
-    );
-  };
-
-  return (
-    <motion.div
-      initial={{ opacity: 0, y: 10 }}
-      animate={{ opacity: 1, y: 0 }}
-      className={cn(
-        "flex w-full",
-        msg.role === 'user' ? "justify-end" : "justify-start"
-      )}
-    >
-      <div className={cn(
-        "max-w-[85%] group relative min-w-0",
-        msg.role === 'user' ? "chat-bubble-user" : "chat-bubble-ai"
-      )} style={{ zIndex: totalMessages - index }}>
-        {renderContent()}
-      </div>
-    </motion.div>
-  );
-}, (prevProps, nextProps) => {
-  return (
-    prevProps.msg.content === nextProps.msg.content &&
-    prevProps.msg.loading === nextProps.msg.loading &&
-    prevProps.msg.thinkingContent === nextProps.msg.thinkingContent &&
-    prevProps.msg.thinkingDone === nextProps.msg.thinkingDone &&
-    prevProps.index === nextProps.index &&
-    prevProps.totalMessages === nextProps.totalMessages
-  );
-});
-
 // ── Sleek Custom Slider Component ───────────────────────────────────────────
 const SleekSlider = ({
   label,
@@ -490,6 +268,231 @@ const SleekSlider = ({
     </div>
   );
 };
+
+// ── Memoized Message Item Component for High Performance ──────────────────────
+const MessageItem = React.memo(({
+  msg,
+  index,
+  messagesLength,
+  onOpenSource,
+  setHoveredSource,
+  setTooltipCoords,
+  tooltipTimeoutRef
+}) => {
+  const preProcessMessage = (text) => {
+    if (!text) return "";
+    
+    // Сначала обрабатываем формулы LaTeX
+    let processed = text
+      .replace(/\\\[([\s\S]*?)\\\]/g, '$$$$$1$$$$')
+      .replace(/\\\(([\s\S]*?)\\\)/g, '$$$1$$');
+
+    // Разделяем текст на части: обычный текст и блоки кода (```...```)
+    const parts = processed.split(/(```[\s\S]*?```)/g);
+    
+    const finalParts = parts.map(part => {
+      // Если это блок кода, возвращаем его как есть (не трогаем цитаты внутри)
+      if (part.startsWith('```')) return part;
+      
+      // В обычном тексте защищаем LaTeX от ссылок
+      const mathBlocks = [];
+      let subPart = part.replace(/(\$\$[\s\S]*?\$\$|\$[^\$\n]+?\$)/g, (m) => {
+        mathBlocks.push(m);
+        return `%%MATH_${mathBlocks.length - 1}%%`;
+      });
+
+      // Заменяем [N] на ссылки только в обычном тексте
+      subPart = subPart.replace(/(?<!\\in|\\subset|\\subseteq|\\supset)\[(\d+(?:,\s*\d+)*)\]/g, (match, nums) => {
+        return nums.split(',').map(n => {
+          const num = n.trim();
+          return `[${num}](#cite:${num})`;
+        }).join('');
+      });
+
+      // Возвращаем LaTeX
+      return subPart.replace(/%%MATH_(\d+)%%/g, (_, idx) => mathBlocks[parseInt(idx)]);
+    });
+
+    processed = finalParts.join('');
+
+    // Обработка всех форматов thinking-тегов:
+    const thinkFormats = [
+      { open: '<|channel|>', close: '<channel|>' },   // Gemma 4 (рус)
+      { open: '<think>', close: '</think>' },     // Qwen/DeepSeek (рус)
+      { open: '<|think|>', close: '<|/think|>' },  // запасной
+    ];
+    for (const { open, close } of thinkFormats) {
+      if (!processed.includes(open)) continue;
+      const parts = processed.split(open);
+      const beforeThink = parts[0];
+      const thinkContent = parts[1];
+      if (thinkContent && thinkContent.includes(close)) {
+        const thinkParts = thinkContent.split(close);
+        processed = `${beforeThink}<details class="mb-4 rounded-xl border border-purple-500/20 bg-purple-500/5 overflow-hidden"><summary class="cursor-pointer px-4 py-2 text-[11px] font-bold text-purple-500 hover:bg-purple-500/10 transition-colors select-none">✨ Рассуждения</summary><div class="p-4 text-xs text-muted-foreground/80 italic border-t border-purple-500/10 whitespace-pre-wrap">${thinkParts[0]}</div></details>\n${thinkParts.slice(1).join(close)}`;
+      } else if (thinkContent) {
+        processed = `${beforeThink}<div class="mb-4 rounded-xl border border-purple-500/20 bg-purple-500/5 overflow-hidden"><div class="px-4 py-2 text-[11px] font-bold text-purple-500 flex items-center gap-2"><span class="animate-pulse">✨ Модель рассуждает...</span></div><div class="p-4 text-xs text-muted-foreground/80 italic border-t border-purple-500/10 whitespace-pre-wrap">${thinkContent}</div></div>`;
+      }
+      break; // обработали — выходим
+    }
+    return processed;
+  };
+
+  const renderContent = () => {
+    if (msg.loading) return (
+      <div className="flex gap-1 py-2">
+        <span className="w-1.5 h-1.5 bg-primary/40 rounded-full animate-bounce" />
+        <span className="w-1.5 h-1.5 bg-primary/40 rounded-full animate-bounce [animation-delay:0.2s]" />
+        <span className="w-1.5 h-1.5 bg-primary/40 rounded-full animate-bounce [animation-delay:0.4s]" />
+      </div>
+    );
+
+    return (
+      <div className="flex flex-col gap-2">
+        {msg.image && (
+          <div className="mb-2 rounded-lg overflow-hidden border border-border/40 max-w-sm">
+            <img src={msg.image} alt="User upload" className="w-full h-auto object-cover" />
+          </div>
+        )}
+
+        {/* Блок рассуждений — рендерится отдельно, до ответа */}
+        {msg.thinkingContent && (
+          <ThinkingBlock
+            content={msg.thinkingContent}
+            isStreaming={!msg.thinkingDone}
+          />
+        )}
+        <div className="prose prose-invert prose-sm max-w-none">
+          <ReactMarkdown
+            remarkPlugins={[remarkGfm, remarkMath]}
+            rehypePlugins={[rehypeRaw, rehypeKatex]}
+            components={{
+              a: ({ href, children }) => {
+                if (href?.startsWith('#cite:')) {
+                  const num = href.split(':')[1];
+                  return (
+                    <span className="inline-block ml-1 no-underline">
+                      <Citation
+                        n={parseInt(num)}
+                        sources={msg.sources}
+                        onClick={(src) => {
+                          setHoveredSource(null);
+                          onOpenSource(src);
+                        }}
+                        onHover={(src, coords) => {
+                          clearTimeout(tooltipTimeoutRef.current);
+                          setHoveredSource(src);
+                          setTooltipCoords(coords);
+                        }}
+                        onLeave={() => {
+                          tooltipTimeoutRef.current = setTimeout(() => setHoveredSource(null), 100);
+                        }}
+                      />
+                    </span>
+                  );
+                }
+                return <a href={href} target="_blank" rel="noopener noreferrer">{children}</a>;
+              },
+              code({ node, inline, className, children, ...props }) {
+                const match = /language-(\w+)/.exec(className || '');
+                const lang = match ? match[1] : '';
+                return !inline && match ? (
+                  <div className="relative group my-4 rounded-xl overflow-hidden bg-[#0d1117] border border-white/5">
+                    {/* Тонкий индикатор языка и кнопка COPY в одной строке, встроенные в блок */}
+                    <div className="flex items-center justify-between px-4 py-2 opacity-40 group-hover:opacity-100 transition-opacity">
+                      <span className="text-[9px] font-bold text-white/50 uppercase tracking-[0.2em]">{lang}</span>
+                      <button
+                        onClick={() => navigator.clipboard.writeText(String(children).replace(/\n$/, ''))}
+                        className="flex items-center gap-1 text-[9px] font-bold text-white/50 hover:text-white transition-colors"
+                      >
+                        <Zap size={10} /> COPY
+                      </button>
+                    </div>
+                    <div className="overflow-x-auto custom-scrollbar">
+                      <SyntaxHighlighter
+                        style={atomDark}
+                        language={lang}
+                        PreTag="div"
+                        className="!bg-transparent !pt-0 !p-4 font-mono text-sm leading-relaxed"
+                        {...props}
+                      >
+                        {String(children).replace(/\n$/, '')}
+                      </SyntaxHighlighter>
+                    </div>
+                  </div>
+                ) : (
+                  <code className={cn("bg-white/10 px-1.5 py-0.5 rounded text-indigo-300 font-mono text-xs", className)} {...props}>
+                    {children}
+                  </code>
+                );
+              }
+            }}
+          >
+            {preProcessMessage(msg.content)}
+          </ReactMarkdown>
+
+          {msg.sources && msg.sources.length > 0 && (
+            <div className="mt-4 flex flex-wrap gap-2 pt-4 border-t border-border/20">
+              {msg.sources.map((src, idx) => (
+                <button
+                  key={idx}
+                  title={`${src.file_name} ${src.page ? '(стр. ' + src.page + ')' : ''}`}
+                  onClick={() => {
+                    setHoveredSource(null);
+                    onOpenSource(src);
+                  }}
+                  onMouseEnter={(e) => {
+                    const rect = e.currentTarget.getBoundingClientRect();
+                    clearTimeout(tooltipTimeoutRef.current);
+                    setHoveredSource(src);
+                    setTooltipCoords({ x: rect.left + rect.width / 2, y: rect.top });
+                  }}
+                  onMouseLeave={() => {
+                    tooltipTimeoutRef.current = setTimeout(() => setHoveredSource(null), 100);
+                  }}
+                  className="flex items-center gap-2 bg-muted/30 hover:bg-primary/10 border border-border/40 hover:border-primary/30 px-2.5 py-1 rounded-full text-[9px] transition-all"
+                >
+                  <span className="w-3.5 h-3.5 flex items-center justify-center bg-primary/20 text-primary rounded-full text-[8px] font-bold">
+                    {idx + 1}
+                  </span>
+                  <span className="truncate max-w-[140px] opacity-70 hover:opacity-100">{src.file_name}</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      className={cn(
+        "flex w-full",
+        msg.role === 'user' ? "justify-end" : "justify-start"
+      )}
+    >
+      <div className={cn(
+        "max-w-[85%] group relative min-w-0",
+        msg.role === 'user' ? "chat-bubble-user" : "chat-bubble-ai"
+      )} style={{ zIndex: messagesLength - index }}>
+        {renderContent()}
+      </div>
+    </motion.div>
+  );
+}, (prev, next) => {
+  return (
+    prev.msg.content === next.msg.content &&
+    prev.msg.loading === next.msg.loading &&
+    prev.msg.image === next.msg.image &&
+    prev.msg.thinkingContent === next.msg.thinkingContent &&
+    prev.msg.thinkingDone === next.msg.thinkingDone &&
+    prev.messagesLength === next.messagesLength &&
+    prev.index === next.index &&
+    prev.msg.sources === next.msg.sources
+  );
+});
 
 export default function ChatArea({ notebook, selectedSources, onOpenSource, llmSettings, setLlmSettings }) {
   const [messages, setMessages] = useState([
@@ -953,22 +956,16 @@ export default function ChatArea({ notebook, selectedSources, onOpenSource, llmS
       <div className="flex-1 overflow-y-auto p-6 space-y-8">
         <AnimatePresence initial={false}>
           {messages.map((msg, i) => (
-            <motion.div
+            <MessageItem
               key={i}
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              className={cn(
-                "flex w-full",
-                msg.role === 'user' ? "justify-end" : "justify-start"
-              )}
-            >
-              <div className={cn(
-                "max-w-[85%] group relative min-w-0",
-                msg.role === 'user' ? "chat-bubble-user" : "chat-bubble-ai"
-              )} style={{ zIndex: messages.length - i }}>
-                {renderMessageContent(msg)}
-              </div>
-            </motion.div>
+              msg={msg}
+              index={i}
+              messagesLength={messages.length}
+              onOpenSource={onOpenSource}
+              setHoveredSource={setHoveredSource}
+              setTooltipCoords={setTooltipCoords}
+              tooltipTimeoutRef={tooltipTimeoutRef}
+            />
           ))}
         </AnimatePresence>
         <div ref={messagesEndRef} />
