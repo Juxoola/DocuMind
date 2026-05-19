@@ -640,6 +640,11 @@ async def chat(request: ChatRequest):
                     r_vision = await asyncio.to_thread(requests.post, f"{active_llm}/v1/chat/completions", json=v_payload, timeout=60)
                     extracted = r_vision.json()["choices"][0]["message"]["content"].strip()
                     
+                    print(f"\n  [OCR] 📷 Распознанный текст с изображения:")
+                    print("=" * 60)
+                    print(extracted)
+                    print("=" * 60 + "\n")
+                    
                     # Чистый запрос для RAG (без инструкций, чтобы не ломать поиск)
                     if request.query.strip():
                         search_query = f"{request.query.strip()} {extracted}"
