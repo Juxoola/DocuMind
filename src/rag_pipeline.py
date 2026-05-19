@@ -146,13 +146,13 @@ def get_vector_store(notebook_id: str):
     chroma_collection = db.get_or_create_collection("multimodal_rag")
     return ChromaVectorStore(chroma_collection=chroma_collection)
 
-# Промпт для генерации альтернативных формулировок запроса (Query Expansion)
 _QUERY_GEN_PROMPT = (
-    "Ты — помощник для поиска информации. Сгенерируй {num_queries} альтернативные "
-    "формулировки следующего вопроса на том же языке. "
-    "Каждая формулировка — отдельная строка, без нумерации и лишних слов.\n"
-    "Вопрос: {query}\n"
-    "Альтернативы:"
+    "Ты — эксперт по поиску информации. Сформулируй ровно {num_queries} разных коротких поисковых запроса "
+    "на том же языке для поиска справочной информации на основе следующего задания/вопроса.\n"
+    "[ВАЖНО: Пиши ТОЛЬКО поисковые запросы, по одному запросу на строке. НЕ пиши никаких вступлений, пояснений и тегов <think>. Каждый запрос должен быть на новой отдельной строке.]\n"
+    "Каждый запрос должен содержать ключевые термины, темы или формулы (исключай специфические числа из задания).\n"
+    "Задание/вопрос: {query}\n"
+    "Поисковые запросы:"
 )
 
 def _get_qe_llm():
@@ -183,9 +183,16 @@ def _get_qe_llm():
         api_key="sk-local",
         model="gpt-4o",
         temperature=0.3,
-        max_tokens=128,       # Нам нужны только две коротких фразы
-        timeout=10.0,          # Не зависаем дольше 10с
+        max_tokens=512,       # Достаточно для генерации 3 простых фраз
+        timeout=20.0,          # Запас таймаута
         max_retries=0,         # Без ретраев — если нет ответа, сразу фоллбэк
+        additional_kwargs={
+            "extra_body": {
+                "thinking_budget": 0,
+                "thinking_budget_tokens": 0,
+                "chat_template_kwargs": {"enable_thinking": False}
+            }
+        }
     )
 
 def _rebuild_bm25_bg(notebook_id: str, db_path: str):
@@ -287,19 +294,79 @@ def retrieve_nodes(query: str, notebook_id: str, allowed_files=None, max_tokens=
     qprompt = _QUERY_GEN_PROMPT if qe_llm else None
     
     try:
+        retrievers = [vector_retriever]
         if bm25_retriever:
+            retrievers.append(bm25_retriever)
+            
+        # Запускаем QueryFusionRetriever если включен Query Expansion или доступен гибридный поиск
+        if len(retrievers) > 1 or num_q > 1:
             fusion_retriever = QueryFusionRetriever(
-                [vector_retriever, bm25_retriever],
+                retrievers,
                 similarity_top_k=top_k_global,
                 num_queries=num_q,
                 query_gen_prompt=qprompt,
                 llm=qe_llm,
                 use_async=False
             )
+            
+            # Внедряем custom_get_queries для надежной обработки thinking-моделей и очистки от разметки/нумерации
+            if num_q > 1 and qe_llm:
+                def custom_get_queries(original_query: str):
+                    try:
+                        prompt_str = fusion_retriever.query_gen_prompt.format(
+                            num_queries=fusion_retriever.num_queries - 1,
+                            query=original_query,
+                        )
+                        response = fusion_retriever._llm.complete(prompt_str)
+                        text = response.text or ""
+                        
+                        # Если модель думает, отсекаем <think>...</think>
+                        if "<think>" in text:
+                            parts = text.split("</think>")
+                            text = parts[-1]
+                        text = text.replace("<think>", "").replace("</think>", "")
+                        
+                        # Парсим строки и чистим от нумерации/маркеров списка
+                        lines = text.strip("`").split("\n")
+                        queries = []
+                        import re
+                        for line in lines:
+                            line = line.strip()
+                            if not line:
+                                continue
+                            line = re.sub(r'^\d+[\.\)]\s*', '', line) # Убирает "1. ", "2) "
+                            line = re.sub(r'^[-\*\+]\s*', '', line)   # Убирает списка "- ", "* "
+                            line = line.strip()
+                            if line:
+                                queries.append(line)
+                        
+                        # Возвращаем QueryBundle для сгенерированных запросов
+                        from llama_index.core import QueryBundle
+                        return [QueryBundle(q) for q in queries[:fusion_retriever.num_queries - 1]]
+                    except Exception as qe_err:
+                        logger.warning(f"Ошибка генерации запросов в custom_get_queries: {qe_err}")
+                        return []
+                
+                fusion_retriever._get_queries = custom_get_queries
+            
+            # Логируем сгенерированные запросы для пользователя
+            if num_q > 1 and qe_llm:
+                try:
+                    generated_bundles = fusion_retriever._get_queries(query)
+                    print(f"  [RAG] 🧠 Сгенерированные поисковые запросы (Query Expansion):")
+                    for i, gq in enumerate(generated_bundles, 1):
+                        print(f"    {i}. {gq.query_str}")
+                except Exception as qe_err:
+                    logger.warning(f"Не удалось получить сгенерированные запросы для лога: {qe_err}")
+
             all_nodes = fusion_retriever.retrieve(query)
-            # Фильтруем результаты, так как BM25 может не поддерживать фильтрацию на уровне запроса
+            # Фильтруем результаты, так как слияние/BM25 может не поддерживать фильтрацию на уровне запроса
             all_nodes = [n for n in all_nodes if n.node.metadata.get("file_name") in allowed_files]
-            label = f"Гибрид+QE({num_q})" if num_q > 1 else "Гибрид"
+            
+            if len(retrievers) > 1:
+                label = f"Гибрид+QE({num_q})" if num_q > 1 else "Гибрид"
+            else:
+                label = f"Вектор+QE({num_q})"
             print(f"  [RAG] 🔍 {label} по {len(allowed_files)} файлам: {len(all_nodes)} фрагм.")
         else:
             all_nodes = vector_retriever.retrieve(query)

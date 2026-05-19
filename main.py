@@ -632,11 +632,11 @@ async def chat(request: ChatRequest):
                 vision_messages = [
                     {"role": "user", "content": [
                         {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{request.image_base64}"}},
-                        {"type": "text", "text": "Выполни точный OCR текста с картинки."}
+                        {"type": "text", "text": "Ты — профессиональный инструмент распознавания текста и анализа изображений. Сделай точный OCR всего текста на изображении, включая все вопросы, задания, формулы и таблицы. Если на картинке есть важные графики, схемы или диаграммы, кратко опиши их суть текстом. Выведи только результат распознавания без лишних слов."}
                     ]}
                 ]
                 try:
-                    v_payload = {"messages": vision_messages, "stream": False, "max_tokens": 300}
+                    v_payload = {"messages": vision_messages, "stream": False, "max_tokens": 1024}
                     r_vision = await asyncio.to_thread(requests.post, f"{active_llm}/v1/chat/completions", json=v_payload, timeout=60)
                     extracted = r_vision.json()["choices"][0]["message"]["content"].strip()
                     
