@@ -194,6 +194,14 @@ async def get_ingestion_status(notebook_id: str):
 async def cancel_upload(notebook_id: str = Query(...)):
     """Сигнализирует активному процессу загрузки в этом блокноте остановиться."""
     evt = upload_cancel_flags.get(notebook_id)
+    # Мгновенно убиваем все subprocess-ы (ffmpeg и пр.), даже если cancel_check ещё не сработал
+    try:
+        from src.ingestion import kill_subprocesses
+        killed = kill_subprocesses(notebook_id)
+        if killed:
+            print(f"[CANCEL] Убито {killed} активных subprocess-ов для {notebook_id}")
+    except Exception as e:
+        print(f"[CANCEL] Ошибка при kill_subprocesses: {e}")
     if evt is None:
         return {"status": "no_active_upload"}
     evt.set()
@@ -345,6 +353,43 @@ async def upload_file(
             print(f"[INGESTION] Готово: {file.filename} ({time_str})")
         except IngestionCancelled:
             print(f"[INGESTION] Загрузка отменена пользователем: {file.filename}")
+            # Комплексная очистка, чтобы не оставалось "призраков":
+            # 1) главный файл
+            try:
+                if os.path.exists(file_path):
+                    os.remove(file_path)
+                    print(f"[INGESTION] Файл удалён после отмены: {file_path}")
+            except Exception as e:
+                print(f"[INGESTION] Не удалось удалить {file_path}: {e}")
+            # 2) sidecar .json (мог быть записан process_audio_video/process_pdf до того, как cancel долетел)
+            sidecar = os.path.join(os.path.dirname(file_path), f"{file.filename}.json")
+            try:
+                if os.path.exists(sidecar):
+                    os.remove(sidecar)
+                    print(f"[INGESTION] Sidecar удалён: {sidecar}")
+            except Exception as e:
+                print(f"[INGESTION] Не удалось удалить sidecar: {e}")
+            # 3) изображения страниц/кадров в images_dir
+            try:
+                images_dir = paths.get("images")
+                if images_dir and os.path.exists(images_dir):
+                    stem = os.path.splitext(file.filename)[0]
+                    for f in os.listdir(images_dir):
+                        if f.startswith("p_") or f.startswith("v_") or stem in f:
+                            try: os.remove(os.path.join(images_dir, f))
+                            except Exception: pass
+            except Exception as e:
+                print(f"[INGESTION] Ошибка очистки images: {e}")
+            # 4) частичные эмбеддинги в ChromaDB (если build_index был вызван до cancel — не должно быть,
+            #    но на всякий случай)
+            try:
+                from src.rag_pipeline import get_vector_store
+                vector_store = get_vector_store(notebook_id)
+                collection = vector_store._collection
+                collection.delete(where={"file_name": file.filename})
+                print(f"[INGESTION] ChromaDB записи для {file.filename} удалены")
+            except Exception as e:
+                print(f"[INGESTION] Очистка ChromaDB не удалась (это нормально, если индекс не строился): {e}")
             ingestion_status[notebook_id] = {"is_uploading": False, "cancelled": True}
             q.put({"type": "cancelled", "filename": file.filename})
         except Exception as e:

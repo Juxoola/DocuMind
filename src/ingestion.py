@@ -48,6 +48,33 @@ class IngestionCancelled(Exception):
     """Поднимается, когда пользователь запросил отмену обработки файла."""
     pass
 
+# Глобальный реестр активных subprocess-ов по notebook_id.
+# Нужен, чтобы cancel мог их мгновенно убить (ffmpeg, whisperx и т.д.),
+# иначе блокирующий вызов может идти минуты после нажатия кнопки.
+_active_subprocesses: dict = {}
+
+def register_subprocess(notebook_id, popen):
+    _active_subprocesses.setdefault(notebook_id, []).append(popen)
+
+def unregister_subprocess(notebook_id, popen):
+    lst = _active_subprocesses.get(notebook_id)
+    if lst and popen in lst:
+        try: lst.remove(popen)
+        except Exception: pass
+    if lst is not None and not lst:
+        _active_subprocesses.pop(notebook_id, None)
+
+def kill_subprocesses(notebook_id):
+    """Немедленно убивает все subprocess-ы, зарегистрированные для этого блокнота."""
+    procs = _active_subprocesses.pop(notebook_id, [])
+    for p in procs:
+        try:
+            if p.poll() is None:
+                p.terminate()
+        except Exception:
+            pass
+    return len(procs)
+
 # --- Фикс для Windows DLL ---
 try:
     import torch
@@ -214,7 +241,7 @@ def save_high_res_frame(video_path, time_sec, output_path):
     except Exception as e:
         logger.warning(f"Ошибка FFmpeg при сохранении кадра: {e}")
 
-def process_audio_video(file_path, images_dir, is_video=False, progress_cb=None, llm_settings=None, cancel_check=None):
+def process_audio_video(file_path, images_dir, is_video=False, progress_cb=None, llm_settings=None, cancel_check=None, notebook_id=None):
     def _is_cancelled():
         return bool(cancel_check and cancel_check())
 
@@ -273,11 +300,21 @@ def process_audio_video(file_path, images_dir, is_video=False, progress_cb=None,
                "-f", "image2pipe", "-vcodec", "rawvideo", "-pix_fmt", "bgr24", "pipe:1"]
         
         process = subprocess.Popen(cmd, stdout=subprocess.PIPE, bufsize=10**8)
+        if notebook_id is not None:
+            register_subprocess(notebook_id, process)
         frame_list = []
         try:
             prev_saved_thumb = None; last_seen_thumb = None; stable_since_sec = 0; current_sec = 0
             chunk_size = COMPARE_SIZE[0] * COMPARE_SIZE[1] * 3
+            cancel_check_every = 30  # проверяем cancel каждые ~30 кадров (~30с видео)
+            frame_counter = 0
             while True:
+                if frame_counter % cancel_check_every == 0 and _is_cancelled():
+                    print(f"[Ingestion] Отмена во время извлечения кадров видео ({format_seconds(current_sec)})")
+                    try: process.terminate()
+                    except Exception: pass
+                    raise IngestionCancelled(f"Cancelled during frame extraction at {format_seconds(current_sec)}")
+                frame_counter += 1
                 raw_frame = process.stdout.read(chunk_size)
                 if not raw_frame or len(raw_frame) != chunk_size: break
                 thumb = np.frombuffer(raw_frame, dtype='uint8').reshape((COMPARE_SIZE[1], COMPARE_SIZE[0], 3))
@@ -311,6 +348,8 @@ def process_audio_video(file_path, images_dir, is_video=False, progress_cb=None,
                     prog(62 + int((current_sec / duration_sec) * 3) if duration_sec > 0 else 62, f"Анализ видео: {format_seconds(current_sec)} / {format_seconds(duration_sec)}")
         finally:
             process.stdout.close(); process.terminate(); process.wait()
+            if notebook_id is not None:
+                unregister_subprocess(notebook_id, process)
 
         # 3. ОПИСАНИЕ КАДРОВ
         n = len(frame_list)
@@ -536,11 +575,13 @@ def process_docx(file_path, images_dir, llm_settings=None, shared_llm_url=None, 
         nodes.append(TextNode(text="\n".join([p.text for p in docx.Document(file_path).paragraphs]), metadata={"file_name":file_name}))
     return nodes
 
-def ensure_720p_video(file_path, prog_cb=None):
+def ensure_720p_video(file_path, prog_cb=None, cancel_check=None, notebook_id=None):
     ext = os.path.splitext(file_path)[1].lower()
     if ext not in ['.mp4', '.avi', '.mkv', '.mov']: return file_path
     from imageio_ffmpeg import get_ffmpeg_exe
     ffmpeg = get_ffmpeg_exe()
+    def _is_cancelled():
+        return bool(cancel_check and cancel_check())
     def get_duration(path):
         try:
             cmd = [ffmpeg, "-i", path]
@@ -555,23 +596,58 @@ def ensure_720p_video(file_path, prog_cb=None):
         return 0
     duration = get_duration(file_path); temp_final = file_path + ".720p.mp4"
     if duration < 120:
+        if _is_cancelled(): raise IngestionCancelled("Cancelled before 720p encode")
         if prog_cb: prog_cb(5, "Оптимизация видео (GPU)...")
         cmd = [ffmpeg, "-y", "-hwaccel", "cuda", "-hwaccel_output_format", "cuda", "-i", file_path, "-vf", "scale_cuda=1280:720:format=yuv420p", "-c:v", "hevc_nvenc", "-preset", "p1", "-rc", "constqp", "-qp", "30", "-pix_fmt", "yuv420p", "-tag:v", "hvc1", "-c:a", "aac", "-b:a", "128k", "-movflags", "+faststart", temp_final]
-        subprocess.run(cmd, capture_output=True)
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        if notebook_id is not None: register_subprocess(notebook_id, proc)
+        try:
+            proc.wait()
+        finally:
+            if notebook_id is not None: unregister_subprocess(notebook_id, proc)
+        if _is_cancelled():
+            try: os.remove(temp_final)
+            except Exception: pass
+            raise IngestionCancelled("Cancelled during 720p encode")
     else:
+        if _is_cancelled(): raise IngestionCancelled("Cancelled before turbo encode")
         if prog_cb: prog_cb(5, "Турбо-оптимизация (Параллельный GPU)...")
         num_workers = 4; seg_len = duration / num_workers; temp_dir = file_path + "_parts"
         os.makedirs(temp_dir, exist_ok=True)
         def encode_seg(idx):
+            if _is_cancelled(): return None
             out_part = os.path.join(temp_dir, f"part_{idx}.mp4")
             cmd = [ffmpeg, "-y", "-hwaccel", "cuda", "-hwaccel_output_format", "cuda", "-ss", str(idx * seg_len), "-t", str(seg_len), "-i", file_path, "-vf", "scale_cuda=1280:720:format=yuv420p", "-c:v", "hevc_nvenc", "-preset", "p1", "-rc", "constqp", "-qp", "30", "-an", out_part]
-            subprocess.run(cmd, capture_output=True); return out_part
-        with concurrent.futures.ThreadPoolExecutor(max_workers=num_workers) as ex: parts = list(ex.map(encode_seg, range(num_workers)))
+            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            if notebook_id is not None: register_subprocess(notebook_id, proc)
+            try:
+                proc.wait()
+            finally:
+                if notebook_id is not None: unregister_subprocess(notebook_id, proc)
+            return out_part
+        with concurrent.futures.ThreadPoolExecutor(max_workers=num_workers) as ex:
+            parts = []
+            for p in ex.map(encode_seg, range(num_workers)):
+                if _is_cancelled():
+                    print(f"[Ingestion] Отмена во время турбо-кодирования видео (получено {len(parts)}/{num_workers} сегментов)")
+                    ex.shutdown(wait=False, cancel_futures=True)
+                    raise IngestionCancelled("Cancelled during turbo encode")
+                parts.append(p)
+        if _is_cancelled(): raise IngestionCancelled("Cancelled after turbo encode")
         list_path = os.path.join(temp_dir, "list.txt")
         with open(list_path, "w") as f:
             for p in parts: f.write(f"file '{os.path.abspath(p)}'\n")
         merge_cmd = [ffmpeg, "-y", "-f", "concat", "-safe", "0", "-i", list_path, "-i", file_path, "-map", "0:v", "-map", "1:a?", "-c", "copy", "-movflags", "+faststart", temp_final]
-        subprocess.run(merge_cmd, capture_output=True)
+        merge_proc = subprocess.Popen(merge_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        if notebook_id is not None: register_subprocess(notebook_id, merge_proc)
+        try:
+            merge_proc.wait()
+        finally:
+            if notebook_id is not None: unregister_subprocess(notebook_id, merge_proc)
+        if _is_cancelled():
+            try: os.remove(temp_final)
+            except Exception: pass
+            raise IngestionCancelled("Cancelled after video merge")
         try: shutil.rmtree(temp_dir)
         except Exception: pass
     if os.path.exists(temp_final) and os.path.getsize(temp_final) > 1000:
@@ -598,10 +674,10 @@ def ingest_file(file_path, notebook_id, progress_cb=None, llm_settings=None, can
     paths = config.get_notebook_paths(notebook_id); images_dir = paths["images"]
     os.makedirs(images_dir, exist_ok=True)
     if _is_cancelled(): raise IngestionCancelled("Cancelled before media conversion")
-    if ext in ['.mp4', '.avi', '.mkv', '.mov']: file_path = ensure_720p_video(file_path, progress_cb)
+    if ext in ['.mp4', '.avi', '.mkv', '.mov']: file_path = ensure_720p_video(file_path, progress_cb, cancel_check=cancel_check, notebook_id=notebook_id)
     elif ext in ['.mp3', '.wav', '.m4a']: file_path = ensure_mp3_audio(file_path, progress_cb); ext = ".mp3"
     if _is_cancelled(): raise IngestionCancelled("Cancelled after media conversion")
-    if ext in ['.mp4', '.avi', '.mkv', '.mov', '.mp3']: return process_audio_video(file_path, images_dir, ext != ".mp3", progress_cb, llm_settings, cancel_check=cancel_check)
+    if ext in ['.mp4', '.avi', '.mkv', '.mov', '.mp3']: return process_audio_video(file_path, images_dir, ext != ".mp3", progress_cb, llm_settings, cancel_check=cancel_check, notebook_id=notebook_id)
     # Больше не запускаем Vision-сервер заранее.
     # Он запустится лениво (lazy-load) только если внутри PDF/PPTX/DOCX обнаружится реальное изображение.
     shared_llm_url = None
