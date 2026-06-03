@@ -87,6 +87,7 @@ def get_gguf_llm(
     thinking_budget: int = 1024,
     n_parallel: int = 1,
     custom_args: Optional[List[str]] = None,
+    mtp_enabled: bool = False,
 ) -> str:
     """
     Запускает llama-server.exe для указанной модели.
@@ -112,7 +113,7 @@ def get_gguf_llm(
         "thinking_budget": int(thinking_budget if thinking_budget is not None else 1024),
         "n_parallel": int(n_parallel or 1),
         "custom_args": custom_args if custom_args is not None else [],
-        "mtp": "mtp" in os.path.basename(gguf_path).lower(),
+        "mtp_enabled": bool(mtp_enabled),
     }
 
     with _lock:
@@ -171,7 +172,7 @@ def get_gguf_llm(
         "-n", str(current_config["max_tokens"])
     ]
 
-    if current_config["mtp"]:
+    if current_config["mtp_enabled"]:
         cmd.extend(["--spec-type", "draft-mtp", "--spec-draft-n-max", "2"])
 
     # Если рассуждения отключены — добавляем соответствующие флаги сервера

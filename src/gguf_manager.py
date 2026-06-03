@@ -58,6 +58,7 @@ def start_gguf_server(
     ctx_size: Optional[int] = None,
     gpu_layers: Optional[int] = None,
     threads: Optional[int] = None,
+    mtp_enabled: bool = False,
 ) -> Dict:
     """Запускает нативный llama-server.exe."""
     global _server_process, _server_info
@@ -84,7 +85,7 @@ def start_gguf_server(
         "-n", "2048",
         "--flash-attn", "on"
     ]
-    if "mtp" in os.path.basename(gguf_path).lower():
+    if mtp_enabled:
         cmd.extend(["--spec-type", "draft-mtp", "--spec-draft-n-max", "2"])
     if mmproj_path:
         cmd.extend(["--mmproj", os.path.normpath(mmproj_path)])

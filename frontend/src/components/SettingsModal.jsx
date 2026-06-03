@@ -325,6 +325,13 @@ export default function SettingsModal({ isOpen, onClose, settings, onSave }) {
                                                         <option value="false">Выкл</option>
                                                     </select>
                                                 </label>
+                                                <label className="flex flex-col gap-1 text-[10px] text-muted-foreground" title="Multi-Token Prediction (--spec-type draft-mtp). Включайте только если модель обучена для MTP (например, Qwen3). Ускоряет генерацию, но увеличивает VRAM.">
+                                                    MTP (draft-mtp) ℹ️
+                                                    <select value={(localSettings.mtp_enabled === true || localSettings.mtp_enabled === 'true') ? 'true' : 'false'} onChange={e => setLocalSettings({...localSettings, mtp_enabled: e.target.value === 'true'})} className="bg-background border border-border rounded px-2 py-1 text-foreground">
+                                                        <option value="false">Выкл</option>
+                                                        <option value="true">Вкл</option>
+                                                    </select>
+                                                </label>
                                             </div>
 
                                             {/* Тонкие настройки для Основной модели */}

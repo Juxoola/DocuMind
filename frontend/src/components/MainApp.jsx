@@ -32,6 +32,7 @@ export default function MainApp({ notebook, onExit }) {
 			use_gguf: '',
 			gguf_model_path: '',
 			gguf_mmproj_path: '',
+			mtp_enabled: false,
 		};
 	});
   

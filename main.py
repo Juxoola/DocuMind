@@ -545,6 +545,7 @@ class ChatRequest(BaseModel):
     gguf_flash_attn: Optional[str] = "true"
     thinking_budget: Optional[int] = 1024 # -1 = без ограничений
     context_strategy: Optional[str] = "sliding" # sliding | rag_priority
+    mtp_enabled: Optional[bool] = False # Multi-Token Prediction (--spec-type draft-mtp)
 
 @app.post("/api/chat")
 async def chat(request: ChatRequest):
@@ -600,7 +601,8 @@ async def chat(request: ChatRequest):
                 type_k=request.gguf_kv_quant,
                 type_v=request.gguf_kv_quant,
                 enable_thinking=request.thinking_mode,
-                thinking_budget=request.thinking_budget
+                thinking_budget=request.thinking_budget,
+                mtp_enabled=request.mtp_enabled
             )
             config.save_last_model(request.gguf_model_path, request.gguf_mmproj_path)
         except Exception as e:
