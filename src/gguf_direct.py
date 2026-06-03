@@ -111,7 +111,8 @@ def get_gguf_llm(
         "enable_thinking": bool(enable_thinking),
         "thinking_budget": int(thinking_budget if thinking_budget is not None else 1024),
         "n_parallel": int(n_parallel or 1),
-        "custom_args": custom_args if custom_args is not None else []
+        "custom_args": custom_args if custom_args is not None else [],
+        "mtp": "mtp" in os.path.basename(gguf_path).lower(),
     }
 
     with _lock:
@@ -169,6 +170,9 @@ def get_gguf_llm(
         "--cache-type-v", type_v_str,
         "-n", str(current_config["max_tokens"])
     ]
+
+    if current_config["mtp"]:
+        cmd.extend(["--spec-type", "draft-mtp", "--spec-draft-n-max", "2"])
 
     # Если рассуждения отключены — добавляем соответствующие флаги сервера
     if not current_config["enable_thinking"]:

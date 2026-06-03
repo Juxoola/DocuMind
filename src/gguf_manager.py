@@ -84,6 +84,8 @@ def start_gguf_server(
         "-n", "2048",
         "--flash-attn", "on"
     ]
+    if "mtp" in os.path.basename(gguf_path).lower():
+        cmd.extend(["--spec-type", "draft-mtp", "--spec-draft-n-max", "2"])
     if mmproj_path:
         cmd.extend(["--mmproj", os.path.normpath(mmproj_path)])
     
