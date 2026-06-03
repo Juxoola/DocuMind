@@ -314,9 +314,13 @@ export default function SettingsModal({ isOpen, onClose, settings, onSave }) {
                                                     CPU Потоки ℹ️
                                                     <input type="number" step="1" value={localSettings.gguf_threads || 8} onChange={e => setLocalSettings({...localSettings, gguf_threads: parseInt(e.target.value)})} className="bg-background border border-border rounded px-2 py-1 text-foreground" />
                                                 </label>
-                                                <label className="flex flex-col gap-1 text-[10px] text-muted-foreground" title="Размер батча (влияет на скорость обработки длинного текста).">
+                                                <label className="flex flex-col gap-1 text-[10px] text-muted-foreground" title="Логический размер батча (влияет на скорость обработки длинного текста).">
                                                     Batch Size ℹ️
-                                                    <input type="number" step="256" value={localSettings.gguf_batch_size || 2048} onChange={e => setLocalSettings({...localSettings, gguf_batch_size: parseInt(e.target.value)})} className="bg-background border border-border rounded px-2 py-1 text-foreground" />
+                                                    <input type="number" step="256" value={localSettings.gguf_batch_size || 512} onChange={e => setLocalSettings({...localSettings, gguf_batch_size: parseInt(e.target.value)})} className="bg-background border border-border rounded px-2 py-1 text-foreground" />
+                                                </label>
+                                                <label className="flex flex-col gap-1 text-[10px] text-muted-foreground" title="Физический (micro-batch) размер. Должен быть <= Batch Size. Уменьшите при нехватке VRAM.">
+                                                    UBatch Size ℹ️
+                                                    <input type="number" step="64" value={localSettings.gguf_ubatch_size || 256} onChange={e => setLocalSettings({...localSettings, gguf_ubatch_size: parseInt(e.target.value)})} className="bg-background border border-border rounded px-2 py-1 text-foreground" />
                                                 </label>
                                                 <label className="flex flex-col gap-1 text-[10px] text-muted-foreground" title="Использовать Flash Attention для ускорения.">
                                                     Flash Attention ℹ️
@@ -406,9 +410,13 @@ export default function SettingsModal({ isOpen, onClose, settings, onSave }) {
                                                     CPU Потоки ℹ️
                                                     <input type="number" step="1" value={localSettings.vision_threads || 8} onChange={e => setLocalSettings({...localSettings, vision_threads: parseInt(e.target.value)})} className="bg-background border border-border rounded px-2 py-1 text-foreground" />
                                                 </label>
-                                                <label className="flex flex-col gap-1 text-[10px] text-muted-foreground" title="Размер батча (влияет на скорость обработки длинного текста).">
+                                                <label className="flex flex-col gap-1 text-[10px] text-muted-foreground" title="Логический размер батча для Vision модели.">
                                                     Batch Size ℹ️
-                                                    <input type="number" step="256" value={localSettings.vision_batch_size || 2048} onChange={e => setLocalSettings({...localSettings, vision_batch_size: parseInt(e.target.value)})} className="bg-background border border-border rounded px-2 py-1 text-foreground" />
+                                                    <input type="number" step="256" value={localSettings.vision_batch_size || 512} onChange={e => setLocalSettings({...localSettings, vision_batch_size: parseInt(e.target.value)})} className="bg-background border border-border rounded px-2 py-1 text-foreground" />
+                                                </label>
+                                                <label className="flex flex-col gap-1 text-[10px] text-muted-foreground" title="Физический (micro-batch) размер для Vision модели. Должен быть <= Batch Size.">
+                                                    UBatch Size ℹ️
+                                                    <input type="number" step="64" value={localSettings.vision_ubatch_size || 256} onChange={e => setLocalSettings({...localSettings, vision_ubatch_size: parseInt(e.target.value)})} className="bg-background border border-border rounded px-2 py-1 text-foreground" />
                                                 </label>
                                                 <label className="flex flex-col gap-1 text-[10px] text-muted-foreground" title="Использовать Flash Attention для ускорения.">
                                                     Flash Attention ℹ️

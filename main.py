@@ -6,6 +6,7 @@ import uuid
 import logging
 import requests
 import traceback
+import threading
 from pathlib import Path
 from fastapi import FastAPI, UploadFile, File, HTTPException, Query
 from fastapi.responses import StreamingResponse
@@ -182,10 +183,21 @@ async def get_files(notebook_id: str):
 
 # Глобальный статус загрузки для каждого блокнота
 ingestion_status = {}
+# Флаги отмены активной загрузки (per notebook)
+upload_cancel_flags: dict = {}
 
 @app.get("/api/ingestion_status")
 async def get_ingestion_status(notebook_id: str):
     return ingestion_status.get(notebook_id, {"is_uploading": False})
+
+@app.post("/api/upload/cancel")
+async def cancel_upload(notebook_id: str = Query(...)):
+    """Сигнализирует активному процессу загрузки в этом блокноте остановиться."""
+    evt = upload_cancel_flags.get(notebook_id)
+    if evt is None:
+        return {"status": "no_active_upload"}
+    evt.set()
+    return {"status": "cancel_requested"}
 
 @app.post("/api/upload")
 async def upload_file(
@@ -206,6 +218,7 @@ async def upload_file(
     vision_gpu_layers: Optional[int] = -1,
     vision_threads: Optional[int] = 8,
     vision_batch_size: Optional[int] = 512,
+    vision_ubatch_size: Optional[int] = 256,
     vision_flash_attn: Optional[str] = "true",
     vision_max_tokens: Optional[int] = 4096,
     vision_repeat_penalty: Optional[float] = 1.2,
@@ -260,6 +273,7 @@ async def upload_file(
         "vision_gpu_layers": vision_gpu_layers,
         "vision_threads": vision_threads,
         "vision_batch_size": vision_batch_size,
+        "vision_ubatch_size": vision_ubatch_size,
         "vision_flash_attn": vision_flash_attn,
         "vision_max_tokens": vision_max_tokens,
         "vision_repeat_penalty": vision_repeat_penalty,
@@ -275,6 +289,9 @@ async def upload_file(
     def process_task():
         import time
         start_time = time.time()
+        # Инициализируем cancel-флаг для этого блокнота
+        cancel_event = upload_cancel_flags.setdefault(notebook_id, threading.Event())
+        cancel_event.clear()
         # Инициализируем статус пачки
         ingestion_status[notebook_id] = {
             "is_uploading": True,
@@ -284,6 +301,10 @@ async def upload_file(
             "total_files": total_count,
             "status": "Подготовка..."
         }
+        try:
+            from src.ingestion import IngestionCancelled
+        except ImportError:
+            IngestionCancelled = RuntimeError  # fallback, если модуль не успел загрузиться
         try:
             def prog(pct, msg):
                 q.put({"type": "progress", "pct": pct, "msg": msg})
@@ -295,8 +316,12 @@ async def upload_file(
                     })
 
             prog(5, "Файл сохранён, подготовка...")
-            nodes = ingest_file(file_path, notebook_id, progress_cb=prog, llm_settings=llm_settings)
-            
+            nodes = ingest_file(
+                file_path, notebook_id,
+                progress_cb=prog, llm_settings=llm_settings,
+                cancel_check=cancel_event.is_set,
+            )
+
             prog(90, "Построение индекса (ChromaDB)...")
             build_index(nodes, notebook_id)
             
@@ -318,12 +343,18 @@ async def upload_file(
 
             q.put({"type": "done", "filename": file.filename, "elapsed": time_str, "elapsed_sec": elapsed})
             print(f"[INGESTION] Готово: {file.filename} ({time_str})")
+        except IngestionCancelled:
+            print(f"[INGESTION] Загрузка отменена пользователем: {file.filename}")
+            ingestion_status[notebook_id] = {"is_uploading": False, "cancelled": True}
+            q.put({"type": "cancelled", "filename": file.filename})
         except Exception as e:
             import traceback
             traceback.print_exc()
             ingestion_status[notebook_id] = {"is_uploading": False, "error": str(e)}
             q.put({"type": "error", "msg": str(e)})
         finally:
+            # Освобождаем cancel-флаг после завершения задачи
+            upload_cancel_flags.pop(notebook_id, None)
             # После загрузки файла оставляем модели в памяти, но чистим кэш
             import gc, torch
             gc.collect()
@@ -338,7 +369,7 @@ async def upload_file(
                 await asyncio.sleep(0.1)
             msg = q.get()
             yield f"data: {json.dumps(msg, ensure_ascii=False)}\n\n"
-            if msg["type"] in ["done", "error"]:
+            if msg["type"] in ["done", "error", "cancelled"]:
                 break
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
@@ -543,7 +574,8 @@ class ChatRequest(BaseModel):
     gguf_ctx_size: Optional[int] = 32768
     gguf_gpu_layers: Optional[int] = -1
     gguf_threads: Optional[int] = 8
-    gguf_batch_size: Optional[int] = 2048
+    gguf_batch_size: Optional[int] = 512
+    gguf_ubatch_size: Optional[int] = 256
     gguf_flash_attn: Optional[str] = "true"
     thinking_budget: Optional[int] = 1024 # -1 = без ограничений
     context_strategy: Optional[str] = "sliding" # sliding | rag_priority
@@ -598,6 +630,7 @@ async def chat(request: ChatRequest):
                 gpu_layers=request.gguf_gpu_layers,
                 n_threads=request.gguf_threads,
                 n_batch=request.gguf_batch_size,
+                n_ubatch=request.gguf_ubatch_size,
                 flash_attn=True if request.gguf_flash_attn == "true" else False,
                 max_tokens=request.max_tokens,
                 type_k=request.gguf_kv_quant,

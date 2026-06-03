@@ -33,7 +33,11 @@ export default function MainApp({ notebook, onExit }) {
 			gguf_model_path: '',
 			gguf_mmproj_path: '',
 			mtp_enabled: false,
+			gguf_batch_size: 512,
+			gguf_ubatch_size: 256,
 			vision_mtp_enabled: false,
+			vision_batch_size: 512,
+			vision_ubatch_size: 256,
 		};
 	});
   
@@ -42,7 +46,15 @@ export default function MainApp({ notebook, onExit }) {
     if (!files.length) return;
 
     setUploadState(prev => ({ ...prev, isUploading: true, totalFiles: files.length, currentFile: 1, batchProgress: 0 }));
-    
+
+    const cancelUpload = async () => {
+      try {
+        await fetch(`/api/upload/cancel?notebook_id=${encodeURIComponent(notebook.id)}`, { method: 'POST' });
+      } catch (e) {
+        console.error('[UPLOAD] Cancel request failed', e);
+      }
+    };
+
     let fileIdx = 1;
     const totalFiles = files.length;
 
@@ -93,6 +105,13 @@ export default function MainApp({ notebook, onExit }) {
                   console.log(`[UPLOAD] Received 'done' event for ${file.name}. Breaking stream.`);
                   setUploadState(prev => ({ ...prev, status: `Готово: ${data.filename}` }));
                   shouldBreak = true;
+                } else if (data.type === 'cancelled') {
+                  console.log(`[UPLOAD] Загрузка ${data.filename} отменена пользователем.`);
+                  setUploadState({ isUploading: false, progress: 0, batchProgress: 0, currentFile: 0, totalFiles: 0, status: 'Отменено' });
+                  shouldBreak = true;
+                } else if (data.type === 'error') {
+                  console.error(`[UPLOAD] Server error: ${data.msg}`);
+                  setUploadState(prev => ({ ...prev, status: `Ошибка: ${data.msg}` }));
                 }
               } catch (e) {
                 console.warn("[UPLOAD] JSON parse error", e);
@@ -350,9 +369,18 @@ export default function MainApp({ notebook, onExit }) {
                    <div className="w-2 h-2 bg-primary rounded-full animate-pulse shadow-[0_0_8px_rgba(var(--primary),0.5)]" />
                    <span className="text-[10px] font-black uppercase tracking-[0.2em] text-primary">Загрузка</span>
                 </div>
-                <span className="text-[10px] font-bold text-muted-foreground bg-muted px-2 py-0.5 rounded-full">
-                  {uploadState.currentFile} из {uploadState.totalFiles}
-                </span>
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] font-bold text-muted-foreground bg-muted px-2 py-0.5 rounded-full">
+                    {uploadState.currentFile} из {uploadState.totalFiles}
+                  </span>
+                  <button
+                    onClick={cancelUpload}
+                    title="Остановить загрузку"
+                    className="w-5 h-5 flex items-center justify-center text-muted-foreground hover:text-red-500 hover:bg-red-500/10 rounded-full transition-colors"
+                  >
+                    <span className="text-base leading-none">×</span>
+                  </button>
+                </div>
               </div>
 
               {/* Полосы прогресса */}

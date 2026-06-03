@@ -78,7 +78,7 @@ def get_gguf_llm(
     ctx_size: int = None,
     gpu_layers: int = -1,
     n_threads: int = None,
-    n_batch: int = 2048,
+    n_batch: int = 512,
     flash_attn: bool = True,
     max_tokens: int = 4096,
     type_k: int = 2,
@@ -88,6 +88,7 @@ def get_gguf_llm(
     n_parallel: int = 1,
     custom_args: Optional[List[str]] = None,
     mtp_enabled: bool = False,
+    n_ubatch: int = 256,
 ) -> str:
     """
     Запускает llama-server.exe для указанной модели.
@@ -104,7 +105,7 @@ def get_gguf_llm(
         "mmproj": mmproj_path or None,
         "ctx_size": int(ctx_size or config.GGUF_CTX_SIZE),
         "gpu_layers": int(gpu_layers if gpu_layers is not None else -1),
-        "n_batch": int(n_batch or 2048),
+        "n_batch": int(n_batch or 512),
         "flash_attn": bool(flash_attn),
         "max_tokens": int(max_tokens or 4096),
         "type_k": int(type_k or 2),
@@ -114,6 +115,7 @@ def get_gguf_llm(
         "n_parallel": int(n_parallel or 1),
         "custom_args": custom_args if custom_args is not None else [],
         "mtp_enabled": bool(mtp_enabled),
+        "n_ubatch": int(n_ubatch or 256),
     }
 
     with _lock:
@@ -162,8 +164,8 @@ def get_gguf_llm(
         "--port", str(port),
         "-c", str(total_ctx),
         "-ngl", str(current_config["gpu_layers"]),
-        "-b", "512",
-        "-ub", "256",
+        "-b", str(current_config["n_batch"]),
+        "-ub", str(current_config["n_ubatch"]),
         "--parallel", str(current_config["n_parallel"]),
         "--cont-batching",
         "--jinja",

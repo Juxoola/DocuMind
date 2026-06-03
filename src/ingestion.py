@@ -44,6 +44,10 @@ def _safe_getmodule(obj, filename=None):
     except Exception: return None
 _inspect_module.getmodule = _safe_getmodule
 
+class IngestionCancelled(Exception):
+    """Поднимается, когда пользователь запросил отмену обработки файла."""
+    pass
+
 # --- Фикс для Windows DLL ---
 try:
     import torch
@@ -96,7 +100,8 @@ def get_vision_url(llm_settings, progress_cb=None):
         m_path = config.resolve_model_path(v_mmproj)
         v_ctx = int(llm_settings.get("vision_ctx_size") or config.GGUF_CTX_SIZE)
         v_gl = int(llm_settings.get("vision_gpu_layers") or -1)
-        v_b = int(llm_settings.get("vision_batch_size") or 2048)
+        v_b = int(llm_settings.get("vision_batch_size") or 512)
+        v_ub = int(llm_settings.get("vision_ubatch_size") or 256)
         v_fa = llm_settings.get("vision_flash_attn") == "true"
         v_kv = int(llm_settings.get("vision_kv_quant") or 2)
         v_conc = int(llm_settings.get("vision_concurrency") or config.VISION_CONCURRENCY)
@@ -104,7 +109,7 @@ def get_vision_url(llm_settings, progress_cb=None):
 
         return get_gguf_llm(
             gguf_path=g_path, mmproj_path=m_path,
-            ctx_size=v_ctx, gpu_layers=v_gl, n_batch=v_b, flash_attn=v_fa,
+            ctx_size=v_ctx, gpu_layers=v_gl, n_batch=v_b, n_ubatch=v_ub, flash_attn=v_fa,
             type_k=v_kv, type_v=v_kv,
             n_parallel=v_conc,
             mtp_enabled=v_mtp,
@@ -209,13 +214,16 @@ def save_high_res_frame(video_path, time_sec, output_path):
     except Exception as e:
         logger.warning(f"Ошибка FFmpeg при сохранении кадра: {e}")
 
-def process_audio_video(file_path, images_dir, is_video=False, progress_cb=None, llm_settings=None):
+def process_audio_video(file_path, images_dir, is_video=False, progress_cb=None, llm_settings=None, cancel_check=None):
+    def _is_cancelled():
+        return bool(cancel_check and cancel_check())
+
     file_name = os.path.basename(file_path)
     def prog(pct, msg):
         try: print(f"  [{pct}%] {msg}")
         except Exception: pass
         if progress_cb: progress_cb(pct, msg)
-    
+
     nodes = []
     transcript_data = []
     frame_data = []
@@ -324,21 +332,29 @@ def process_audio_video(file_path, images_dir, is_video=False, progress_cb=None,
             # Собираем результаты по мере готовности для обновления прогресса
             # Используем большой chunk_size, чтобы описания не разрывались
             splitter = SentenceSplitter(chunk_size=2048, chunk_overlap=128)
-            for idx, future in enumerate(futures):
-                desc = future.result()
-                path, t = frame_list[idx]
-                
-                # Принудительно пропускаем описание через сплиттер, чтобы не превысить контекст эмбеддингов
-                desc_nodes = splitter.get_nodes_from_documents([
-                    TextNode(text=f"Кадр {file_name} [{format_seconds(t)}]: {desc}", 
-                             metadata={"file_name":file_name, "image_path":path, "time":t})
-                ])
-                nodes.extend(desc_nodes)
-                
-                frame_data.append({"time":t, "image_path":path, "description":desc})
-                done = idx + 1
-                prog(65 + int(done/n*22) if n else 87, f"Описание: {done}/{n}")
-            
+            try:
+                for idx, future in enumerate(futures):
+                    if _is_cancelled():
+                        print(f"[Ingestion] Отмена во время OCR кадров ({idx}/{n})")
+                        try: executor.shutdown(wait=False, cancel_futures=True)
+                        except Exception: pass
+                        raise IngestionCancelled(f"Cancelled at frame {idx}/{n}")
+                    desc = future.result()
+                    path, t = frame_list[idx]
+
+                    # Принудительно пропускаем описание через сплиттер, чтобы не превысить контекст эмбеддингов
+                    desc_nodes = splitter.get_nodes_from_documents([
+                        TextNode(text=f"Кадр {file_name} [{format_seconds(t)}]: {desc}",
+                                 metadata={"file_name":file_name, "image_path":path, "time":t})
+                    ])
+                    nodes.extend(desc_nodes)
+
+                    frame_data.append({"time":t, "image_path":path, "description":desc})
+                    done = idx + 1
+                    prog(65 + int(done/n*22) if n else 87, f"Описание: {done}/{n}")
+            except IngestionCancelled:
+                raise
+
         if shared_llm_url:
             unload_all_models(role="llm")
 
@@ -347,7 +363,10 @@ def process_audio_video(file_path, images_dir, is_video=False, progress_cb=None,
         json.dump(metadata_json, f, ensure_ascii=False, indent=2)
     return nodes
 
-def process_pdf(file_path, images_dir, llm_settings=None, shared_llm_url=None, original_filename=None, progress_cb=None):
+def process_pdf(file_path, images_dir, llm_settings=None, shared_llm_url=None, original_filename=None, progress_cb=None, cancel_check=None):
+    def _is_cancelled():
+        return bool(cancel_check and cancel_check())
+
     nodes = []; file_name = original_filename or os.path.basename(file_path); doc = fitz.open(file_path)
     frame_data = []
     frame_list = []
@@ -355,6 +374,9 @@ def process_pdf(file_path, images_dir, llm_settings=None, shared_llm_url=None, o
     # Сплиттер для описаний (более крупный)
     v_splitter = SentenceSplitter(chunk_size=2048, chunk_overlap=128)
     for page_num in range(len(doc)):
+        if _is_cancelled():
+            print(f"[Ingestion] Отмена на странице {page_num+1}/{len(doc)}")
+            raise IngestionCancelled(f"Cancelled at page {page_num+1}")
         page = doc.load_page(page_num); text = page.get_text()
         if text.strip(): 
             page_nodes = splitter.get_nodes_from_documents([
@@ -417,11 +439,18 @@ def process_pdf(file_path, images_dir, llm_settings=None, shared_llm_url=None, o
             
             with ThreadPoolExecutor(max_workers=v_conc) as executor:
                 futures = {executor.submit(describe_image_with_lmstudio, f["path"], llm_settings, shared_llm_url): f for f in frame_list}
-                
+
                 done_count = 0
-                for future in as_completed(futures):
-                    frame_info = futures[future]
-                    desc = future.result()
+                try:
+                    for future in as_completed(futures):
+                        if _is_cancelled():
+                            print(f"[Ingestion] Отмена во время OCR ({done_count}/{n} готово)")
+                            for f in futures.values():
+                                try: executor.shutdown(wait=False, cancel_futures=True)
+                                except Exception: pass
+                            raise IngestionCancelled(f"Cancelled during OCR ({done_count}/{n})")
+                        frame_info = futures[future]
+                        desc = future.result()
                     done_count += 1
                     
                     if desc and "Изображение без описания" not in desc:
@@ -443,7 +472,9 @@ def process_pdf(file_path, images_dir, llm_settings=None, shared_llm_url=None, o
                         try: os.remove(frame_info["path"])
                         except Exception: pass
                     
-                    if progress_cb: progress_cb(65 + int(done_count/n*25), f"Описание PDF: {done_count}/{n}")
+                        if progress_cb: progress_cb(65 + int(done_count/n*25), f"Описание PDF: {done_count}/{n}")
+                except IngestionCancelled:
+                    raise
 
         if shared_llm_url:
             unload_all_models(role="llm")
@@ -458,7 +489,7 @@ def process_pdf(file_path, images_dir, llm_settings=None, shared_llm_url=None, o
             
     return nodes
 
-def process_pptx(file_path, images_dir, llm_settings=None, shared_llm_url=None, progress_cb=None):
+def process_pptx(file_path, images_dir, llm_settings=None, shared_llm_url=None, progress_cb=None, cancel_check=None):
     nodes = []; file_name = os.path.basename(file_path); pdf_path = os.path.splitext(file_path)[0] + ".pdf"
     import win32com.client, pythoncom
     try:
@@ -470,9 +501,11 @@ def process_pptx(file_path, images_dir, llm_settings=None, shared_llm_url=None, 
         if os.path.exists(pdf_path):
             if os.path.exists(file_path): os.remove(file_path)
             # Метаданные сохраняем уже для нового PDF
-            nodes = process_pdf(pdf_path, images_dir, llm_settings, shared_llm_url, original_filename=os.path.basename(pdf_path), progress_cb=progress_cb)
+            nodes = process_pdf(pdf_path, images_dir, llm_settings, shared_llm_url, original_filename=os.path.basename(pdf_path), progress_cb=progress_cb, cancel_check=cancel_check)
         else:
             raise Exception("PDF conversion failed")
+    except IngestionCancelled:
+        raise
     except Exception as e:
         logger.warning(f"COM-конвертация PPTX не удалась, резерв через python-pptx: {e}")
         prs = Presentation(file_path)
@@ -480,7 +513,7 @@ def process_pptx(file_path, images_dir, llm_settings=None, shared_llm_url=None, 
             nodes.append(TextNode(text="\n".join([sh.text for sh in slide.shapes if hasattr(sh, "text")]), metadata={"file_name":file_name, "page":i+1}))
     return nodes
 
-def process_docx(file_path, images_dir, llm_settings=None, shared_llm_url=None, progress_cb=None):
+def process_docx(file_path, images_dir, llm_settings=None, shared_llm_url=None, progress_cb=None, cancel_check=None):
     nodes = []; file_name = os.path.basename(file_path); pdf_path = os.path.splitext(file_path)[0] + ".pdf"
     import win32com.client, pythoncom
     try:
@@ -492,9 +525,11 @@ def process_docx(file_path, images_dir, llm_settings=None, shared_llm_url=None, 
         if os.path.exists(pdf_path):
             if os.path.exists(file_path): os.remove(file_path)
             # Метаданные сохраняем уже для нового PDF
-            nodes = process_pdf(pdf_path, images_dir, llm_settings, shared_llm_url, original_filename=os.path.basename(pdf_path), progress_cb=progress_cb)
+            nodes = process_pdf(pdf_path, images_dir, llm_settings, shared_llm_url, original_filename=os.path.basename(pdf_path), progress_cb=progress_cb, cancel_check=cancel_check)
         else:
             raise Exception("PDF conversion failed")
+    except IngestionCancelled:
+        raise
     except Exception as e:
         logger.warning(f"COM-конвертация DOCX не удалась, резерв через python-docx: {e}")
         import docx
@@ -555,21 +590,26 @@ def ensure_mp3_audio(file_path, prog_cb=None):
     if os.path.exists(temp_path): os.remove(file_path); return temp_path
     return file_path
 
-def ingest_file(file_path, notebook_id, progress_cb=None, llm_settings=None):
+def ingest_file(file_path, notebook_id, progress_cb=None, llm_settings=None, cancel_check=None):
+    def _is_cancelled():
+        return bool(cancel_check and cancel_check())
+
     ext = os.path.splitext(file_path)[1].lower()
     paths = config.get_notebook_paths(notebook_id); images_dir = paths["images"]
     os.makedirs(images_dir, exist_ok=True)
+    if _is_cancelled(): raise IngestionCancelled("Cancelled before media conversion")
     if ext in ['.mp4', '.avi', '.mkv', '.mov']: file_path = ensure_720p_video(file_path, progress_cb)
     elif ext in ['.mp3', '.wav', '.m4a']: file_path = ensure_mp3_audio(file_path, progress_cb); ext = ".mp3"
-    if ext in ['.mp4', '.avi', '.mkv', '.mov', '.mp3']: return process_audio_video(file_path, images_dir, ext != ".mp3", progress_cb, llm_settings)
-    # Больше не запускаем Vision-сервер заранее. 
+    if _is_cancelled(): raise IngestionCancelled("Cancelled after media conversion")
+    if ext in ['.mp4', '.avi', '.mkv', '.mov', '.mp3']: return process_audio_video(file_path, images_dir, ext != ".mp3", progress_cb, llm_settings, cancel_check=cancel_check)
+    # Больше не запускаем Vision-сервер заранее.
     # Он запустится лениво (lazy-load) только если внутри PDF/PPTX/DOCX обнаружится реальное изображение.
     shared_llm_url = None
 
     try:
-        if ext == '.pdf': nodes = process_pdf(file_path, images_dir, llm_settings, shared_llm_url, progress_cb=progress_cb)
-        elif ext == '.pptx': nodes = process_pptx(file_path, images_dir, llm_settings, shared_llm_url, progress_cb=progress_cb)
-        elif ext == '.docx': nodes = process_docx(file_path, images_dir, llm_settings, shared_llm_url, progress_cb=progress_cb)
+        if ext == '.pdf': nodes = process_pdf(file_path, images_dir, llm_settings, shared_llm_url, progress_cb=progress_cb, cancel_check=cancel_check)
+        elif ext == '.pptx': nodes = process_pptx(file_path, images_dir, llm_settings, shared_llm_url, progress_cb=progress_cb, cancel_check=cancel_check)
+        elif ext == '.docx': nodes = process_docx(file_path, images_dir, llm_settings, shared_llm_url, progress_cb=progress_cb, cancel_check=cancel_check)
         else:
             try:
                 with open(file_path, 'r', encoding='utf-8') as f: text = f.read()
