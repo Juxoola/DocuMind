@@ -518,27 +518,27 @@ def process_pdf(file_path, images_dir, llm_settings=None, shared_llm_url=None, o
                             raise IngestionCancelled(f"Cancelled during OCR ({done_count}/{n})")
                         frame_info = futures[future]
                         desc = future.result()
-                    done_count += 1
-                    
-                    if desc and "Изображение без описания" not in desc:
-                        # Принудительно пропускаем описание через v_splitter (большой размер чанка)
-                        desc_nodes = v_splitter.get_nodes_from_documents([
-                            TextNode(
-                                text=f"Изображение PDF {file_name} стр {frame_info['page']}: {desc}", 
-                                metadata={"file_name":file_name, "image_path":frame_info["path"], "page":frame_info["page"]}
-                            )
-                        ])
-                        nodes.extend(desc_nodes)
-                        
-                        frame_data.append({
-                            "page": frame_info["page"], 
-                            "image_path": frame_info["path"], 
-                            "description": desc
-                        })
-                    else:
-                        try: os.remove(frame_info["path"])
-                        except Exception: pass
-                    
+                        done_count += 1
+
+                        if desc and "Изображение без описания" not in desc:
+                            # Принудительно пропускаем описание через v_splitter (большой размер чанка)
+                            desc_nodes = v_splitter.get_nodes_from_documents([
+                                TextNode(
+                                    text=f"Изображение PDF {file_name} стр {frame_info['page']}: {desc}",
+                                    metadata={"file_name":file_name, "image_path":frame_info["path"], "page":frame_info["page"]}
+                                )
+                            ])
+                            nodes.extend(desc_nodes)
+
+                            frame_data.append({
+                                "page": frame_info["page"],
+                                "image_path": frame_info["path"],
+                                "description": desc
+                            })
+                        else:
+                            try: os.remove(frame_info["path"])
+                            except Exception: pass
+
                         if progress_cb: progress_cb(65 + int(done_count/n*25), f"Описание PDF: {done_count}/{n}")
                 except IngestionCancelled:
                     raise
