@@ -235,6 +235,32 @@ def _rebuild_bm25_bg(notebook_id: str, db_path: str):
     except Exception as e:
         logger.warning(f"[RAG] Ошибка фоновой сборки BM25: {e}")
 
+def _rrf_fuse_across_files(file_results, k: int = 60):
+    """F2: Merge RRF scores across files so big files don't dominate.
+
+    Args:
+        file_results: list of (file_name, [NodeWithScore]) tuples
+        k: RRF constant
+
+    Returns:
+        list[NodeWithScore] sorted by cross-file RRF score desc, deduplicated.
+    """
+    from llama_index.core.schema import NodeWithScore
+
+    scores: dict = {}
+    nodes_by_id: dict = {}
+
+    for _fname, per_file_nodes in file_results:
+        # Внутри файла — rank = позиция в уже RRF-слитом списке
+        for rank, nws in enumerate(per_file_nodes, start=1):
+            nid = nws.node.node_id
+            scores[nid] = scores.get(nid, 0.0) + 1.0 / (k + rank)
+            nodes_by_id[nid] = nws
+
+    sorted_ids = sorted(scores.keys(), key=lambda i: scores[i], reverse=True)
+    return [NodeWithScore(node=nodes_by_id[i].node, score=scores[i]) for i in sorted_ids]
+
+
 def _rrf_fuse(vector_results, bm25_results, k: int = 60):
     """Reciprocal Rank Fusion (Cormack et al. 2009).
 
@@ -325,35 +351,53 @@ def retrieve_nodes(query: str, notebook_id: str, allowed_files=None, max_tokens=
         else:
             print(f"  [RAG] Query Expansion отключён (нет доступного LLM-сервера)")
 
-    # Унифицированный поиск по всем файлам сразу (в 10-20 раз быстрее чем пофайловый)
-    file_filter = MetadataFilters(
-        filters=[MetadataFilter(key="file_name", value=allowed_files, operator=FilterOperator.IN)]
-    )
-    
-    # Регулируем количество результатов: чем больше файлов, тем больше кандидатов берем для реранкера
-    top_k_global = min(config.RAG_TOP_K_PER_FILE * len(allowed_files), config.RAG_RERANK_POOL)
-    
+    # F2: Per-file RRF — каждый файл получает равный голос, независимо от размера.
+    # Внутри файла — RRF (vector+BM25), между файлами — RRF поверх.
+    # Один файл → используем один MetadataFilter (быстрее).
+    if len(allowed_files) == 1:
+        file_filter = MetadataFilters(
+            filters=[MetadataFilter(key="file_name", value=allowed_files[0], operator=FilterOperator.EQ)]
+        )
+    else:
+        file_filter = MetadataFilters(
+            filters=[MetadataFilter(key="file_name", value=allowed_files, operator=FilterOperator.IN)]
+        )
+
+    # Сколько кандидатов брать с каждого файла (используется и per-file, и как top_k для одиночного файла)
+    top_k_per_file = config.RAG_TOP_K_PER_FILE
+
+    # Один файл — старый быстрый путь (без per-file overhead)
     vector_retriever = index.as_retriever(
-        similarity_top_k=top_k_global, 
+        similarity_top_k=top_k_per_file,
         filters=file_filter
     )
-    
+
     num_q = 3 if qe_llm else 1
     qprompt = _QUERY_GEN_PROMPT if qe_llm else None
 
+    use_qe = (num_q > 1)  # Query Expansion активен (нужен LLM-сервер)
+
     try:
-        retrievers = [vector_retriever]
-        if bm25_retriever:
-            retrievers.append(bm25_retriever)
-
-        use_qe = (num_q > 1)  # Query Expansion активен (нужен LLM-сервер)
-
         if use_qe:
-            # Query Expansion включён: используем QueryFusionRetriever для генерации
-            # дополнительных формулировок запроса + RRF-подобное слияние (mode=reciprocal_rerank).
+            # F2 + QE: создаём per-file retrievers и передаём их в QueryFusionRetriever.
+            # Каждый per-file retriever получает ВСЕ варианты запросов (orig + 2 от LLM).
+            # QueryFusionRetriever делает RRF-мерж, mode='reciprocal_rerank' (по умолчанию)
+            # корректно мерджит per-file результаты.
+            per_file_retrievers = []
+            for fname in allowed_files:
+                ff = MetadataFilters(
+                    filters=[MetadataFilter(key="file_name", value=fname, operator=FilterOperator.EQ)]
+                )
+                per_file_retrievers.append(
+                    index.as_retriever(similarity_top_k=top_k_per_file, filters=ff)
+                )
+            if bm25_retriever:
+                # BM25 — общий, фильтруем post-hoc (не все версии llama-index поддерживают filter в BM25)
+                per_file_retrievers.append(bm25_retriever)
+
             fusion_retriever = QueryFusionRetriever(
-                retrievers,
-                similarity_top_k=top_k_global,
+                per_file_retrievers,
+                similarity_top_k=top_k_per_file * len(allowed_files),
                 num_queries=num_q,
                 query_gen_prompt=qprompt,
                 llm=qe_llm,
@@ -412,27 +456,51 @@ def retrieve_nodes(query: str, notebook_id: str, allowed_files=None, max_tokens=
                     logger.warning(f"Не удалось получить сгенерированные запросы для лога: {qe_err}")
 
             all_nodes = fusion_retriever.retrieve(query)
-            # Фильтруем результаты, так как слияние/BM25 может не поддерживать фильтрацию на уровне запроса
+            # Пост-фильтр: убеждаемся, что только разрешённые файлы (BM25 может вернуть чужие)
             all_nodes = [n for n in all_nodes if n.node.metadata.get("file_name") in allowed_files]
 
-            if len(retrievers) > 1:
-                label = f"Гибрид+QE({num_q})"
+            if bm25_retriever:
+                label = f"Per-file Гибрид+QE({num_q})"
             else:
-                label = f"Вектор+QE({num_q})"
+                label = f"Per-file Вектор+QE({num_q})"
             print(f"  [RAG] 🔍 {label} по {len(allowed_files)} файлам: {len(all_nodes)} фрагм.")
         else:
-            # QE выключен: НЕ используем QueryFusionRetriever (он плохо мерджит без RRF mode).
-            # Вместо этого вызываем каждый retriever напрямую и сливаем через RRF.
-            # Это даёт +5-15% precision vs concat-with-dedup: BM25-only чанки получают
-            # честный ранг вместо того чтобы утонуть после vector-only чанков.
-            vec_results = vector_retriever.retrieve(query)
-            bm25_results = bm25_retriever.retrieve(query) if bm25_retriever else []
-            all_nodes = _rrf_fuse(vec_results, bm25_results)
-            all_nodes = [n for n in all_nodes if n.node.metadata.get("file_name") in allowed_files]
-            if bm25_retriever:
-                print(f"  [RAG] 🔍 Гибрид (RRF, vector+BM25) по {len(allowed_files)} файлам: {len(all_nodes)} фрагм.")
+            # F2: QE выключен → per-file RRF.
+            # Для каждого файла: vector (top_k_per_file) + BM25 (top_k_per_file, post-filter) → RRF
+            # Затем RRF merge across files.
+            if len(allowed_files) == 1:
+                # 1 файл — простой путь, без per-file overhead
+                vec_results = vector_retriever.retrieve(query)
+                bm25_results = bm25_retriever.retrieve(query) if bm25_retriever else []
+                bm25_results = [n for n in bm25_results if n.node.metadata.get("file_name") == allowed_files[0]][:top_k_per_file]
+                all_nodes = _rrf_fuse(vec_results, bm25_results)
+                if bm25_retriever:
+                    print(f"  [RAG] 🔍 Гибрид (RRF, vector+BM25) по 1 файлу: {len(all_nodes)} фрагм.")
+                else:
+                    print(f"  [RAG] 🔍 Вектор по 1 файлу: {len(all_nodes)} фрагм.")
             else:
-                print(f"  [RAG] 🔍 Вектор по {len(allowed_files)} файлам: {len(all_nodes)} фрагм.")
+                # N файлов — per-file RRF, затем cross-file RRF
+                file_results = []
+                for fname in allowed_files:
+                    ff = MetadataFilters(
+                        filters=[MetadataFilter(key="file_name", value=fname, operator=FilterOperator.EQ)]
+                    )
+                    v = index.as_retriever(similarity_top_k=top_k_per_file, filters=ff)
+                    vec = v.retrieve(query)
+                    bm = []
+                    if bm25_retriever:
+                        bm_all = bm25_retriever.retrieve(query)
+                        bm = [n for n in bm_all if n.node.metadata.get("file_name") == fname][:top_k_per_file]
+                    fused = _rrf_fuse(vec, bm)
+                    file_results.append((fname, fused))
+                all_nodes = _rrf_fuse_across_files(file_results)
+                # Cap на RAG_RERANK_POOL, чтобы не раздувать reranker budget
+                if len(all_nodes) > config.RAG_RERANK_POOL:
+                    all_nodes = all_nodes[:config.RAG_RERANK_POOL]
+                if bm25_retriever:
+                    print(f"  [RAG] 🔍 Per-file Гибрид (RRF, vector+BM25) по {len(allowed_files)} файлам: {len(all_nodes)} фрагм.")
+                else:
+                    print(f"  [RAG] 🔍 Per-file Вектор по {len(allowed_files)} файлам: {len(all_nodes)} фрагм.")
     except Exception as e:
         print(f"Ошибка унифицированного поиска: {e}")
         all_nodes = []
