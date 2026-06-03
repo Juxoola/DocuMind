@@ -457,7 +457,19 @@ def retrieve_nodes(query: str, notebook_id: str, allowed_files=None, max_tokens=
                 _model_cache["reranker"] = url
             
             url = _model_cache["reranker"]
-            documents = [n.node.get_content() for n in all_nodes]
+            # F5: reranker получает префикс с координатами чанка, чтобы cross-encoder
+            # мог учитывать координаты при оценке (для запросов "что на стр. 5 лекции 3").
+            # Префикс короткий (<50 токенов) — не раздувает input и не съедает полезный контекст.
+            def _rerank_doc(nws):
+                meta = nws.node.metadata or {}
+                coord_parts = []
+                if meta.get("file_name"): coord_parts.append(str(meta["file_name"]))
+                if meta.get("page") not in (None, ""): coord_parts.append(f"стр.{meta['page']}")
+                elif meta.get("time") not in (None, ""): coord_parts.append(f"@{meta['time']}")
+                elif meta.get("start") not in (None, ""): coord_parts.append(f"@{meta['start']}")
+                prefix = f"[{' '.join(coord_parts)}] " if coord_parts else ""
+                return prefix + nws.node.get_content()
+            documents = [_rerank_doc(n) for n in all_nodes]
             payload = {"model": "gguf-reranker", "query": query, "documents": documents, "top_n": len(documents)}
             
             try:
@@ -545,7 +557,17 @@ def retrieve_nodes(query: str, notebook_id: str, allowed_files=None, max_tokens=
                 _model_cache["reranker"] = CrossEncoder(reranker_name, device=device, model_kwargs=rerank_kwargs)
             
             model = _model_cache["reranker"]
-            pairs = [[query, n.node.get_content()] for n in all_nodes]
+            # F5: PyTorch reranker тоже видит координаты (аналогично GGUF-ветке выше)
+            def _rerank_doc(nws):
+                meta = nws.node.metadata or {}
+                coord_parts = []
+                if meta.get("file_name"): coord_parts.append(str(meta["file_name"]))
+                if meta.get("page") not in (None, ""): coord_parts.append(f"стр.{meta['page']}")
+                elif meta.get("time") not in (None, ""): coord_parts.append(f"@{meta['time']}")
+                elif meta.get("start") not in (None, ""): coord_parts.append(f"@{meta['start']}")
+                prefix = f"[{' '.join(coord_parts)}] " if coord_parts else ""
+                return prefix + nws.node.get_content()
+            pairs = [[query, _rerank_doc(n)] for n in all_nodes]
             scores = model.predict(pairs)
         
         # Присваиваем скоры и сортируем
