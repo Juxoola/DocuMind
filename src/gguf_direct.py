@@ -286,9 +286,11 @@ def get_gguf_embedding_url(gguf_path: str, n_threads: int = None, is_reranker: b
         # Embedding/Reranker не генерируют текст авторегрессивно.
         # Параметры зависят от роли:
         #
-        # Embedding: -c 2048, -b 2048
-        #   Чанк обрабатывается целиком за один проход, -b 2048 гарантирует,
-        #   что тексты длиннее 32 токенов (например, для Gemma) не вызовут ошибку 500.
+        # Embedding: -c 4096, -b 2048
+        #   v_splitter в process_pdf режет vision-описания на чанки по 2048 символов.
+        #   Для русского текста 2048 chars ≈ 600-1500 токенов + prefix "Изображение PDF имя стр N: " ≈ 200-300 токенов.
+        #   С -c 2048 длинные описания (3000+ символов) превышали контекст → 500 "Context size has been exceeded"
+        #   и падение build_index. -c 4096 даёт запас с учётом prefix и Cyrillic-токенизации.
         #
         # Reranker: -c 4096, -b 2048
         #   /v1/rerank оценивает каждую пару (query + doc) НЕЗАВИСИМО.
@@ -299,7 +301,7 @@ def get_gguf_embedding_url(gguf_path: str, n_threads: int = None, is_reranker: b
         if is_reranker:
             ctx, b_size = "4096", "2048"
         else:
-            ctx, b_size = "2048", "2048"
+            ctx, b_size = "4096", "2048"
         cmd.extend(["-c", ctx, "-b", b_size, "-ub", b_size])
         
         # Квантование KV-cache: q8_0 = 50% экономии памяти против f16.
