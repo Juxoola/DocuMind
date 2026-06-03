@@ -215,6 +215,7 @@ async def upload_file(
     vision_frequency_penalty: Optional[float] = 0.0,
     vision_concurrency: Optional[int] = 1,
     vision_kv_quant: Optional[int] = 2,
+    vision_mtp_enabled: Optional[bool] = False, # Multi-Token Prediction для Vision модели
 ):
     print(f"[API] Новый запрос загрузки для блокнота {notebook_id}. Файл: {file.filename} ({current_idx}/{total_count})")
     paths = config.get_notebook_paths(notebook_id)
@@ -268,6 +269,7 @@ async def upload_file(
         "vision_frequency_penalty": vision_frequency_penalty,
         "vision_concurrency": vision_concurrency,
         "vision_kv_quant": vision_kv_quant,
+        "vision_mtp_enabled": vision_mtp_enabled,
     }
 
     def process_task():

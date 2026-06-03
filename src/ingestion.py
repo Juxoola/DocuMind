@@ -100,12 +100,14 @@ def get_vision_url(llm_settings, progress_cb=None):
         v_fa = llm_settings.get("vision_flash_attn") == "true"
         v_kv = int(llm_settings.get("vision_kv_quant") or 2)
         v_conc = int(llm_settings.get("vision_concurrency") or config.VISION_CONCURRENCY)
-        
+        v_mtp = bool(llm_settings.get("vision_mtp_enabled", False))
+
         return get_gguf_llm(
-            gguf_path=g_path, mmproj_path=m_path, 
+            gguf_path=g_path, mmproj_path=m_path,
             ctx_size=v_ctx, gpu_layers=v_gl, n_batch=v_b, flash_attn=v_fa,
             type_k=v_kv, type_v=v_kv,
             n_parallel=v_conc,
+            mtp_enabled=v_mtp,
             custom_args=["--reasoning", "off", "--reasoning-format", "none", "--reasoning-budget", "0", "--no-context-shift"]
         )
     except Exception as e:
