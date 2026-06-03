@@ -577,21 +577,33 @@ def retrieve_nodes(query: str, notebook_id: str, allowed_files=None, max_tokens=
         all_nodes.sort(key=lambda x: x.score, reverse=True)
         all_nodes = all_nodes[:config.RAG_FINAL_TOP_N]
 
-        # Пороговая фильтрация: убираем нерелевантные чанки
-        above_threshold = [n for n in all_nodes if n.score >= config.RERANK_SCORE_THRESHOLD]
-        
+        # F6: Adaptive threshold через MAD (median absolute deviation).
+        # Qwen3-Reranker выдаёт логиты в широком диапазоне, абсолютный порог 0.05
+        # плохо работает: для расплывчатых вопросов "что такое X" средний score ~0.6,
+        # для точных "формула 4.12" средний ~0.2. MAD-based порог адаптируется к
+        # распределению скоров в конкретном query.
+        import statistics as _stats
+        if len(all_nodes) >= 4:
+            score_vals = [n.score for n in all_nodes]
+            median = _stats.median(score_vals)
+            mad = _stats.median([abs(s - median) for s in score_vals]) or 0.05
+            adaptive_thr = max(0.0, median - 2.0 * mad)
+        else:
+            adaptive_thr = config.RERANK_SCORE_THRESHOLD
+
+        above_threshold = [n for n in all_nodes if n.score >= adaptive_thr]
+
         # Гарантируем минимум MIN_FINAL_CHUNKS (чтобы не терять контекст для сложных вопросов)
         min_chunks = min(config.MIN_FINAL_CHUNKS, len(all_nodes))
-        
+
         if len(above_threshold) >= min_chunks:
-            # Срезалось достаточно мусора, но осталось нужное количество
             if len(above_threshold) < len(all_nodes):
-                print(f"  [RAG] 🎯 Порог {config.RERANK_SCORE_THRESHOLD}: убрано {len(all_nodes) - len(above_threshold)} нерелевантных чанков")
+                print(f"  [RAG] 🎯 Адаптивный порог {adaptive_thr:.3f} (median-MAD): убрано {len(all_nodes) - len(above_threshold)} чанков")
             all_nodes = above_threshold
         else:
             # Оказалось слишком мало хороших чанков — добираем до минимума из лучших ниже порога
             all_nodes = all_nodes[:min_chunks]
-            print(f"  [RAG] ⚠️ Порог оставил <{min_chunks} чанков. Добавлено до {min_chunks} лучших (мин. score: {all_nodes[-1].score:.3f})")
+            print(f"  [RAG] ⚠️ Адаптивный порог {adaptive_thr:.3f} оставил <{min_chunks} чанков. Добавлено до {min_chunks} лучших (мин. score: {all_nodes[-1].score:.3f})")
 
 
         print(f"  [RAG] Итого после реранкинга: {len(all_nodes)} чанков")
