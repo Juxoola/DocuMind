@@ -211,6 +211,17 @@ def _rebuild_bm25_bg(notebook_id: str, db_path: str):
         for i, doc_id in enumerate(result['ids']):
             text = result['documents'][i]
             meta = result['metadatas'][i] or {}
+            # F1: BM25 видит координаты чанка. Только для BM25-токенизации;
+            # embedding-вектора в ChromaDB не меняются, переиндексация не нужна.
+            fname = meta.get('file_name', '')
+            page = meta.get('page', '')
+            t = meta.get('start', meta.get('time', ''))
+            coord_parts = []
+            if fname: coord_parts.append(str(fname))
+            if page not in ('', None): coord_parts.append(f"стр.{page}")
+            elif t not in ('', None): coord_parts.append(f"@{t}")
+            if coord_parts:
+                text = f"[{' '.join(coord_parts)}]: {text}"
             bm25_nodes.append(TextNode(text=text, id_=doc_id, metadata=meta))
         if bm25_nodes:
             from llama_index.retrievers.bm25 import BM25Retriever
