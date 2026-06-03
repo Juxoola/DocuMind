@@ -424,37 +424,65 @@ def process_pdf(file_path, images_dir, llm_settings=None, shared_llm_url=None, o
             nodes.extend(page_nodes)
         
         # Фильтрация: анализируем, нужно ли отправлять страницу на Vision-анализ.
-        # Мы хотим избежать отправки страниц, где из графики только рамки вокруг кода.
+        # Улучшенная версия: ловит таблицы (тонкие горизонтальные/вертикальные линии)
+        # и снижает порог для диаграмм из простых линий/блоков.
         images = page.get_images()
         drawings = page.get_drawings()
-        
+
         has_real_graphics = False
         if len(images) > 0:
+            # Встроенное raster-изображение — всегда vision
             has_real_graphics = True
         else:
-            # Проверяем векторные рисунки на признаки реальных схем/диаграмм.
-            # Мы хотим отличить схемы от декоративных рамок кода и фона текста.
+            # Векторный анализ: ищем кривые, сложные пути, и узор из тонких линий (таблицы)
             graphics_weight = 0
+            horizontal_lines = 0  # длинные тонкие горизонтальные
+            vertical_lines = 0    # длинные тонкие вертикальные
             for d in drawings:
                 items = d.get('items', [])
                 # 1. Кривые ('c', 'q') или сложные пути — это 100% графика (схемы, иллюстрации)
                 if any(i[0] in ['c', 'q'] for i in items) or len(items) > 12:
                     has_real_graphics = True
                     break
-                
-                # 2. Игнорируем белые прямоугольники (это почти всегда фон текста или кода)
+
+                rect = d.get('rect')
+
+                # 2. Игнорируем ТОЛЬКО полностью белые БОЛЬШИЕ прямоугольники (фон страницы),
+                #    а не любые белые ячейки (которые могут быть частью таблицы).
                 fill = d.get('fill')
-                is_white_rect = len(items) == 1 and items[0][0] == 're' and fill and (sum(fill) > 2.9)
-                if is_white_rect:
+                is_page_background = (
+                    len(items) == 1
+                    and items[0][0] == 're'
+                    and fill is not None
+                    and all(c >= 0.99 for c in fill)
+                    and rect is not None
+                    and (rect.x1 - rect.x0) > 200
+                    and (rect.y1 - rect.y0) > 200
+                )
+                if is_page_background:
                     continue
-                
-                # 3. Все остальное (линии, цветные блоки) считаем потенциальной графикой
+
+                # 3. Считаем тонкие линии (типичные для таблиц, рамок, схем)
+                if rect is not None:
+                    w = rect.x1 - rect.x0
+                    h = rect.y1 - rect.y0
+                    if w > 30 and h < 3:
+                        horizontal_lines += 1
+                    elif w < 3 and h > 30:
+                        vertical_lines += 1
+
+                # 4. Все остальное считаем потенциальной графикой
                 graphics_weight += 1
-            
+
             if not has_real_graphics:
-                # Порог в 25 объектов-весов позволяет игнорировать даже 5-6 рамок кода 
-                # (каждая рамка — это 4 линии), но захватит реальные чертежи или таблицы.
-                if graphics_weight > 25:
+                # A) Сниженный порог: 8 вместо 25 (таблицы/диаграммы из блоков)
+                if graphics_weight > 8:
+                    has_real_graphics = True
+                # B) Детектор таблиц: >=3 горизонтальных и >=1 вертикальная тонкая линия
+                elif horizontal_lines >= 3 and vertical_lines >= 1:
+                    has_real_graphics = True
+                # C) Запасной: много линий одного направления (длинные вертикальные/горизонтальные)
+                elif horizontal_lines + vertical_lines >= 6:
                     has_real_graphics = True
 
         if has_real_graphics:
