@@ -23,7 +23,7 @@ export default function MainApp({ notebook, onExit }) {
     totalFiles: 0,
     status: ''
   });
-	const [llmSettings, setLlmSettings] = useState(() => {
+  const [llmSettings, setLlmSettings] = useState(() => {
 		const saved = localStorage.getItem('llm_settings');
 		return saved ? JSON.parse(saved) : {
 			llm_url: 'http://localhost:1234/v1',
@@ -40,25 +40,32 @@ export default function MainApp({ notebook, onExit }) {
 			vision_ubatch_size: 256,
 		};
 	});
-  
+  const cancelRef = useRef(false);
+
+  const cancelUpload = async () => {
+    cancelRef.current = true;
+    try {
+      await fetch(`/api/upload/cancel?notebook_id=${encodeURIComponent(notebook.id)}`, { method: 'POST' });
+    } catch (e) {
+      console.error('[UPLOAD] Cancel request failed', e);
+    }
+  };
+
   const handleUpload = async (filesToUpload) => {
     const files = Array.from(filesToUpload);
     if (!files.length) return;
 
+    cancelRef.current = false;
     setUploadState(prev => ({ ...prev, isUploading: true, totalFiles: files.length, currentFile: 1, batchProgress: 0 }));
-
-    const cancelUpload = async () => {
-      try {
-        await fetch(`/api/upload/cancel?notebook_id=${encodeURIComponent(notebook.id)}`, { method: 'POST' });
-      } catch (e) {
-        console.error('[UPLOAD] Cancel request failed', e);
-      }
-    };
 
     let fileIdx = 1;
     const totalFiles = files.length;
 
     for (const file of files) {
+      if (cancelRef.current) {
+        console.log(`[UPLOAD] Cancelled before file ${fileIdx}/${totalFiles} (${file.name})`);
+        break;
+      }
       const formData = new FormData();
       formData.append('file', file);
       
