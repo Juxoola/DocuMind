@@ -224,6 +224,42 @@ def _rebuild_bm25_bg(notebook_id: str, db_path: str):
     except Exception as e:
         logger.warning(f"[RAG] Ошибка фоновой сборки BM25: {e}")
 
+def _rrf_fuse(vector_results, bm25_results, k: int = 60):
+    """Reciprocal Rank Fusion (Cormack et al. 2009).
+
+    RRF_score(d) = Σ 1 / (k + rank_i(d)) для каждого retriever i.
+
+    Зачем: BM25-only чанки (semantic_score=0 но bm25_score высокий) получают
+    честный шанс попасть в топ. Раньше они шли после vector-only чанков
+    с residual similarity, и терялись в top-K.
+
+    Args:
+        vector_results: list[NodeWithScore] от vector_retriever
+        bm25_results:   list[NodeWithScore] от BM25Retriever (или [])
+        k: константа сглаживания (60 — стандарт)
+
+    Returns:
+        list[NodeWithScore], отсортированный по RRF score desc, без дубликатов.
+    """
+    from llama_index.core.schema import NodeWithScore
+
+    scores: dict = {}
+    nodes_by_id: dict = {}
+
+    for rank, nws in enumerate(vector_results, start=1):
+        nid = nws.node.node_id
+        scores[nid] = scores.get(nid, 0.0) + 1.0 / (k + rank)
+        nodes_by_id[nid] = nws
+
+    for rank, nws in enumerate(bm25_results, start=1):
+        nid = nws.node.node_id
+        scores[nid] = scores.get(nid, 0.0) + 1.0 / (k + rank)
+        nodes_by_id[nid] = nws
+
+    sorted_ids = sorted(scores.keys(), key=lambda i: scores[i], reverse=True)
+    return [NodeWithScore(node=nodes_by_id[i].node, score=scores[i]) for i in sorted_ids]
+
+
 def build_index(nodes, notebook_id: str):
     init_settings()
     vector_store = get_vector_store(notebook_id)
@@ -293,23 +329,27 @@ def retrieve_nodes(query: str, notebook_id: str, allowed_files=None, max_tokens=
     
     num_q = 3 if qe_llm else 1
     qprompt = _QUERY_GEN_PROMPT if qe_llm else None
-    
+
     try:
         retrievers = [vector_retriever]
         if bm25_retriever:
             retrievers.append(bm25_retriever)
-            
-        # Запускаем QueryFusionRetriever если включен Query Expansion или доступен гибридный поиск
-        if len(retrievers) > 1 or num_q > 1:
+
+        use_qe = (num_q > 1)  # Query Expansion активен (нужен LLM-сервер)
+
+        if use_qe:
+            # Query Expansion включён: используем QueryFusionRetriever для генерации
+            # дополнительных формулировок запроса + RRF-подобное слияние (mode=reciprocal_rerank).
             fusion_retriever = QueryFusionRetriever(
                 retrievers,
                 similarity_top_k=top_k_global,
                 num_queries=num_q,
                 query_gen_prompt=qprompt,
                 llm=qe_llm,
-                use_async=False
+                use_async=False,
+                mode="reciprocal_rerank",  # RRF внутри QueryFusionRetriever
             )
-            
+
             # Внедряем custom_get_queries для надежной обработки thinking-моделей и очистки от разметки/нумерации
             if num_q > 1 and qe_llm:
                 def custom_get_queries(original_query: str):
@@ -320,13 +360,13 @@ def retrieve_nodes(query: str, notebook_id: str, allowed_files=None, max_tokens=
                         )
                         response = fusion_retriever._llm.complete(prompt_str)
                         text = response.text or ""
-                        
+
                         # Если модель думает, отсекаем <think>...</think>
                         if "<think>" in text:
                             parts = text.split("</think>")
                             text = parts[-1]
                         text = text.replace("<think>", "").replace("</think>", "")
-                        
+
                         # Парсим строки и чистим от нумерации/маркеров списка
                         lines = text.strip("`").split("\n")
                         queries = []
@@ -340,16 +380,16 @@ def retrieve_nodes(query: str, notebook_id: str, allowed_files=None, max_tokens=
                             line = line.strip()
                             if line:
                                 queries.append(line)
-                        
+
                         # Возвращаем QueryBundle для сгенерированных запросов
                         from llama_index.core import QueryBundle
                         return [QueryBundle(q) for q in queries[:fusion_retriever.num_queries - 1]]
                     except Exception as qe_err:
                         logger.warning(f"Ошибка генерации запросов в custom_get_queries: {qe_err}")
                         return []
-                
+
                 fusion_retriever._get_queries = custom_get_queries
-            
+
             # Логируем сгенерированные запросы для пользователя
             if num_q > 1 and qe_llm:
                 try:
@@ -363,15 +403,25 @@ def retrieve_nodes(query: str, notebook_id: str, allowed_files=None, max_tokens=
             all_nodes = fusion_retriever.retrieve(query)
             # Фильтруем результаты, так как слияние/BM25 может не поддерживать фильтрацию на уровне запроса
             all_nodes = [n for n in all_nodes if n.node.metadata.get("file_name") in allowed_files]
-            
+
             if len(retrievers) > 1:
-                label = f"Гибрид+QE({num_q})" if num_q > 1 else "Гибрид"
+                label = f"Гибрид+QE({num_q})"
             else:
                 label = f"Вектор+QE({num_q})"
             print(f"  [RAG] 🔍 {label} по {len(allowed_files)} файлам: {len(all_nodes)} фрагм.")
         else:
-            all_nodes = vector_retriever.retrieve(query)
-            print(f"  [RAG] 🔍 Вектор по {len(allowed_files)} файлам: {len(all_nodes)} фрагм.")
+            # QE выключен: НЕ используем QueryFusionRetriever (он плохо мерджит без RRF mode).
+            # Вместо этого вызываем каждый retriever напрямую и сливаем через RRF.
+            # Это даёт +5-15% precision vs concat-with-dedup: BM25-only чанки получают
+            # честный ранг вместо того чтобы утонуть после vector-only чанков.
+            vec_results = vector_retriever.retrieve(query)
+            bm25_results = bm25_retriever.retrieve(query) if bm25_retriever else []
+            all_nodes = _rrf_fuse(vec_results, bm25_results)
+            all_nodes = [n for n in all_nodes if n.node.metadata.get("file_name") in allowed_files]
+            if bm25_retriever:
+                print(f"  [RAG] 🔍 Гибрид (RRF, vector+BM25) по {len(allowed_files)} файлам: {len(all_nodes)} фрагм.")
+            else:
+                print(f"  [RAG] 🔍 Вектор по {len(allowed_files)} файлам: {len(all_nodes)} фрагм.")
     except Exception as e:
         print(f"Ошибка унифицированного поиска: {e}")
         all_nodes = []

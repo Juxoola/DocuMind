@@ -402,6 +402,60 @@ def process_audio_video(file_path, images_dir, is_video=False, progress_cb=None,
         json.dump(metadata_json, f, ensure_ascii=False, indent=2)
     return nodes
 
+def _analyze_page_for_vision(page):
+    """Чистый анализ одной страницы без побочных эффектов.
+    Возвращает (text, has_real_graphics). Потокобезопасно: fitz.Page immutable из open документа."""
+    text = page.get_text()
+    images = page.get_images()
+    drawings = page.get_drawings()
+
+    has_real_graphics = False
+    if len(images) > 0:
+        has_real_graphics = True
+    else:
+        graphics_weight = 0
+        horizontal_lines = 0
+        vertical_lines = 0
+        for d in drawings:
+            items = d.get('items', [])
+            if any(i[0] in ['c', 'q'] for i in items) or len(items) > 12:
+                has_real_graphics = True
+                break
+
+            rect = d.get('rect')
+            fill = d.get('fill')
+            is_page_background = (
+                len(items) == 1
+                and items[0][0] == 're'
+                and fill is not None
+                and all(c >= 0.99 for c in fill)
+                and rect is not None
+                and (rect.x1 - rect.x0) > 200
+                and (rect.y1 - rect.y0) > 200
+            )
+            if is_page_background:
+                continue
+
+            if rect is not None:
+                w = rect.x1 - rect.x0
+                h = rect.y1 - rect.y0
+                if w > 30 and h < 3:
+                    horizontal_lines += 1
+                elif w < 3 and h > 30:
+                    vertical_lines += 1
+            graphics_weight += 1
+
+        if not has_real_graphics:
+            if graphics_weight > 8:
+                has_real_graphics = True
+            elif horizontal_lines >= 3 and vertical_lines >= 1:
+                has_real_graphics = True
+            elif horizontal_lines + vertical_lines >= 6:
+                has_real_graphics = True
+
+    return text, has_real_graphics
+
+
 def process_pdf(file_path, images_dir, llm_settings=None, shared_llm_url=None, original_filename=None, progress_cb=None, cancel_check=None):
     def _is_cancelled():
         return bool(cancel_check and cancel_check())
@@ -412,87 +466,60 @@ def process_pdf(file_path, images_dir, llm_settings=None, shared_llm_url=None, o
     splitter = SentenceSplitter(chunk_size=1024, chunk_overlap=256)
     # Сплиттер для описаний (более крупный)
     v_splitter = SentenceSplitter(chunk_size=2048, chunk_overlap=128)
-    for page_num in range(len(doc)):
+
+    # Параллельный разбор страниц: page.get_text() + get_drawings() GIL-free (PyMuPDF native).
+    # Один ThreadPoolExecutor на весь PDF; cancel-check между батчами.
+    # n_workers ограничен min(8, cpu_count, num_pages) чтобы не плодить потоки на маленьких PDF.
+    total_pages = len(doc)
+    n_workers = min(8, (os.cpu_count() or 4), total_pages)
+    page_results = [None] * total_pages  # сохраняем порядок страниц
+
+    if n_workers <= 1:
+        # Тривиальный случай: последовательный проход
+        for page_num in range(total_pages):
+            if _is_cancelled():
+                print(f"[Ingestion] Отмена на странице {page_num+1}/{total_pages}")
+                raise IngestionCancelled(f"Cancelled at page {page_num+1}")
+            page = doc.load_page(page_num)
+            text, has_real_graphics = _analyze_page_for_vision(page)
+            page_results[page_num] = (text, has_real_graphics)
+    else:
+        with ThreadPoolExecutor(max_workers=n_workers) as ex:
+            cancel_check_every = max(1, total_pages // (n_workers * 4))
+            submitted = 0
+            future_to_pn = {}
+            for page_num in range(total_pages):
+                if submitted % cancel_check_every == 0 and _is_cancelled():
+                    print(f"[Ingestion] Отмена во время разбора страниц ({submitted}/{total_pages})")
+                    ex.shutdown(wait=False, cancel_futures=True)
+                    raise IngestionCancelled(f"Cancelled at page {submitted}")
+                page = doc.load_page(page_num)
+                future_to_pn[ex.submit(_analyze_page_for_vision, page)] = page_num
+                submitted += 1
+            for fut in as_completed(future_to_pn):
+                pn = future_to_pn[fut]
+                try:
+                    page_results[pn] = fut.result()
+                except Exception as e:
+                    logger.warning(f"Ошибка разбора страницы {pn+1}: {e}")
+                    page_results[pn] = ("", False)
+
+    # Последовательная фаза: создание нод и pixmap-ов (Pixmap НЕ потокобезопасен в PyMuPDF < 1.24)
+    for page_num in range(total_pages):
         if _is_cancelled():
-            print(f"[Ingestion] Отмена на странице {page_num+1}/{len(doc)}")
+            print(f"[Ingestion] Отмена на странице {page_num+1}/{total_pages}")
             raise IngestionCancelled(f"Cancelled at page {page_num+1}")
-        page = doc.load_page(page_num); text = page.get_text()
-        if text.strip(): 
+        text, has_real_graphics = page_results[page_num]
+        if text and text.strip():
             page_nodes = splitter.get_nodes_from_documents([
                 TextNode(text=text, metadata={"file_name":file_name, "page":page_num+1})
             ])
             nodes.extend(page_nodes)
-        
-        # Фильтрация: анализируем, нужно ли отправлять страницу на Vision-анализ.
-        # Улучшенная версия: ловит таблицы (тонкие горизонтальные/вертикальные линии)
-        # и снижает порог для диаграмм из простых линий/блоков.
-        images = page.get_images()
-        drawings = page.get_drawings()
-
-        has_real_graphics = False
-        if len(images) > 0:
-            # Встроенное raster-изображение — всегда vision
-            has_real_graphics = True
-        else:
-            # Векторный анализ: ищем кривые, сложные пути, и узор из тонких линий (таблицы)
-            graphics_weight = 0
-            horizontal_lines = 0  # длинные тонкие горизонтальные
-            vertical_lines = 0    # длинные тонкие вертикальные
-            for d in drawings:
-                items = d.get('items', [])
-                # 1. Кривые ('c', 'q') или сложные пути — это 100% графика (схемы, иллюстрации)
-                if any(i[0] in ['c', 'q'] for i in items) or len(items) > 12:
-                    has_real_graphics = True
-                    break
-
-                rect = d.get('rect')
-
-                # 2. Игнорируем ТОЛЬКО полностью белые БОЛЬШИЕ прямоугольники (фон страницы),
-                #    а не любые белые ячейки (которые могут быть частью таблицы).
-                fill = d.get('fill')
-                is_page_background = (
-                    len(items) == 1
-                    and items[0][0] == 're'
-                    and fill is not None
-                    and all(c >= 0.99 for c in fill)
-                    and rect is not None
-                    and (rect.x1 - rect.x0) > 200
-                    and (rect.y1 - rect.y0) > 200
-                )
-                if is_page_background:
-                    continue
-
-                # 3. Считаем тонкие линии (типичные для таблиц, рамок, схем)
-                if rect is not None:
-                    w = rect.x1 - rect.x0
-                    h = rect.y1 - rect.y0
-                    if w > 30 and h < 3:
-                        horizontal_lines += 1
-                    elif w < 3 and h > 30:
-                        vertical_lines += 1
-
-                # 4. Все остальное считаем потенциальной графикой
-                graphics_weight += 1
-
-            if not has_real_graphics:
-                # A) Сниженный порог: 8 вместо 25 (таблицы/диаграммы из блоков)
-                if graphics_weight > 8:
-                    has_real_graphics = True
-                # B) Детектор таблиц: >=3 горизонтальных и >=1 вертикальная тонкая линия
-                elif horizontal_lines >= 3 and vertical_lines >= 1:
-                    has_real_graphics = True
-                # C) Запасной: много линий одного направления (длинные вертикальные/горизонтальные)
-                elif horizontal_lines + vertical_lines >= 6:
-                    has_real_graphics = True
 
         if has_real_graphics:
             image_path = os.path.join(images_dir, f"p_{page_num+1}_{uuid.uuid4().hex[:6]}.png")
-            page.get_pixmap(dpi=150).save(image_path)
-            # Добавляем в очередь на обработку
+            doc.load_page(page_num).get_pixmap(dpi=150).save(image_path)
             frame_list.append({"page": page_num+1, "path": image_path})
-        else:
-            # Текстовая страница без графики
-            pass
 
     if frame_list:
         # Ленивый запуск сервера
