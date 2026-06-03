@@ -65,6 +65,12 @@ GGUF_THREADS = int(os.getenv("GGUF_THREADS", 0))
 # Контекст (токенов) - 16к это разумный баланс для 3080/4080
 GGUF_CTX_SIZE = int(os.getenv("GGUF_CTX_SIZE", 16384))
 
+# F3: Максимальный размер чанка (в символах) для embedding без split.
+# Соответствует ~1.5x GGUF_CTX эмбеддинг-сервера в символах.
+# 4096 chars ≈ 1.2-1.6K токенов для русского; -c 4096 у эмбеддинг-сервера.
+# Если описание влезает — оставляем одним чанком (лучше recall на связных описаниях).
+GGUF_CTX_EMBED_CHARS = int(os.getenv("GGUF_CTX_EMBED_CHARS", 4096))
+
 # GPU слоёв (-1 = все на GPU, 0 = только CPU)
 GGUF_GPU_LAYERS = int(os.getenv("GGUF_GPU_LAYERS", -1))
 

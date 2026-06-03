@@ -381,12 +381,21 @@ def process_audio_video(file_path, images_dir, is_video=False, progress_cb=None,
                     desc = future.result()
                     path, t = frame_list[idx]
 
-                    # Принудительно пропускаем описание через сплиттер, чтобы не превысить контекст эмбеддингов
-                    desc_nodes = splitter.get_nodes_from_documents([
-                        TextNode(text=f"Кадр {file_name} [{format_seconds(t)}]: {desc}",
-                                 metadata={"file_name":file_name, "image_path":path, "time":t})
-                    ])
-                    nodes.extend(desc_nodes)
+                    # F3: если описание влезает в контекст эмбеддингов — оставляем одним чанком.
+                    # Иначе — режем через сплиттер. Это сохраняет связность описания для
+                    # средних картинок (2-4К символов) и не фрагментирует семантику.
+                    full_text = f"Кадр {file_name} [{format_seconds(t)}]: {desc}"
+                    if len(full_text) <= config.GGUF_CTX_EMBED_CHARS:
+                        # Один цельный чанк
+                        nodes.append(TextNode(text=full_text,
+                                              metadata={"file_name":file_name, "image_path":path, "time":t}))
+                    else:
+                        # Только для очень длинных описаний — split
+                        desc_nodes = splitter.get_nodes_from_documents([
+                            TextNode(text=full_text,
+                                     metadata={"file_name":file_name, "image_path":path, "time":t})
+                        ])
+                        nodes.extend(desc_nodes)
 
                     frame_data.append({"time":t, "image_path":path, "description":desc})
                     done = idx + 1
@@ -548,14 +557,25 @@ def process_pdf(file_path, images_dir, llm_settings=None, shared_llm_url=None, o
                         done_count += 1
 
                         if desc and "Изображение без описания" not in desc:
-                            # Принудительно пропускаем описание через v_splitter (большой размер чанка)
-                            desc_nodes = v_splitter.get_nodes_from_documents([
-                                TextNode(
-                                    text=f"Изображение PDF {file_name} стр {frame_info['page']}: {desc}",
+                            # F3: если описание влезает в ctx эмбеддингов — оставляем одним чанком.
+                            # Типичное vision-описание 1.5-4К символов; раньше v_splitter резал
+                            # описание таблицы/схемы пополам, теряя связность.
+                            full_text = f"Изображение PDF {file_name} стр {frame_info['page']}: {desc}"
+                            if len(full_text) <= config.GGUF_CTX_EMBED_CHARS:
+                                # Один цельный чанк — embedding получает полную семантику
+                                nodes.append(TextNode(
+                                    text=full_text,
                                     metadata={"file_name":file_name, "image_path":frame_info["path"], "page":frame_info["page"]}
-                                )
-                            ])
-                            nodes.extend(desc_nodes)
+                                ))
+                            else:
+                                # Только очень длинные описания (>4К) — split
+                                desc_nodes = v_splitter.get_nodes_from_documents([
+                                    TextNode(
+                                        text=full_text,
+                                        metadata={"file_name":file_name, "image_path":frame_info["path"], "page":frame_info["page"]}
+                                    )
+                                ])
+                                nodes.extend(desc_nodes)
 
                             frame_data.append({
                                 "page": frame_info["page"],
