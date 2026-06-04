@@ -12,7 +12,10 @@ export default function SettingsModal({ isOpen, onClose, settings, onSave }) {
     const [ggufLoading, setGgufLoading] = useState(false);
     const [ggufLoadedModels, setGgufLoadedModels] = useState([]);
     const [expandedDirs, setExpandedDirs] = useState({});
+    // Hot-swap LLM load state (real-time from /api/llm-status/stream)
+    const [llmLoadState, setLlmLoadState] = useState({ state: 'idle', phase: null, model: null, elapsed: 0, eta: null, error: null });
     const [ggufConfig, setGgufConfig] = useState({
+        search_dirs: '',
         gguf_kv_quant: 2,
         presence_penalty: 0.0,
         frequency_penalty: 0.0,
@@ -39,6 +42,32 @@ export default function SettingsModal({ isOpen, onClose, settings, onSave }) {
             fetchRagConfig();
         }
     }, [isOpen, settings]);
+
+    // SSE-подписка на статус LLM (real-time прогресс hot-swap)
+    useEffect(() => {
+        if (!isOpen) return;
+        let es;
+        let reconnectTimer;
+        const connect = () => {
+            es = new EventSource('/api/llm-status/stream');
+            es.onmessage = (e) => {
+                try {
+                    const data = JSON.parse(e.data);
+                    setLlmLoadState(prev => ({ ...prev, ...data }));
+                } catch (err) { /* ignore */ }
+            };
+            es.onerror = () => {
+                if (es) { es.close(); es = null; }
+                // Reconnect через 2с
+                reconnectTimer = setTimeout(connect, 2000);
+            };
+        };
+        connect();
+        return () => {
+            if (es) es.close();
+            if (reconnectTimer) clearTimeout(reconnectTimer);
+        };
+    }, [isOpen]);
 
     const fetchRagConfig = async () => {
         try {
@@ -95,7 +124,7 @@ export default function SettingsModal({ isOpen, onClose, settings, onSave }) {
         }
     };
 
-    const selectModel = (modelPath, mmprojPath) => {
+    const selectModel = async (modelPath, mmprojPath) => {
         const newSettings = {
             ...localSettings,
             use_gguf: 'true',
@@ -107,6 +136,37 @@ export default function SettingsModal({ isOpen, onClose, settings, onSave }) {
         // Автосохранение при выборе модели
         onSave(newSettings);
         localStorage.setItem('llm_settings', JSON.stringify(newSettings));
+        // Hot-swap: запускаем модель в фоне через preload endpoint.
+        // Это избавляет от задержки 10-30с при первом сообщении.
+        try {
+            setLlmLoadState({ state: 'loading', model: modelPath, phase: 'starting', elapsed: 0, eta: null });
+            const res = await fetch('/api/preload-llm', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    gguf_model_path: modelPath,
+                    gguf_mmproj_path: mmprojPath || null,
+                    gguf_ctx_size: newSettings.gguf_ctx_size,
+                    gguf_gpu_layers: newSettings.gguf_gpu_layers,
+                    gguf_threads: newSettings.gguf_threads,
+                    gguf_batch_size: newSettings.gguf_batch_size,
+                    gguf_ubatch_size: newSettings.gguf_ubatch_size,
+                    gguf_flash_attn: newSettings.gguf_flash_attn,
+                    max_tokens: newSettings.max_tokens,
+                    gguf_kv_quant: newSettings.gguf_kv_quant,
+                    thinking_mode: newSettings.thinking_mode,
+                    thinking_budget: newSettings.thinking_budget,
+                    mtp_enabled: newSettings.mtp_enabled,
+                }),
+            });
+            const data = await res.json();
+            if (data.status === 'error') {
+                setLlmLoadState(prev => ({ ...prev, state: 'error', error: data.error || 'unknown' }));
+            }
+        } catch (err) {
+            console.error('preload-llm failed:', err);
+            setLlmLoadState(prev => ({ ...prev, state: 'error', error: err.message }));
+        }
     };
 
     const unloadAllModels = async () => {
@@ -296,6 +356,42 @@ export default function SettingsModal({ isOpen, onClose, settings, onSave }) {
                                                 <p className="text-[9px] text-muted-foreground mt-1">
                                                     + mmproj: {localSettings.gguf_mmproj_path.split('/').pop()}
                                                 </p>
+                                            )}
+                                            {/* Hot-swap прогресс */}
+                                            {llmLoadState.state === 'loading' && (
+                                                <div className="mt-3 p-3 rounded-xl bg-blue-500/10 border border-blue-500/20">
+                                                    <div className="flex items-center gap-2 mb-2">
+                                                        <RefreshCw className="w-3 h-3 text-blue-500 animate-spin" />
+                                                        <span className="text-[11px] font-bold text-blue-600 dark:text-blue-400">
+                                                            Загрузка модели...
+                                                        </span>
+                                                    </div>
+                                                    <p className="text-[10px] text-muted-foreground">
+                                                        Фаза: {llmLoadState.phase === 'freeing' ? 'выгрузка старой' :
+                                                               llmLoadState.phase === 'starting' ? 'подготовка' :
+                                                               llmLoadState.phase === 'loading_model' ? 'загрузка в память' :
+                                                               llmLoadState.phase || '...'}
+                                                        {llmLoadState.elapsed != null && ` · ${llmLoadState.elapsed.toFixed(0)}с`}
+                                                        {llmLoadState.eta != null && llmLoadState.eta > 0 && ` · ~${llmLoadState.eta.toFixed(0)}с осталось`}
+                                                    </p>
+                                                </div>
+                                            )}
+                                            {llmLoadState.state === 'ready' && (
+                                                <div className="mt-3 p-2 rounded-xl bg-green-500/10 border border-green-500/20">
+                                                    <span className="text-[10px] font-bold text-green-600 dark:text-green-400">
+                                                        ✅ Модель готова{llmLoadState.elapsed != null && ` (загружена за ${llmLoadState.elapsed.toFixed(0)}с)`}
+                                                    </span>
+                                                </div>
+                                            )}
+                                            {llmLoadState.state === 'error' && (
+                                                <div className="mt-3 p-2 rounded-xl bg-red-500/10 border border-red-500/20">
+                                                    <p className="text-[10px] font-bold text-red-600 dark:text-red-400">
+                                                        ❌ Ошибка загрузки
+                                                    </p>
+                                                    <p className="text-[9px] text-muted-foreground mt-1 break-all">
+                                                        {llmLoadState.error}
+                                                    </p>
+                                                </div>
                                             )}
                                             <div className="grid grid-cols-2 gap-3 mt-3">
                                                 <label className="flex flex-col gap-1 text-[10px] text-muted-foreground" title="Температура (0.0 - 2.0). Чем выше, тем более креативный ответ.">

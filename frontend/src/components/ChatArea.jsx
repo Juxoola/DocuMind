@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Send, Trash2, Sparkles, Clock, Zap, Cpu, FileText, Settings as SettingsIcon, HardDrive, Square, Image as ImageIcon, Plus, X as XIcon, ChevronRight, SlidersHorizontal } from 'lucide-react';
+import { Send, Trash2, Sparkles, Clock, Zap, Cpu, FileText, Settings as SettingsIcon, HardDrive, Square, Image as ImageIcon, Plus, X as XIcon, ChevronRight, SlidersHorizontal, RefreshCw } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
@@ -539,6 +539,28 @@ export default function ChatArea({ notebook, selectedSources, onOpenSource, llmS
 
   useEffect(scrollToBottom, [messages]);
 
+  // Подписка на статус LLM (для блокировки Send пока грузится модель)
+  const [llmStatus, setLlmStatus] = useState({ state: 'ready', phase: null, model: null, error: null });
+  useEffect(() => {
+    let es;
+    let reconnectTimer;
+    const connect = () => {
+      es = new EventSource('/api/llm-status/stream');
+      es.onmessage = (e) => {
+        try { setLlmStatus(JSON.parse(e.data)); } catch {}
+      };
+      es.onerror = () => {
+        if (es) { es.close(); es = null; }
+        reconnectTimer = setTimeout(connect, 2000);
+      };
+    };
+    connect();
+    return () => {
+      if (es) es.close();
+      if (reconnectTimer) clearTimeout(reconnectTimer);
+    };
+  }, []);
+
   const handleImageChange = (e) => {
     const file = e.target.files[0];
     if (file && file.type.startsWith('image/')) {
@@ -594,6 +616,7 @@ export default function ChatArea({ notebook, selectedSources, onOpenSource, llmS
 
   const handleSend = async () => {
     if (!input.trim() && !selectedImage || isLoading) return;
+    if (llmStatus.state === 'loading') return;  // блокируем Send пока грузится модель
     if (selectedSources.length === 0) {
       alert('Выберите хотя бы один источник в боковой панели!');
       return;
@@ -1026,6 +1049,14 @@ export default function ChatArea({ notebook, selectedSources, onOpenSource, llmS
                 title="Остановить генерацию"
               >
                 <Square size={18} className="fill-current" />
+              </button>
+            ) : llmStatus.state === 'loading' ? (
+              <button
+                disabled
+                className="p-3 bg-blue-500/50 text-white rounded-xl cursor-not-allowed"
+                title="Дождитесь загрузки модели"
+              >
+                <RefreshCw size={18} className="animate-spin" />
               </button>
             ) : (
               <button
