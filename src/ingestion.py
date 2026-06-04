@@ -701,8 +701,9 @@ def ensure_720p_video(file_path, prog_cb=None, cancel_check=None, notebook_id=No
     if not use_turbo:
         if _is_cancelled(): raise IngestionCancelled("Cancelled before 720p encode")
         if prog_cb: prog_cb(5, "Оптимизация видео (GPU)...")
-        cmd = [ffmpeg, "-y", "-hwaccel", "cuda", "-hwaccel_output_format", "cuda", "-i", file_path, "-vf", "scale_cuda=1280:720:format=yuv420p", "-c:v", "hevc_nvenc", "-preset", "p1", "-rc", "constqp", "-qp", "30", "-pix_fmt", "yuv420p", "-tag:v", "hvc1", "-c:a", "aac", "-b:a", "128k", "-movflags", "+faststart", temp_final]
-        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        # FIX: stderr в DEVNULL — раньше PIPE заполнялся за 30-60с и ffmpeg блокировался
+        cmd = [ffmpeg, "-y", "-hide_banner", "-hwaccel", "cuda", "-hwaccel_output_format", "cuda", "-i", file_path, "-vf", "scale_cuda=1280:720:format=yuv420p", "-c:v", "hevc_nvenc", "-preset", "p1", "-rc", "constqp", "-qp", "30", "-pix_fmt", "yuv420p", "-tag:v", "hvc1", "-c:a", "aac", "-b:a", "128k", "-movflags", "+faststart", temp_final]
+        proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         if notebook_id is not None: register_subprocess(notebook_id, proc)
         try:
             proc.wait()
@@ -720,10 +721,34 @@ def ensure_720p_video(file_path, prog_cb=None, cancel_check=None, notebook_id=No
         def encode_seg(idx):
             if _is_cancelled(): return None
             out_part = os.path.join(temp_dir, f"part_{idx}.mp4")
-            cmd = [ffmpeg, "-y", "-hwaccel", "cuda", "-hwaccel_output_format", "cuda", "-ss", str(idx * seg_len), "-t", str(seg_len), "-i", file_path, "-vf", "scale_cuda=1280:720:format=yuv420p", "-c:v", "hevc_nvenc", "-preset", "p1", "-rc", "constqp", "-qp", "30", "-an", out_part]
-            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            # FIX: stderr в DEVNULL (раньше PIPE заполнялся → ffmpeg блокировался →
+            # все 4 параллельных сегмента зависали одновременно через 30-60с).
+            # stdout с -progress pipe:1 → читаем построчно → real-time progress в UI.
+            cmd = [ffmpeg, "-y", "-hide_banner", "-hwaccel", "cuda", "-hwaccel_output_format", "cuda",
+                   "-ss", str(idx * seg_len), "-t", str(seg_len), "-i", file_path,
+                   "-vf", "scale_cuda=1280:720:format=yuv420p",
+                   "-c:v", "hevc_nvenc", "-preset", "p1", "-rc", "constqp", "-qp", "30",
+                   "-progress", "pipe:1", "-an", out_part]
+            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                                    text=True, bufsize=1)
             if notebook_id is not None: register_subprocess(notebook_id, proc)
             try:
+                last_pct = -1
+                for line in proc.stdout:
+                    if _is_cancelled():
+                        proc.kill(); return None
+                    line = line.strip()
+                    if line.startswith("out_time_ms="):
+                        try:
+                            time_ms = int(line.split("=", 1)[1])
+                            pct = min(99, int(time_ms / 10000 / seg_len))
+                            if pct > last_pct and pct % 10 == 0:
+                                last_pct = pct
+                                if prog_cb:
+                                    overall = 5 + ((idx + pct / 100.0) / num_workers) * 3
+                                    prog_cb(overall, f"Сегмент {idx+1}/{num_workers}: {pct}%")
+                        except (ValueError, ZeroDivisionError):
+                            pass
                 proc.wait()
             finally:
                 if notebook_id is not None: unregister_subprocess(notebook_id, proc)
@@ -732,16 +757,18 @@ def ensure_720p_video(file_path, prog_cb=None, cancel_check=None, notebook_id=No
             parts = []
             for p in ex.map(encode_seg, range(num_workers)):
                 if _is_cancelled():
-                    print(f"[Ingestion] Отмена во время турбо-кодирования видео (получено {len(parts)}/{num_workers} сегментов)")
+                    _safe_print(f"[Ingestion] Отмена во время турбо-кодирования видео (получено {len(parts)}/{num_workers} сегментов)")
                     ex.shutdown(wait=False, cancel_futures=True)
                     raise IngestionCancelled("Cancelled during turbo encode")
                 parts.append(p)
         if _is_cancelled(): raise IngestionCancelled("Cancelled after turbo encode")
+        if prog_cb: prog_cb(8, "Сборка сегментов...")
         list_path = os.path.join(temp_dir, "list.txt")
         with open(list_path, "w") as f:
             for p in parts: f.write(f"file '{os.path.abspath(p)}'\n")
-        merge_cmd = [ffmpeg, "-y", "-f", "concat", "-safe", "0", "-i", list_path, "-i", file_path, "-map", "0:v", "-map", "1:a?", "-c", "copy", "-movflags", "+faststart", temp_final]
-        merge_proc = subprocess.Popen(merge_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        # FIX: merge тоже с DEVNULL для stderr
+        merge_cmd = [ffmpeg, "-y", "-hide_banner", "-f", "concat", "-safe", "0", "-i", list_path, "-i", file_path, "-map", "0:v", "-map", "1:a?", "-c", "copy", "-movflags", "+faststart", temp_final]
+        merge_proc = subprocess.Popen(merge_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         if notebook_id is not None: register_subprocess(notebook_id, merge_proc)
         try:
             merge_proc.wait()
