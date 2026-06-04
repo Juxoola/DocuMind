@@ -246,6 +246,7 @@ def process_audio_video(file_path, images_dir, is_video=False, progress_cb=None,
         return bool(cancel_check and cancel_check())
 
     file_name = os.path.basename(file_path)
+    _safe_print(f"[process_audio_video] Начало: {file_name}, is_video={is_video}")
     def prog(pct, msg):
         try: print(f"  [{pct}%] {msg}")
         except Exception: pass
@@ -650,6 +651,18 @@ def process_docx(file_path, images_dir, llm_settings=None, shared_llm_url=None, 
         nodes.append(TextNode(text="\n".join([p.text for p in docx.Document(file_path).paragraphs]), metadata={"file_name":file_name}))
     return nodes
 
+def _safe_print(msg):
+    """Print с защитой от cp1251 PowerShell (emoji/non-ASCII)."""
+    try:
+        print(msg)
+    except UnicodeEncodeError:
+        try:
+            sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+            print(msg)
+        except Exception:
+            print(msg.encode('ascii', errors='replace').decode('ascii'))
+
+
 def ensure_720p_video(file_path, prog_cb=None, cancel_check=None, notebook_id=None):
     ext = os.path.splitext(file_path)[1].lower()
     if ext not in ['.mp4', '.avi', '.mkv', '.mov']: return file_path
@@ -658,19 +671,34 @@ def ensure_720p_video(file_path, prog_cb=None, cancel_check=None, notebook_id=No
     def _is_cancelled():
         return bool(cancel_check and cancel_check())
     def get_duration(path):
+        # FIX: добавлен таймаут 30с и явный flush. Раньше `ffmpeg -i path` без таймаута
+        # мог зависнуть на минуты для .mkv с нестандартными контейнерами.
+        # 30с — за глаза для парсинга заголовка; если не успел — возвращаем 0
+        # (caller корректно обрабатывает fallback).
         try:
-            cmd = [ffmpeg, "-i", path]
-            # Захватываем вывод как байты, чтобы избежать ошибок декодирования в фоновых потоках на Windows
-            res = subprocess.run(cmd, capture_output=True)
+            cmd = [ffmpeg, "-hide_banner", "-i", path]
+            res = subprocess.run(cmd, capture_output=True, timeout=30)
             stderr = res.stderr.decode('utf-8', errors='ignore')
             for line in stderr.split("\n"):
                 if "Duration" in line:
                     time_str = line.split("Duration: ")[1].split(",")[0]
                     h, m, s = time_str.split(":"); return float(h)*3600 + float(m)*60 + float(s)
+        except subprocess.TimeoutExpired:
+            _safe_print(f"[ensure_720p_video] WARNING get_duration timeout для {os.path.basename(path)} (30с)")
         except Exception: pass
         return 0
+    _safe_print(f"[ensure_720p_video] Начало: {os.path.basename(file_path)}")
     duration = get_duration(file_path); temp_final = file_path + ".720p.mp4"
-    if duration < 120:
+    _safe_print(f"[ensure_720p_video] Длительность: {duration:.1f}с ({format_seconds(duration)})")
+    # FIX: если get_duration упал (вернул 0) — идём в TURBO-режим (быстрее для длинных),
+    # а не в single-encode (который медленнее для 1+ч видео). Раньше duration=0
+    # попадал в ветку duration<120 → single encode → 30-60 мин вместо 5-10 мин.
+    if duration == 0:
+        _safe_print(f"[ensure_720p_video] WARNING Длительность неизвестна -> турбо-режим по умолчанию")
+        use_turbo = True
+    else:
+        use_turbo = duration >= 120
+    if not use_turbo:
         if _is_cancelled(): raise IngestionCancelled("Cancelled before 720p encode")
         if prog_cb: prog_cb(5, "Оптимизация видео (GPU)...")
         cmd = [ffmpeg, "-y", "-hwaccel", "cuda", "-hwaccel_output_format", "cuda", "-i", file_path, "-vf", "scale_cuda=1280:720:format=yuv420p", "-c:v", "hevc_nvenc", "-preset", "p1", "-rc", "constqp", "-qp", "30", "-pix_fmt", "yuv420p", "-tag:v", "hvc1", "-c:a", "aac", "-b:a", "128k", "-movflags", "+faststart", temp_final]
