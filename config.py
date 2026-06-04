@@ -48,6 +48,10 @@ RAG_QUERY_EXPANSION = os.getenv("RAG_QUERY_EXPANSION", "true").lower() == "true"
 RERANK_SCORE_THRESHOLD = float(os.getenv("RERANK_SCORE_THRESHOLD", "0.05"))
 # Гарантированный минимум чанков даже если они ниже порога
 MIN_FINAL_CHUNKS = int(os.getenv("MIN_FINAL_CHUNKS", "5"))
+# Top-K relevance ratio: после F6 adaptive threshold дополнительно отрезаем
+# чанки с score < top_score * RAG_TOP_K_RATIO. 0.0 = отключено.
+# Пример: top=0.99, ratio=0.1 → отрезаем всё с score <0.099 (типичный мусор).
+RAG_TOP_K_RATIO = float(os.getenv("RAG_TOP_K_RATIO", "0.1"))
 
 # ── Настройки локальных GGUF моделей ──
 

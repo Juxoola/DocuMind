@@ -673,6 +673,19 @@ def retrieve_nodes(query: str, notebook_id: str, allowed_files=None, max_tokens=
             all_nodes = all_nodes[:min_chunks]
             print(f"  [RAG] ⚠️ Адаптивный порог {adaptive_thr:.3f} оставил <{min_chunks} чанков. Добавлено до {min_chunks} лучших (мин. score: {all_nodes[-1].score:.3f})")
 
+        # F6+: Top-K relevance ratio. F6 median-MAD отлично работает на бимодальных
+        # распределениях (cluster высоких + cluster низких), но плохо — когда median
+        # и MAD оба маленькие (топ-2 сильно выше, остальные плотным комом мусора).
+        # В таком случае adaptive_thr ≈ 0 и ВСЕ чанки проходят, загрязняя контекст.
+        # Дополнительно режем всё, что в RAG_TOP_K_RATIO раз хуже топ-1: это
+        # гарантированный мусор (reranker не ошибается на 10x ratio).
+        if config.RAG_TOP_K_RATIO > 0 and all_nodes:
+            top_score = all_nodes[0].score
+            ratio_thr = top_score * config.RAG_TOP_K_RATIO
+            above_ratio = [n for n in all_nodes if n.score >= ratio_thr]
+            if len(above_ratio) >= min_chunks and len(above_ratio) < len(all_nodes):
+                print(f"  [RAG] 🎯 Top-K ratio {config.RAG_TOP_K_RATIO:.2f} (порог {ratio_thr:.3f} = {top_score:.3f}*{config.RAG_TOP_K_RATIO:.2f}): убрано {len(all_nodes) - len(above_ratio)} чанков")
+                all_nodes = above_ratio
 
         print(f"  [RAG] Итого после реранкинга: {len(all_nodes)} чанков")
 

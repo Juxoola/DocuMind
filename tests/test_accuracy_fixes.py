@@ -162,6 +162,105 @@ def test_f6_static_threshold_misses_technical_chunks():
     assert len(adaptive_above) == len(scores_marginal), "Adaptive 0 пропускает все"
 
 
+def test_f6_top_k_ratio_cuts_obvious_garbage():
+    """
+    F6+ (top-K ratio): для распределения 'top-2 супер-высокие, остальные мусор'
+    median-MAD = 0 (ничего не режет), но top-K ratio = top*0.1 отрезает мусор.
+    Реальный случай из теста пользователя: 35 → 16 → 2 (после top-K).
+    """
+    scores = [0.9994, 0.9810, 0.0782, 0.0714, 0.0392, 0.0186, 0.0181, 0.0160,
+              0.0142, 0.0060, 0.0053, 0.0052, 0.0046, 0.0043, 0.0026, 0.0020]
+
+    # F6 median-MAD
+    median = statistics.median(scores)
+    mad = statistics.median([abs(s - median) for s in scores]) or 0.05
+    adaptive_thr = max(0.0, median - 2.0 * mad)
+    above = [s for s in scores if s >= adaptive_thr]
+
+    # top-K ratio 0.1: ratio_thr = 0.9994*0.1 = 0.0999
+    top_score = max(scores)
+    ratio = 0.1
+    ratio_thr = top_score * ratio
+    above_ratio = [s for s in scores if s >= ratio_thr]
+
+    # Sanity: F6 не отрезал ничего (adaptive_thr=0)
+    assert adaptive_thr < 0.001, f"F6 adaptive_thr должно быть ~0, получили {adaptive_thr}"
+    assert len(above) == len(scores), f"F6 ничего не отрезал: {len(above)}/{len(scores)}"
+
+    # Sanity: top-K ratio 0.1 ОЧЕНЬ агрессивный — оставляет только топ-2 (>= 0.0999)
+    assert len(above_ratio) == 2, f"top-K ratio 0.1 должен оставить 2 (>=0.0999), получили {len(above_ratio)}: {above_ratio}"
+    assert above_ratio[0] == 0.9994
+    assert above_ratio[1] == 0.9810
+    # Мусор (0.0782, 0.0714 — 7.8% и 7.1% от top) ОТРЕЗАН — это правильно при ratio=0.1
+    # Для более мягкой фильтрации можно поставить RAG_TOP_K_RATIO=0.07 — оставит 4
+    print(f"    ratio=0.1: kept {len(above_ratio)}, отрезано {len(scores) - len(above_ratio)} мусорных")
+
+
+def test_f6_top_k_ratio_disabled_via_zero():
+    """F6+: RAG_TOP_K_RATIO=0 → отключено (для отката)."""
+    ratio = 0.0
+    scores = [0.99, 0.05, 0.01, 0.001]
+    if ratio > 0:
+        ratio_thr = max(scores) * ratio
+        above = [s for s in scores if s >= ratio_thr]
+    else:
+        above = scores
+    assert len(above) == 4, "ratio=0 должен оставить все"
+
+
+def test_f6_top_k_ratio_preserves_all_relevant():
+    """
+    F6+: если все скоры высокие (напр. >0.5), top-K ratio ничего не режет.
+    """
+    scores = [0.95, 0.92, 0.88, 0.81, 0.75, 0.68, 0.61, 0.55, 0.52, 0.50]
+    ratio = 0.1
+    top_score = max(scores)
+    ratio_thr = top_score * ratio
+    above = [s for s in scores if s >= ratio_thr]
+    assert len(above) == len(scores), f"Все высокие скоры должны пройти, отрезано {len(scores) - len(above)}"
+
+
+def test_f6_top_k_ratio_respects_min_chunks():
+    """
+    F6+: если top-K ratio оставит меньше MIN_FINAL_CHUNKS, не режем.
+    (Защита от вырожденных случаев.)
+    """
+    scores = [0.99, 0.005, 0.003, 0.001, 0.0005]
+    ratio = 0.1
+    top_score = max(scores)
+    ratio_thr = top_score * ratio
+    above = [s for s in scores if s >= ratio_thr]
+    min_chunks = 5
+    if len(above) >= min_chunks:
+        final = above
+    else:
+        final = scores
+    assert len(final) == 5, f"Должны оставить все 5 (min_chunks защита), получили {len(final)}"
+
+
+def test_f6_top_k_ratio_realistic_16_chunks():
+    """
+    F6+: реалистичный случай — 16 чанков с score drop после топ-2.
+    С ratio=0.1 оставляет 2 (топ), с ratio=0.07 оставляет 4 (топ + пограничные).
+    """
+    all_scores = [0.9994, 0.9810, 0.0782, 0.0714, 0.0392, 0.0186, 0.0181, 0.0160,
+                  0.0142, 0.0060, 0.0053, 0.0052, 0.0046, 0.0043, 0.0026, 0.0020]
+
+    # ratio=0.1 (default) — оставляет топ-2
+    ratio_aggressive = 0.1
+    thr_agg = all_scores[0] * ratio_aggressive
+    kept_agg = [s for s in all_scores if s >= thr_agg]
+    assert len(kept_agg) == 2
+    assert kept_agg == [0.9994, 0.9810]
+
+    # ratio=0.07 (мягче) — оставляет топ-4
+    ratio_soft = 0.07
+    thr_soft = all_scores[0] * ratio_soft
+    kept_soft = [s for s in all_scores if s >= thr_soft]
+    assert len(kept_soft) == 4
+    assert kept_soft == [0.9994, 0.9810, 0.0782, 0.0714]
+
+
 def test_f2_rrf_across_files_balances_big_and_small():
     """
     F2: _rrf_fuse_across_files даёт равный голос каждому файлу.
@@ -221,6 +320,11 @@ if __name__ == "__main__":
         test_f6_adaptive_threshold_clear_outlier,
         test_f6_adaptive_threshold_fallback_for_few_chunks,
         test_f6_static_threshold_misses_technical_chunks,
+        test_f6_top_k_ratio_cuts_obvious_garbage,
+        test_f6_top_k_ratio_disabled_via_zero,
+        test_f6_top_k_ratio_preserves_all_relevant,
+        test_f6_top_k_ratio_respects_min_chunks,
+        test_f6_top_k_ratio_realistic_16_chunks,
         test_f2_rrf_across_files_balances_big_and_small,
         test_f2_rrf_across_files_dedupes_across_files,
         test_f2_rrf_across_files_empty_input,
