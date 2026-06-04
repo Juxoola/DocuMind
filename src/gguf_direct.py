@@ -21,6 +21,20 @@ _server_configs: Dict[str, Dict] = {}
 _server_roles: Dict[str, str] = {} # gguf_path -> role
 _lock = threading.Lock()
 
+# Состояние последней загрузки LLM (для UI: idle/loading/ready/error)
+# Используется при hot-swap модели через /api/preload-llm.
+_llm_load_state: Dict = {
+    "state": "idle",       # idle | loading | ready | error
+    "model": None,         # path текущей/загружаемой модели
+    "port": None,          # порт (когда ready)
+    "task_id": None,       # уникальный ID фоновой задачи
+    "started_at": None,    # time.time() начала загрузки
+    "ready_at": None,      # time.time() готовности
+    "last_load_seconds": None,  # последнее время загрузки (сек) для ETA
+    "error": None,         # текст ошибки
+    "phase": None,         # freeing | starting | loading_model | probing | ready
+}
+
 # Windows Job Object для гарантированного удаления дочерних процессов при выходе
 _win32_job = None
 if os.name == 'nt':
@@ -71,82 +85,25 @@ def is_server_ready(port: int) -> bool:
     except Exception:
         return False
 
-def get_gguf_llm(
+def _start_llm_server_sync(
     gguf_path: str,
-    mmproj_path: str = None,
-    temperature: float = 0.1,
-    ctx_size: int = None,
-    gpu_layers: int = -1,
-    n_threads: int = None,
-    n_batch: int = 512,
-    flash_attn: bool = True,
-    max_tokens: int = 4096,
-    type_k: int = 2,
-    type_v: int = 2,
-    enable_thinking: bool = True,
-    thinking_budget: int = 1024,
-    n_parallel: int = 1,
-    custom_args: Optional[List[str]] = None,
-    mtp_enabled: bool = False,
-    n_ubatch: int = 256,
+    mmproj_path: str,
+    current_config: Dict,
 ) -> str:
     """
-    Запускает llama-server.exe для указанной модели.
-    Возвращает URL сервера (например, http://127.0.0.1:49152).
+    Внутренняя функция: реально запускает llama-server и ждёт готовности.
+    Блокирует вызывающий поток на 10-60 секунд.
+    Возвращает URL при успехе, бросает исключение при ошибке.
     """
-    # Нормализуем путь к модели (для Windows регистр не важен)
-    gguf_path = os.path.normpath(config.resolve_model_path(gguf_path)).lower()
-    if mmproj_path:
-        mmproj_path = os.path.normpath(config.resolve_model_path(mmproj_path)).lower()
-    
-    # Собираем текущий конфиг запроса для сравнения
-    # Нормализуем значения (None -> default), чтобы избежать ложных перезапусков
-    current_config = {
-        "mmproj": mmproj_path or None,
-        "ctx_size": int(ctx_size or config.GGUF_CTX_SIZE),
-        "gpu_layers": int(gpu_layers if gpu_layers is not None else -1),
-        "n_batch": int(n_batch or 512),
-        "flash_attn": bool(flash_attn),
-        "max_tokens": int(max_tokens or 4096),
-        "type_k": int(type_k or 2),
-        "type_v": int(type_v or 2),
-        "enable_thinking": bool(enable_thinking),
-        "thinking_budget": int(thinking_budget if thinking_budget is not None else 1024),
-        "n_parallel": int(n_parallel or 1),
-        "custom_args": custom_args if custom_args is not None else [],
-        "mtp_enabled": bool(mtp_enabled),
-        "n_ubatch": int(n_ubatch or 256),
-    }
-
-    with _lock:
-        if gguf_path in _server_processes:
-            # Если процесс жив И конфиг совпадает — возвращаем URL
-            if _server_processes[gguf_path].poll() is None and _server_configs.get(gguf_path) == current_config:
-                return f"http://127.0.0.1:{_server_ports[gguf_path]}"
-            else:
-                print(f"[GGUF Server] Настройки изменились или сервер упал. Перезапуск {os.path.basename(gguf_path)}...")
-                # Мы не удаляем его из _server_processes здесь, 
-                # чтобы unload_all_models() ниже гарантированно его прибил.
-
-        # Выгружаем другие LLM модели ПЕРЕД запуском новой (экономия VRAM)
-        # НО: делаем это только если мы РЕАЛЬНО запускаем новый сервер
-        from src.rag_pipeline import unload_rag_models
-        unload_rag_models(hard=False)
-        unload_all_models(role="llm") # Сбрасываем только другие LLM
-
-        if not os.path.exists(gguf_path):
-            raise FileNotFoundError(f"GGUF модель не найдена: {gguf_path}")
-
-        # Подбираем свободный порт
-        import socket
-        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        s.bind(('', 0))
-        port = s.getsockname()[1]
-        s.close()
+    import socket
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    s.bind(('', 0))
+    port = s.getsockname()[1]
+    s.close()
 
     # Для параллельной работы нужно расширить общий контекст, чтобы каждому слоту хватило места
     total_ctx = current_config["ctx_size"] * current_config["n_parallel"]
-    
+
     # Маппинг типов квантования для llama-server
     CACHE_TYPE_MAP = {
         0: "f16",
@@ -154,7 +111,6 @@ def get_gguf_llm(
         2: "q4_0", # q4_k часто мапится на q4_0 в простых версиях
         8: "q8_0"
     }
-    # Пытаемся получить строковое значение, если пришло число
     type_k_str = CACHE_TYPE_MAP.get(current_config["type_k"], "f16")
     type_v_str = CACHE_TYPE_MAP.get(current_config["type_v"], "f16")
 
@@ -177,41 +133,34 @@ def get_gguf_llm(
     if current_config["mtp_enabled"]:
         cmd.extend(["--spec-type", "draft-mtp", "--spec-draft-n-max", "2"])
 
-    # Если рассуждения отключены — добавляем соответствующие флаги сервера
     if not current_config["enable_thinking"]:
         cmd.extend([
-            "--reasoning", "off", 
-            "--reasoning-format", "none", 
+            "--reasoning", "off",
+            "--reasoning-format", "none",
             "--reasoning-budget", "0"
         ])
     else:
-        # Если включены — явно указываем это и задаем бюджет
         cmd.extend([
             "--reasoning", "on",
             "--reasoning-budget", str(current_config["thinking_budget"])
         ])
-    
+
     if current_config["flash_attn"]:
-        # Добавляем только если его нет в custom_args
         if not any("-fa" in str(arg) or "--flash-attn" in str(arg) for arg in (current_config["custom_args"] or [])):
             cmd.extend(["--flash-attn", "on"])
-    
-    if n_threads and n_threads > 0:
-        cmd.extend(["-t", str(n_threads)])
-    
+
+    if current_config.get("_n_threads") and current_config["_n_threads"] > 0:
+        cmd.extend(["-t", str(current_config["_n_threads"])])
+
     if current_config["mmproj"] and os.path.exists(current_config["mmproj"]):
         cmd.extend(["--mmproj", os.path.normpath(current_config["mmproj"])])
         print(f"[GGUF Server] С поддержкой Vision: {os.path.basename(current_config['mmproj'])}")
 
     if current_config["custom_args"]:
-        # Добавляем кастомные аргументы в конец
         cmd.extend(current_config["custom_args"])
 
     print(f"[GGUF Server] Запуск: {os.path.basename(gguf_path)} на порту {port}...")
-    
-    # Запускаем процесс. На Windows используем CREATE_NO_WINDOW.
-    # ВАЖНО: Мы перенаправляем вывод в DEVNULL, чтобы избежать переполнения буфера PIPE, 
-    # которое вызывает зависание процесса llama-server на Windows.
+
     creationflags = 0x08000000 # CREATE_NO_WINDOW
     process = subprocess.Popen(
         cmd,
@@ -220,26 +169,247 @@ def get_gguf_llm(
         creationflags=creationflags
     )
     _assign_to_job(process)
-    
-    # Ждем готовности сервера (до 60 секунд)
+
     start_wait = time.time()
     while time.time() - start_wait < 60:
         if is_server_ready(port):
             print(f"[GGUF Server] Готов!")
-            _server_processes[gguf_path] = process
-            _server_ports[gguf_path] = port
-            _server_configs[gguf_path] = current_config
-            _server_roles[gguf_path] = "llm"
+            with _lock:
+                _server_processes[gguf_path] = process
+                _server_ports[gguf_path] = port
+                _server_configs[gguf_path] = current_config
+                _server_roles[gguf_path] = "llm"
             return f"http://127.0.0.1:{port}"
-        
+
         if process.poll() is not None:
-            stdout, stderr = process.communicate()
-            raise RuntimeError(f"Сервер упал при запуске:\n{stderr}")
-            
+            try:
+                _, stderr = process.communicate(timeout=1)
+            except Exception:
+                stderr = b""
+            raise RuntimeError(f"Сервер упал при запуске: {stderr.decode('utf-8', errors='ignore')[:500]}")
+
         time.sleep(0.5)
-    
+
     process.terminate()
+    try: process.wait(timeout=3)
+    except Exception: process.kill()
     raise TimeoutError("Сервер не ответил за 60 секунд")
+
+
+def get_gguf_llm(
+    gguf_path: str,
+    mmproj_path: str = None,
+    temperature: float = 0.1,
+    ctx_size: int = None,
+    gpu_layers: int = -1,
+    n_threads: int = None,
+    n_batch: int = 512,
+    flash_attn: bool = True,
+    max_tokens: int = 4096,
+    type_k: int = 2,
+    type_v: int = 2,
+    enable_thinking: bool = True,
+    thinking_budget: int = 1024,
+    n_parallel: int = 1,
+    custom_args: Optional[List[str]] = None,
+    mtp_enabled: bool = False,
+    n_ubatch: int = 256,
+) -> str:
+    """
+    Запускает llama-server.exe для указанной модели (синхронно, блокирует).
+    Возвращает URL сервера (например, http://127.0.0.1:49152).
+    Для асинхронной загрузки с UI-прогрессом используй preload_gguf_llm().
+    """
+    # Нормализуем путь к модели
+    gguf_path = os.path.normpath(config.resolve_model_path(gguf_path)).lower()
+    if mmproj_path:
+        mmproj_path = os.path.normpath(config.resolve_model_path(mmproj_path)).lower()
+
+    current_config = {
+        "mmproj": mmproj_path or None,
+        "ctx_size": int(ctx_size or config.GGUF_CTX_SIZE),
+        "gpu_layers": int(gpu_layers if gpu_layers is not None else -1),
+        "n_batch": int(n_batch or 512),
+        "flash_attn": bool(flash_attn),
+        "max_tokens": int(max_tokens or 4096),
+        "type_k": int(type_k or 2),
+        "type_v": int(type_v or 2),
+        "enable_thinking": bool(enable_thinking),
+        "thinking_budget": int(thinking_budget if thinking_budget is not None else 1024),
+        "n_parallel": int(n_parallel or 1),
+        "custom_args": custom_args if custom_args is not None else [],
+        "mtp_enabled": bool(mtp_enabled),
+        "n_ubatch": int(n_ubatch or 256),
+        "_n_threads": n_threads,
+    }
+
+    with _lock:
+        if gguf_path in _server_processes:
+            if _server_processes[gguf_path].poll() is None and _server_configs.get(gguf_path) == current_config:
+                # Уже готов с тем же конфигом
+                _llm_load_state.update({"state": "ready", "model": gguf_path, "port": _server_ports[gguf_path], "error": None})
+                return f"http://127.0.0.1:{_server_ports[gguf_path]}"
+            else:
+                print(f"[GGUF Server] Настройки изменились или сервер упал. Перезапуск {os.path.basename(gguf_path)}...")
+
+        # Помечаем состояние "loading" (если вызывающий не через preload)
+        _llm_load_state.update({
+            "state": "loading", "model": gguf_path, "port": None,
+            "task_id": None, "started_at": time.time(), "ready_at": None,
+            "error": None, "phase": "starting"
+        })
+        unload_rag_models_safe()
+        unload_all_models(role="llm")
+
+        if not os.path.exists(gguf_path):
+            _llm_load_state.update({"state": "error", "error": f"Model not found: {gguf_path}"})
+            raise FileNotFoundError(f"GGUF модель не найдена: {gguf_path}")
+
+    # Запускаем вне _lock
+    try:
+        url = _start_llm_server_sync(gguf_path, mmproj_path, current_config)
+        elapsed = time.time() - (_llm_load_state.get("started_at") or time.time())
+        with _lock:
+            _llm_load_state.update({
+                "state": "ready", "port": _server_ports.get(gguf_path),
+                "ready_at": time.time(), "last_load_seconds": elapsed,
+                "phase": "ready", "error": None
+            })
+        return url
+    except Exception as e:
+        with _lock:
+            _llm_load_state.update({"state": "error", "error": str(e)[:300], "phase": None})
+        raise
+
+
+def unload_rag_models_safe():
+    """Best-effort unload of RAG models to free VRAM before LLM start."""
+    try:
+        from src.rag_pipeline import unload_rag_models
+        unload_rag_models(hard=False)
+    except Exception:
+        pass
+
+
+def preload_gguf_llm(
+    gguf_path: str,
+    mmproj_path: str = None,
+    ctx_size: int = None,
+    gpu_layers: int = -1,
+    n_threads: int = None,
+    n_batch: int = 512,
+    flash_attn: bool = True,
+    max_tokens: int = 4096,
+    type_k: int = 2,
+    type_v: int = 2,
+    enable_thinking: bool = True,
+    thinking_budget: int = 1024,
+    n_parallel: int = 1,
+    custom_args: Optional[List[str]] = None,
+    mtp_enabled: bool = False,
+    n_ubatch: int = 256,
+) -> Dict:
+    """
+    Асинхронно запускает llama-server в фоне. Возвращает сразу.
+    UI следит за прогрессом через get_llm_status() / stream_llm_status().
+    """
+    import uuid
+    gguf_path = os.path.normpath(config.resolve_model_path(gguf_path)).lower()
+    if mmproj_path:
+        mmproj_path = os.path.normpath(config.resolve_model_path(mmproj_path)).lower()
+
+    current_config = {
+        "mmproj": mmproj_path or None,
+        "ctx_size": int(ctx_size or config.GGUF_CTX_SIZE),
+        "gpu_layers": int(gpu_layers if gpu_layers is not None else -1),
+        "n_batch": int(n_batch or 512),
+        "flash_attn": bool(flash_attn),
+        "max_tokens": int(max_tokens or 4096),
+        "type_k": int(type_k or 2),
+        "type_v": int(type_v or 2),
+        "enable_thinking": bool(enable_thinking),
+        "thinking_budget": int(thinking_budget if thinking_budget is not None else 1024),
+        "n_parallel": int(n_parallel or 1),
+        "custom_args": custom_args if custom_args is not None else [],
+        "mtp_enabled": bool(mtp_enabled),
+        "n_ubatch": int(n_ubatch or 256),
+        "_n_threads": n_threads,
+    }
+
+    task_id = str(uuid.uuid4())[:8]
+
+    # Если уже загружена с тем же конфигом — мгновенный ready
+    with _lock:
+        if gguf_path in _server_processes:
+            if _server_processes[gguf_path].poll() is None and _server_configs.get(gguf_path) == current_config:
+                _llm_load_state.update({
+                    "state": "ready", "model": gguf_path,
+                    "port": _server_ports[gguf_path], "task_id": task_id,
+                    "started_at": time.time(), "ready_at": time.time(),
+                    "phase": "ready", "error": None
+                })
+                return {"status": "ready", "port": _server_ports[gguf_path], "task_id": task_id}
+
+    # Помечаем loading и запускаем фоновый поток
+    _llm_load_state.update({
+        "state": "loading", "model": gguf_path, "port": None,
+        "task_id": task_id, "started_at": time.time(),
+        "ready_at": None, "error": None, "phase": "freeing"
+    })
+
+    def _worker():
+        try:
+            _llm_load_state["phase"] = "starting"
+            unload_rag_models_safe()
+            unload_all_models(role="llm")
+            if not os.path.exists(gguf_path):
+                raise FileNotFoundError(f"GGUF модель не найдена: {gguf_path}")
+            _llm_load_state["phase"] = "loading_model"
+            url = _start_llm_server_sync(gguf_path, mmproj_path, current_config)
+            elapsed = time.time() - _llm_load_state["started_at"]
+            _llm_load_state.update({
+                "state": "ready",
+                "port": _server_ports.get(gguf_path),
+                "ready_at": time.time(),
+                "last_load_seconds": elapsed,
+                "phase": "ready",
+                "error": None
+            })
+            print(f"[preload] OK: loaded in {elapsed:.1f}s")
+        except Exception as e:
+            _llm_load_state.update({
+                "state": "error", "error": str(e)[:300], "phase": None
+            })
+            print(f"[preload] ERROR: {e}")
+
+    thread = threading.Thread(target=_worker, daemon=True, name=f"preload-llm-{task_id}")
+    thread.start()
+    return {"status": "loading", "task_id": task_id, "model": os.path.basename(gguf_path)}
+
+
+def get_llm_status() -> Dict:
+    """Возвращает текущее состояние LLM для UI."""
+    with _lock:
+        state = _llm_load_state.copy()
+    # Дополняем elapsed/eta
+    if state.get("started_at") and state.get("state") == "loading":
+        elapsed = time.time() - state["started_at"]
+        state["elapsed"] = round(elapsed, 1)
+        last = state.get("last_load_seconds")
+        if last:
+            state["eta"] = round(max(0, last - elapsed), 1)
+        else:
+            # ETA по типичной скорости: ~1с на 100MB
+            try:
+                size_mb = os.path.getsize(state["model"]) / (1024*1024) if state.get("model") else 0
+                state["eta"] = round(max(5, size_mb / 100), 1)
+            except Exception:
+                state["eta"] = None
+    elif state.get("state") == "ready":
+        state["elapsed"] = round((state.get("ready_at") or time.time()) - (state.get("started_at") or time.time()), 1)
+        state["eta"] = 0
+    return state
+
 
 def get_gguf_embedding_url(gguf_path: str, n_threads: int = None, is_reranker: bool = False) -> str:
     """Запускает llama-server для эмбеддингов или реранкера и возвращает URL."""

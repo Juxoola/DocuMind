@@ -24,7 +24,7 @@ from src.ingestion import ingest_file
 from src.rag_pipeline import build_index, retrieve_nodes, build_file_context, make_prompt, make_messages, close_all_clients, preload_all_models
 from src.gguf_manager import scan_gguf_dirs
 from src.gguf_direct import (
-    get_gguf_llm, unload_all_models, get_loaded_models,
+    get_gguf_llm, preload_gguf_llm, get_llm_status, unload_all_models, get_loaded_models,
     detect_model_family, stream_gguf_chat, kill_stray_servers, count_running_servers
 )
 from src.rag_pipeline import unload_rag_models # Импортируем для очистки
@@ -533,6 +533,87 @@ async def api_gguf_kill_all():
     kill_stray_servers()
     unload_all_models() # Очищаем внутренний стейт тоже
     return {"status": "ok", "msg": "Все процессы llama-server завершены"}
+
+
+class PreloadLlmRequest(BaseModel):
+    gguf_model_path: str
+    gguf_mmproj_path: Optional[str] = None
+    gguf_ctx_size: Optional[int] = None
+    gguf_gpu_layers: Optional[int] = None
+    gguf_threads: Optional[int] = None
+    gguf_batch_size: Optional[int] = None
+    gguf_ubatch_size: Optional[int] = None
+    gguf_flash_attn: Optional[str] = "true"
+    max_tokens: Optional[int] = None
+    gguf_kv_quant: Optional[int] = 2
+    thinking_mode: Optional[bool] = True
+    thinking_budget: Optional[int] = 1024
+    mtp_enabled: Optional[bool] = False
+
+
+@app.post("/api/preload-llm")
+async def api_preload_llm(request: PreloadLlmRequest):
+    """
+    Hot-swap LLM модели: запускает в фоне, возвращает сразу.
+    UI следит за прогрессом через /api/llm-status/stream.
+    """
+    try:
+        result = await asyncio.to_thread(
+            preload_gguf_llm,
+            gguf_path=request.gguf_model_path,
+            mmproj_path=request.gguf_mmproj_path or None,
+            ctx_size=request.gguf_ctx_size,
+            gpu_layers=request.gguf_gpu_layers,
+            n_threads=request.gguf_threads,
+            n_batch=request.gguf_batch_size,
+            flash_attn=(request.gguf_flash_attn == "true"),
+            max_tokens=request.max_tokens,
+            type_k=request.gguf_kv_quant,
+            type_v=request.gguf_kv_quant,
+            enable_thinking=request.thinking_mode,
+            thinking_budget=request.thinking_budget,
+            mtp_enabled=request.mtp_enabled,
+            n_ubatch=request.gguf_ubatch_size,
+        )
+        return result
+    except FileNotFoundError as e:
+        return {"status": "error", "error": str(e)}
+    except Exception as e:
+        return {"status": "error", "error": str(e)[:300]}
+
+
+@app.get("/api/llm-status")
+async def api_llm_status():
+    """Возвращает текущее состояние LLM (idle/loading/ready/error) + прогресс."""
+    return get_llm_status()
+
+
+@app.get("/api/llm-status/stream")
+async def api_llm_status_stream():
+    """SSE поток обновлений статуса LLM (отправляет только при изменениях)."""
+    from fastapi.responses import StreamingResponse
+    import json as _json
+
+    async def event_gen():
+        last_key = None
+        try:
+            while True:
+                st = get_llm_status()
+                # Ключ — это то, что влияет на UI
+                key = (st.get("state"), st.get("phase"), st.get("port"), st.get("error"))
+                if key != last_key:
+                    payload = _json.dumps(st, ensure_ascii=False)
+                    yield f"data: {payload}\n\n"
+                    last_key = key
+                    # Если достигли терминального состояния — закрываем поток
+                    if st.get("state") in ("ready", "error") and not (st.get("state") == "ready" and st.get("phase") == "loading"):
+                        # При ready продолжаем слать, чтобы при следующей загрузке фронт получил сигнал
+                        pass
+                await asyncio.sleep(0.5)
+        except asyncio.CancelledError:
+            pass
+
+    return StreamingResponse(event_gen(), media_type="text/event-stream")
 
 @app.get("/api/gguf-config")
 async def api_get_gguf_config():
