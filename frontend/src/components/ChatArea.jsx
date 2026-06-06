@@ -1440,49 +1440,6 @@ export default function ChatArea({ notebook, selectedSources, onOpenSource, llmS
         }}
       />
 
-      {/* Глобальный портал для тултипов */}
-      <AnimatePresence>
-        {hoveredSource && (
-          <motion.div
-            initial={{ opacity: 0, y: 10, scale: 0.95 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, scale: 0.95 }}
-            onMouseEnter={() => clearTimeout(tooltipTimeoutRef.current)}
-            onMouseLeave={() => setHoveredSource(null)}
-            className="fixed w-80 p-4 bg-card/98 border border-border/80 shadow-[0_20px_50px_rgba(0,0,0,0.5)] rounded-2xl z-[9999] pointer-events-auto backdrop-blur-2xl text-left"
-            style={{
-              left: Math.max(20, Math.min(window.innerWidth - 340, tooltipCoords.x - 160)),
-              bottom: window.innerHeight - tooltipCoords.y + 12
-            }}
-          >
-            <div className="flex items-center gap-3 mb-3 pb-2 border-b border-border/40">
-              <div className="p-1.5 bg-primary/15 rounded-xl text-primary shadow-inner">
-                <FileText size={14} />
-              </div>
-              <div className="flex flex-col min-w-0">
-                <span className="text-[11px] font-bold truncate text-primary uppercase tracking-wider">{hoveredSource.file_name}</span>
-                <div className="flex gap-2 mt-0.5">
-                  {hoveredSource.page && <span className="text-[9px] text-muted-foreground font-medium">Стр {hoveredSource.page}</span>}
-                  {hoveredSource.time !== undefined && <span className="text-[9px] text-muted-foreground font-medium">• {Math.floor(hoveredSource.time / 60)}:{(hoveredSource.time % 60).toString().padStart(2, '0')}</span>}
-                </div>
-              </div>
-            </div>
-            <div className="max-h-60 overflow-y-auto pr-2 custom-scrollbar">
-              <p className="text-[12px] leading-relaxed text-foreground/90 italic font-medium whitespace-pre-wrap">
-                "{hoveredSource.text.replace(/^Source \d+:\s*/im, '')}"
-              </p>
-            </div>
-            <div className="mt-3 pt-2 border-t border-border/40 flex justify-between items-center">
-              <span className="text-[9px] font-medium text-muted-foreground uppercase tracking-wider">Нажмите для перехода</span>
-            </div>
-            <div
-              className="absolute top-full border-[8px] border-transparent border-t-card/98"
-              style={{ left: Math.max(15, Math.min(305, tooltipCoords.x - (Math.max(20, Math.min(window.innerWidth - 340, tooltipCoords.x - 160))) - 8)) }}
-            />
-          </motion.div>
-        )}
-      </AnimatePresence>
-
       {/* Глобальный портал для тултипов — единый компонент, общий с модалом закладки */}
       <CitationTooltipPortal
         hoveredSource={hoveredSource && tooltipCoords.x ? { src: hoveredSource, ...tooltipCoords } : null}
