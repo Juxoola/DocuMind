@@ -25,6 +25,7 @@ import {
   Eye,
   Pencil,
   ExternalLink,
+  Check,
 } from 'lucide-react';
 
 /** Возвращает иконку и цвет по расширению файла */
@@ -70,6 +71,7 @@ function getFileIcon(filename) {
 import { cn } from '../lib/utils';
 import axios from 'axios';
 import { LlmMarkdown } from '../lib/markdownRender';
+import { extractCleanContent, copyAsRichText } from '../lib/copyToClipboard';
 
 export default function Sidebar({ 
   notebook, 
@@ -162,6 +164,9 @@ export default function Sidebar({
   const [bmLoading, setBmLoading] = useState(false);
   const [viewingBm, setViewingBm] = useState(null);
   const [editingBm, setEditingBm] = useState(null); // {id, title, tags}
+  const bmAnswerRef = React.useRef(null);
+  const [bmCopied, setBmCopied] = useState(false);
+  const bmCopyTimeoutRef = React.useRef(null);
 
   const fetchBookmarks = async () => {
     setBmLoading(true);
@@ -242,9 +247,15 @@ export default function Sidebar({
   };
 
   const copyText = async (text) => {
-    try {
-      await navigator.clipboard.writeText(text);
-    } catch (e) { /* noop */ }
+    const root = bmAnswerRef.current;
+    const extracted = extractCleanContent(root) || { html: '', text: text || '' };
+    if (!extracted.html && !extracted.text) return;
+    const ok = await copyAsRichText(extracted);
+    if (ok) {
+      setBmCopied(true);
+      clearTimeout(bmCopyTimeoutRef.current);
+      bmCopyTimeoutRef.current = setTimeout(() => setBmCopied(false), 1500);
+    }
   };
 
   // Список уникальных тегов
@@ -733,18 +744,20 @@ export default function Sidebar({
                 </div>
                 <div>
                   <div className="text-[10px] font-black uppercase tracking-widest text-muted-foreground mb-1.5">Ответ</div>
-                  <LlmMarkdown
-                    text={viewingBm.answer}
-                    sources={viewingBm.sources || []}
-                    onCite={(n, src) => {
-                      // Открываем файл справа, модал закладки НЕ закрываем — он
-                      // не мешает просмотрщику, а пользователю удобно вернуться.
-                      // Передаём полный объект, чтобы page/time доехали до DocumentViewer.
-                      if (src && onOpenFile) {
-                        onOpenFile(src);
-                      }
-                    }}
-                  />
+                  <div ref={bmAnswerRef}>
+                    <LlmMarkdown
+                      text={viewingBm.answer}
+                      sources={viewingBm.sources || []}
+                      onCite={(n, src) => {
+                        // Открываем файл справа, модал закладки НЕ закрываем — он
+                        // не мешает просмотрщику, а пользователю удобно вернуться.
+                        // Передаём полный объект, чтобы page/time доехали до DocumentViewer.
+                        if (src && onOpenFile) {
+                          onOpenFile(src);
+                        }
+                      }}
+                    />
+                  </div>
                 </div>
                 {viewingBm.sources && viewingBm.sources.length > 0 && (
                   <div>
@@ -800,10 +813,15 @@ export default function Sidebar({
                 </button>
                 <button
                   onClick={() => copyText(viewingBm.answer)}
-                  className="flex items-center justify-center gap-2 px-3 py-2 hover:bg-muted text-muted-foreground hover:text-foreground rounded-xl text-xs font-black transition-all"
+                  className={cn(
+                    "flex items-center justify-center gap-2 px-3 py-2 rounded-xl text-xs font-black transition-all",
+                    bmCopied
+                      ? "bg-emerald-500/10 text-emerald-400"
+                      : "hover:bg-muted text-muted-foreground hover:text-foreground"
+                  )}
                   title="Скопировать ответ"
                 >
-                  <Copy size={13} />
+                  {bmCopied ? <Check size={13} /> : <Copy size={13} />}
                 </button>
                 <button
                   onClick={() => {
