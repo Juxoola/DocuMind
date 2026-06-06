@@ -229,26 +229,35 @@ load_rag_config()
 def resolve_model_path(path_or_filename: str) -> str:
     """
     Если путь абсолютный и существует — возвращает его.
-    Иначе ищет файл во всех директориях из GGUF_SEARCH_DIRS.
+    Иначе ищет файл через gguf_manager.find_gguf_by_name (mtime-keyed cache),
+    и только в крайнем случае делает свежий os.walk.
     """
     if not path_or_filename:
         return ""
-    
+
     # Если это уже существующий абсолютный путь
     if os.path.isabs(path_or_filename) and os.path.exists(path_or_filename):
         return os.path.normpath(path_or_filename).lower()
-    
-    # Иначе ищем в GGUF_SEARCH_DIRS
+
+    # Быстрый путь: кешированный scan через gguf_manager
+    try:
+        from src.gguf_manager import find_gguf_by_name
+        hit = find_gguf_by_name(path_or_filename)
+        if hit:
+            print(f"[CONFIG] Модель найдена: {hit}")
+            return os.path.normpath(hit).lower()
+    except Exception as e:
+        logger.debug(f"[CONFIG] gguf_manager.find_gguf_by_name failed: {e}")
+
+    # Fallback (на случай если gguf_manager не импортируется): свежий os.walk
     search_dirs = [d.strip() for d in GGUF_SEARCH_DIRS.split(";") if d.strip()]
     filename = os.path.basename(path_or_filename)
-    
+
     for base_dir in search_dirs:
-        # Рекурсивный поиск файла
-        for dirpath, dirnames, filenames in os.walk(base_dir):
+        for dirpath, _dirnames, filenames in os.walk(base_dir):
             if filename in filenames:
                 full_path = os.path.join(dirpath, filename)
-                print(f"[CONFIG] Модель найдена: {full_path}")
+                print(f"[CONFIG] Модель найдена (fallback walk): {full_path}")
                 return os.path.normpath(full_path).lower()
-    
-    # Если не нашли — возвращаем как есть (может упасть позже, но это честно)
+
     return path_or_filename

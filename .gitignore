@@ -2,6 +2,7 @@ notebooks/
 models/
 scratch/
 *.json
+_gguf_scan_cache.json
 *.mp4
 temp/
 __pycache__/

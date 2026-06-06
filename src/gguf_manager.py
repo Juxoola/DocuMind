@@ -9,6 +9,7 @@ import time
 import requests
 import json
 import socket
+import threading
 from typing import Optional, List, Dict
 import config
 
@@ -17,11 +18,28 @@ _server_process: Optional[subprocess.Popen] = None
 _server_info: Dict = {}
 SERVER_EXE = os.path.join(config.BASE_DIR, "bin", "llama-server.exe")
 
-def scan_gguf_dirs() -> List[Dict]:
-    """Сканирует директории на наличие GGUF и mmproj файлов."""
+# ── Persistent scan cache (mtime-keyed) ─────────────────────────────────
+# os.walk по F:\llm с тысячами файлов на каждый resolve_model_path = секунды задержки.
+# Кеш валидируется по mtime корневой директории + TTL 5 мин (на случай file-add в subdir).
+_GGUF_CACHE_FILE = os.path.join(config.BASE_DIR, "_gguf_scan_cache.json")
+_GGUF_CACHE_TTL_SEC = 300.0
+_gguf_cache_lock = threading.Lock()
+
+
+def _dir_mtime(root: str) -> float:
+    """mtime директории + бонус за file-count (любое добавление/удаление меняет count)."""
+    try:
+        st = os.stat(root)
+        return st.st_mtime
+    except OSError:
+        return 0.0
+
+
+def _scan_gguf_dirs_uncached() -> List[Dict]:
+    """Полный os.walk без кеша. Дорогая операция — вызывать редко."""
     results = []
     search_dirs = [d.strip() for d in config.GGUF_SEARCH_DIRS.split(";") if d.strip()]
-    
+
     for base_dir in search_dirs:
         if not os.path.exists(base_dir): continue
         for dirpath, dirnames, filenames in os.walk(base_dir):
@@ -37,6 +55,80 @@ def scan_gguf_dirs() -> List[Dict]:
                     "mmproj_files": mmproj_files,
                 })
     return results
+
+
+def scan_gguf_dirs() -> List[Dict]:
+    """Сканирует директории на наличие GGUF и mmproj файлов.
+    Использует persistent mtime-keyed cache — повторные вызовы при неизменных
+    директориях практически бесплатны."""
+    with _gguf_cache_lock:
+        # Пробуем достать кеш
+        cached = None
+        try:
+            if os.path.exists(_GGUF_CACHE_FILE):
+                with open(_GGUF_CACHE_FILE, "r", encoding="utf-8") as f:
+                    cached = json.load(f)
+        except Exception:
+            cached = None
+
+        # Валидация: проверяем mtime + TTL
+        if cached:
+            try:
+                saved_at = float(cached.get("saved_at", 0))
+                age = time.time() - saved_at
+                cached_mtimes = cached.get("dir_mtimes", {}) or {}
+                roots = [d.strip() for d in config.GGUF_SEARCH_DIRS.split(";") if d.strip()]
+                roots_valid = all(
+                    cached_mtimes.get(r) == _dir_mtime(r) for r in roots
+                ) and len(cached_mtimes) == len(roots)
+                if age < _GGUF_CACHE_TTL_SEC and roots_valid:
+                    return cached.get("results", [])
+            except Exception:
+                pass
+
+        # Cold path: полный os.walk + persist
+        results = _scan_gguf_dirs_uncached()
+        try:
+            roots = [d.strip() for d in config.GGUF_SEARCH_DIRS.split(";") if d.strip()]
+            payload = {
+                "saved_at": time.time(),
+                "dir_mtimes": {r: _dir_mtime(r) for r in roots},
+                "results": results,
+            }
+            tmp = _GGUF_CACHE_FILE + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(payload, f, ensure_ascii=False)
+            os.replace(tmp, _GGUF_CACHE_FILE)
+        except Exception as e:
+            print(f"[GGUF Manager] WARN: не удалось сохранить scan cache: {e}")
+        return results
+
+
+def invalidate_scan_cache():
+    """Сбросить кеш (например, после добавления новой GGUF в поисковую директорию)."""
+    with _gguf_cache_lock:
+        try:
+            if os.path.exists(_GGUF_CACHE_FILE):
+                os.remove(_GGUF_CACHE_FILE)
+        except Exception:
+            pass
+
+
+def find_gguf_by_name(filename: str) -> Optional[str]:
+    """Быстрый поиск файла по имени в GGUF_SEARCH_DIRS. Использует scan cache.
+    Возвращает полный путь или None.
+
+    Отличие от config.resolve_model_path: не делает fresh os.walk, всегда читает
+    кешированный scan. config.resolve_model_path вызывает нас как fallback.
+    """
+    if not filename:
+        return None
+    name = os.path.basename(filename)
+    for entry in scan_gguf_dirs():
+        for f in (entry.get("gguf_files") or []) + (entry.get("mmproj_files") or []):
+            if f == name:
+                return os.path.join(entry["dir"], name)
+    return None
 
 def get_server_status() -> Dict:
     """Проверяет статус запущенного сервера."""
