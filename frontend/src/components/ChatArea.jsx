@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Send, Trash2, Sparkles, Clock, Zap, Cpu, FileText, Settings as SettingsIcon, HardDrive, Square, Image as ImageIcon, Plus, X as XIcon, ChevronRight, SlidersHorizontal, RefreshCw, Bookmark, BookmarkCheck, Tag as TagIcon, RotateCcw, Eye, Pencil } from 'lucide-react';
+import { Send, Trash2, Sparkles, Clock, Zap, Cpu, FileText, Settings as SettingsIcon, HardDrive, Square, Image as ImageIcon, Plus, X as XIcon, ChevronRight, SlidersHorizontal, RefreshCw, Bookmark, BookmarkCheck, Tag as TagIcon, RotateCcw, Eye, Pencil, Copy, Check } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
@@ -277,6 +277,83 @@ const MessageItem = React.memo(({
   const bmBtnRef = React.useRef(null);
   const bmPopoverRef = React.useRef(null);
   const [bmCoords, setBmCoords] = React.useState({ top: 0, left: 0 });
+  const [copied, setCopied] = React.useState(false);
+  const copyTimeoutRef = React.useRef(null);
+  const bubbleRef = React.useRef(null);
+
+  const buildWordHtml = (bodyHtml, plainText) => {
+    const escapedText = (plainText || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    return `<!DOCTYPE html><html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word"><head><meta charset="utf-8"><title>Exported</title><style>
+body{font-family:Calibri,Arial,sans-serif;font-size:11pt;color:#000;line-height:1.5;margin:24pt;}
+h1,h2,h3,h4,h5,h6{font-weight:bold;margin:14pt 0 8pt;line-height:1.25;}
+h1{font-size:18pt;}h2{font-size:15pt;}h3{font-size:13pt;}h4{font-size:12pt;}
+p{margin:0 0 8pt;}
+ul,ol{margin:0 0 8pt;padding-left:24pt;}li{margin-bottom:3pt;}
+strong{font-weight:bold;}em{font-style:italic;}
+code{font-family:Consolas,monospace;font-size:10pt;background:#f4f4f4;padding:1pt 3pt;border-radius:2pt;}
+pre{font-family:Consolas,monospace;font-size:10pt;background:#f4f4f4;padding:8pt;border-radius:4pt;margin:0 0 8pt;white-space:pre-wrap;}
+blockquote{border-left:3pt solid #bbb;margin:0 0 8pt;padding:0 0 0 10pt;color:#444;}
+a{color:#0563C1;text-decoration:underline;}
+hr{border:0;border-top:1pt solid #ccc;margin:12pt 0;}
+table{border-collapse:collapse;margin:0 0 8pt;}th,td{border:1pt solid #999;padding:4pt 8pt;}
+</style></head><body>${bodyHtml}</body></html>`;
+  };
+
+  const extractContent = () => {
+    const bubble = bubbleRef.current;
+    if (!bubble) return null;
+    const prose = bubble.querySelector('.prose');
+    if (!prose) return null;
+    const clone = prose.cloneNode(true);
+    clone.querySelectorAll('[data-copy-skip="1"]').forEach(el => {
+      const prev = el.previousSibling;
+      if (prev && prev.nodeType === Node.TEXT_NODE) {
+        const t = prev.textContent;
+        if (/^[ \t]*[,;:.][ \t]*$/.test(t)) {
+          prev.textContent = '';
+        } else {
+          prev.textContent = t.replace(/[ \t]+$/, '');
+        }
+      }
+      el.remove();
+    });
+    return {
+      html: clone.innerHTML,
+      text: (clone.textContent || '').replace(/\u00a0/g, ' ').trim(),
+    };
+  };
+
+  const handleCopy = async () => {
+    const extracted = extractContent();
+    if (!extracted || (!extracted.html && !extracted.text)) return;
+    try {
+      if (navigator.clipboard?.write && typeof ClipboardItem !== 'undefined') {
+        const htmlBlob = new Blob([buildWordHtml(extracted.html, extracted.text)], { type: 'text/html' });
+        const textBlob = new Blob([extracted.text], { type: 'text/plain' });
+        await navigator.clipboard.write([
+          new ClipboardItem({ 'text/html': htmlBlob, 'text/plain': textBlob }),
+        ]);
+      } else if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(extracted.text);
+      } else {
+        const ta = document.createElement('textarea');
+        ta.value = extracted.text;
+        ta.style.position = 'fixed';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+      }
+      setCopied(true);
+      clearTimeout(copyTimeoutRef.current);
+      copyTimeoutRef.current = setTimeout(() => setCopied(false), 1500);
+    } catch (e) {
+      console.error('Copy failed:', e);
+    }
+  };
+
+  React.useEffect(() => () => clearTimeout(copyTimeoutRef.current), []);
 
   const openBmPopover = () => {
     setBmTitle(''); // По умолчанию пусто — на карточке возьмётся question
@@ -445,7 +522,7 @@ const MessageItem = React.memo(({
                 if (href?.startsWith('#cite:')) {
                   const num = href.split(':')[1];
                   return (
-                    <span className="inline-block ml-1 no-underline">
+                    <span data-copy-skip="1" className="inline-block ml-1 no-underline">
                       <Citation
                         n={parseInt(num)}
                         sources={msg.sources}
@@ -473,7 +550,7 @@ const MessageItem = React.memo(({
                 return !inline && match ? (
                   <div className="relative group my-4 rounded-xl overflow-hidden bg-[#0d1117] border border-white/5">
                     {/* Тонкий индикатор языка и кнопка COPY в одной строке, встроенные в блок */}
-                    <div className="flex items-center justify-between px-4 py-2 opacity-40 group-hover:opacity-100 transition-opacity">
+                    <div data-copy-skip="1" className="flex items-center justify-between px-4 py-2 opacity-40 group-hover:opacity-100 transition-opacity">
                       <span className="text-[9px] font-bold text-white/50 uppercase tracking-[0.2em]">{lang}</span>
                       <button
                         onClick={() => navigator.clipboard.writeText(String(children).replace(/\n$/, ''))}
@@ -506,7 +583,7 @@ const MessageItem = React.memo(({
           </ReactMarkdown>
 
           {msg.sources && msg.sources.length > 0 && (
-            <div className="mt-4 flex flex-wrap gap-2 pt-4 border-t border-border/20">
+            <div data-copy-skip="1" className="mt-4 flex flex-wrap gap-2 pt-4 border-t border-border/20">
               {msg.sources.map((src, idx) => (
                 <button
                   key={idx}
@@ -537,7 +614,7 @@ const MessageItem = React.memo(({
 
           {/* Кнопка «Сохранить в закладки» (только для AI и только когда стрим завершён) */}
           {msg.role === 'ai' && !msg.loading && msg.content && notebook && (
-            <div className="mt-3 pt-2 border-t border-border/20 flex items-center gap-2">
+            <div data-copy-skip="1" className="mt-3 pt-2 border-t border-border/20 flex items-center gap-2">
               {msg._savedAt ? (
                 <span className="flex items-center gap-1.5 text-[10px] font-bold text-amber-400/80">
                   <BookmarkCheck size={12} />
@@ -558,6 +635,35 @@ const MessageItem = React.memo(({
                   {new Date(msg._savedAt).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}
                 </span>
               )}
+              <button
+                onClick={handleCopy}
+                title="Скопировать ответ"
+                className={cn(
+                  "ml-auto flex items-center gap-1.5 text-[10px] font-bold transition-colors",
+                  copied ? "text-emerald-400" : "text-muted-foreground hover:text-foreground"
+                )}
+              >
+                {copied ? <Check size={12} /> : <Copy size={12} />}
+                {copied ? "Скопировано" : "Копировать"}
+              </button>
+            </div>
+          )}
+
+          {/* Кнопка «Копировать» для сообщений пользователя — снаружи prose,
+              чтобы не ломать типографику текстового блока */}
+          {msg.role === 'user' && !msg.loading && msg.content && (
+            <div data-copy-skip="1" className="pt-2 flex items-center gap-2">
+              <button
+                onClick={handleCopy}
+                title="Скопировать сообщение"
+                className={cn(
+                  "ml-auto flex items-center gap-1.5 text-[10px] font-bold transition-colors",
+                  copied ? "text-emerald-400" : "text-muted-foreground hover:text-foreground"
+                )}
+              >
+                {copied ? <Check size={12} /> : <Copy size={12} />}
+                {copied ? "Скопировано" : "Копировать"}
+              </button>
             </div>
           )}
         </div>
@@ -574,7 +680,7 @@ const MessageItem = React.memo(({
         msg.role === 'user' ? "justify-end" : "justify-start"
       )}
     >
-      <div className={cn(
+      <div ref={bubbleRef} className={cn(
         "max-w-[85%] group relative min-w-0",
         msg.role === 'user' ? "chat-bubble-user" : "chat-bubble-ai"
       )} style={{ zIndex: messagesLength - index }}>

@@ -20,7 +20,7 @@ export function CitationButton({ n, src, onClick, onHover, onLeave }) {
   const btnRef = useRef(null);
 
   if (!src) {
-    return <span className="text-muted-foreground opacity-50 whitespace-nowrap">[{n}]</span>;
+    return <span data-copy-skip="1" className="text-muted-foreground opacity-50 whitespace-nowrap">[{n}]</span>;
   }
 
   const handleMouseEnter = () => {
@@ -31,7 +31,7 @@ export function CitationButton({ n, src, onClick, onHover, onLeave }) {
   };
 
   return (
-    <span className="relative inline-flex items-center align-baseline">
+    <span data-copy-skip="1" className="relative inline-flex items-center align-baseline">
       <button
         ref={btnRef}
         type="button"
