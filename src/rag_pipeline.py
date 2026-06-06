@@ -19,6 +19,12 @@ logger = logging.getLogger(__name__)
 
 _client_cache = {}
 _model_cache = {}
+# F-fix #6: init_lock предотвращает гонку при конкурентной загрузке моделей.
+# Без лока два потока (build_index + retrieve_nodes) могут независимо увидеть
+# "embed_model" отсутствует, создать 2 экземпляра HuggingFaceEmbedding (~1.3GB каждый)
+# → OOM. Lock удерживается только на init-фазу; повторные вызовы — no-op (cache hit).
+_init_lock = threading.Lock()
+
 
 def unload_rag_models(hard=True):
     """Выгрузка моделей RAG. Если hard=False, модели остаются в памяти (только очистка кэша)."""
@@ -26,11 +32,14 @@ def unload_rag_models(hard=True):
     if not _model_cache:
         return
 
-    if hard:
-        print("[RAG] Выгрузка всех моделей (Embedding, Reranker)...")
-        _model_cache.clear()
-    else:
-        print("[RAG] Мягкая очистка (Эмбеддинги и Реранкер остаются в памяти)...")
+    # F-fix #6: под локом, чтобы clear() не сломал параллельный init_settings
+    # (который между cache-miss и _model_cache[k] = ... мог бы увидеть clear() и получить полу-инициализированный кеш).
+    with _init_lock:
+        if hard:
+            print("[RAG] Выгрузка всех моделей (Embedding, Reranker)...")
+            _model_cache.clear()
+        else:
+            print("[RAG] Мягкая очистка (Эмбеддинги и Реранкер остаются в памяти)...")
 
     import gc
     gc.collect()
@@ -67,60 +76,63 @@ def preload_all_models():
 def init_settings(max_tokens=1024):
     global _model_cache
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    
-    if "embed_model" not in _model_cache:
-        model_name = config.EMBEDDING_MODEL_NAME
 
-        if model_name.lower().endswith('.gguf') or os.path.isabs(model_name) and os.path.exists(model_name):
-            print(f"Инициализация GGUF эмбеддингов: {model_name}")
-            from src.gguf_direct import get_gguf_embedding_url
-            from llama_index.embeddings.openai import OpenAIEmbedding
+    # F-fix #6: lock на init-фазу. После инициализации cache hit не требует лока.
+    # Settings.llm пересоздаётся на каждом вызове — это идемпотентно, не под локом.
+    with _init_lock:
+        if "embed_model" not in _model_cache:
+            model_name = config.EMBEDDING_MODEL_NAME
 
-            model_path = config.resolve_model_path(model_name)
-            # n_parallel пробрасывается в init_settings через init_lock-guarded вызов,
-            # чтобы embed_batch_size == --parallel на embedding-сервере.
-            url = get_gguf_embedding_url(model_path)
-            try:
-                from src.gguf_direct import get_active_embedding_parallel
-                n_parallel = get_active_embedding_parallel(model_path)
-            except Exception:
-                n_parallel = 1
-            print(f"[RAG] GGUF embedding server --parallel={n_parallel} → embed_batch_size={n_parallel}")
+            if model_name.lower().endswith('.gguf') or os.path.isabs(model_name) and os.path.exists(model_name):
+                print(f"Инициализация GGUF эмбеддингов: {model_name}")
+                from src.gguf_direct import get_gguf_embedding_url
+                from llama_index.embeddings.openai import OpenAIEmbedding
 
-            _model_cache["embed_model"] = OpenAIEmbedding(
-                api_base=f"{url}/v1",
-                api_key="sk-local",
-                model="text-embedding-ada-002",
-                timeout=120.0,
-                # Сервер запущен с -c 4096 (= максимальный размер 1 чанка).
-                # Каждый документ обрабатывается независимо, батч не складывает токены.
-                # embed_batch_size = n_parallel embedding-сервера: больше слотов — больше параллелизма.
-                embed_batch_size=n_parallel,
-                # Инструкция для Qwen3-Embedding, чтобы он понимал задачу поиска
-                query_header="Instruct: Given a web search query, retrieve relevant passages that answer the query\nQuery: "
-            )
-        else:
-            print(f"Инициализация эмбеддингов (PyTorch): {device.upper()} (Quant: {config.QUANTIZATION})")
-            model_kwargs = {"trust_remote_code": True}
-            model_kwargs["attn_implementation"] = "sdpa"
-            
-            if config.QUANTIZATION == "4bit":
-                model_kwargs["quantization_config"] = BitsAndBytesConfig(
-                    load_in_4bit=True, 
-                    bnb_4bit_compute_dtype=torch.bfloat16,
-                    bnb_4bit_quant_type="nf4"
+                model_path = config.resolve_model_path(model_name)
+                # n_parallel пробрасывается в init_settings через init_lock-guarded вызов,
+                # чтобы embed_batch_size == --parallel на embedding-сервере.
+                url = get_gguf_embedding_url(model_path)
+                try:
+                    from src.gguf_direct import get_active_embedding_parallel
+                    n_parallel = get_active_embedding_parallel(model_path)
+                except Exception:
+                    n_parallel = 1
+                print(f"[RAG] GGUF embedding server --parallel={n_parallel} → embed_batch_size={n_parallel}")
+
+                _model_cache["embed_model"] = OpenAIEmbedding(
+                    api_base=f"{url}/v1",
+                    api_key="sk-local",
+                    model="text-embedding-ada-002",
+                    timeout=120.0,
+                    # Сервер запущен с -c 4096 (= максимальный размер 1 чанка).
+                    # Каждый документ обрабатывается независимо, батч не складывает токены.
+                    # embed_batch_size = n_parallel embedding-сервера: больше слотов — больше параллелизма.
+                    embed_batch_size=n_parallel,
+                    # Инструкция для Qwen3-Embedding, чтобы он понимал задачу поиска
+                    query_header="Instruct: Given a web search query, retrieve relevant passages that answer the query\nQuery: "
                 )
-            elif config.QUANTIZATION == "int8":
-                model_kwargs["quantization_config"] = BitsAndBytesConfig(load_in_8bit=True)
             else:
-                model_kwargs["torch_dtype"] = torch.bfloat16
+                print(f"Инициализация эмбеддингов (PyTorch): {device.upper()} (Quant: {config.QUANTIZATION})")
+                model_kwargs = {"trust_remote_code": True}
+                model_kwargs["attn_implementation"] = "sdpa"
 
-            _model_cache["embed_model"] = HuggingFaceEmbedding(
-                model_name=model_name,
-                device=device,
-                model_kwargs=model_kwargs
-            )
-    
+                if config.QUANTIZATION == "4bit":
+                    model_kwargs["quantization_config"] = BitsAndBytesConfig(
+                        load_in_4bit=True,
+                        bnb_4bit_compute_dtype=torch.bfloat16,
+                        bnb_4bit_quant_type="nf4"
+                    )
+                elif config.QUANTIZATION == "int8":
+                    model_kwargs["quantization_config"] = BitsAndBytesConfig(load_in_8bit=True)
+                else:
+                    model_kwargs["torch_dtype"] = torch.bfloat16
+
+                _model_cache["embed_model"] = HuggingFaceEmbedding(
+                    model_name=model_name,
+                    device=device,
+                    model_kwargs=model_kwargs
+                )
+
     Settings.embed_model = _model_cache["embed_model"]
 
     Settings.llm = OpenAI(
