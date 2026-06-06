@@ -219,10 +219,13 @@ export default function Sidebar({
   const saveBookmarkEdit = async () => {
     if (!editingBm) return;
     try {
+      const tagsArr = typeof editingBm.tags === 'string'
+        ? editingBm.tags.split(',').map(t => t.trim()).filter(Boolean)
+        : (editingBm.tags || []);
       const r = await axios.patch(`/api/bookmarks/${editingBm.id}`, {
         notebook_id: notebook.id,
         title: editingBm.title,
-        tags: editingBm.tags,
+        tags: tagsArr,
       });
       setBookmarks(prev => prev.map(b => b.id === editingBm.id ? r.data : b));
       setEditingBm(null);
