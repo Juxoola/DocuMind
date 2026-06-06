@@ -335,15 +335,21 @@ async def upload_file(
 
             prog(90, "Построение индекса (ChromaDB)...")
             build_index(nodes, notebook_id)
-            
+
             elapsed = time.time() - start_time
             mins = int(elapsed // 60)
             secs = int(elapsed % 60)
             time_str = f"{mins}м {secs}с" if mins > 0 else f"{secs}с"
-            
-            # Если это последний файл в пачке, очищаем статус через задержку или сразу
+
+            # Если это последний файл в пачке — форсируем пересборку BM25 сейчас,
+            # иначе debounce в build_index подождёт _BM25_DEBOUNCE_SEC.
             if current_idx >= total_count:
                 print(f"[INGESTION] Пачка завершена. {total_count} файлов обработано.")
+                try:
+                    from src.rag_pipeline import flush_bm25_rebuild
+                    flush_bm25_rebuild(notebook_id)
+                except Exception as bm25_err:
+                    print(f"[INGESTION] Не удалось форсировать BM25 rebuild: {bm25_err}")
                 ingestion_status[notebook_id] = {"is_uploading": False}
             else:
                 # Обновляем прогресс пачки

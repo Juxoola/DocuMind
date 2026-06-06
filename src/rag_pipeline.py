@@ -243,6 +243,95 @@ def _rebuild_bm25_bg(notebook_id: str, db_path: str):
     except Exception as e:
         logger.warning(f"[RAG] Ошибка фоновой сборки BM25: {e}")
 
+
+# ── BM25 rebuild debouncer ─────────────────────────────────────────────
+# При batch-загрузке (10 PDF подряд) вызов _rebuild_bm25_bg читал ВСЮ ChromaDB
+# 10 раз подряд → thrashing диска. Теперь build_index откладывает rebuild на
+# _BM25_DEBOUNCE_SEC и сбрасывает таймер на каждом новом файле; main.py
+# вызывает flush_bm25_rebuild() в конце batch для немедленной пересборки.
+_BM25_DEBOUNCE_SEC = 30.0
+_bm25_pending_timers: dict = {}      # notebook_id -> threading.Timer
+_bm25_pending_dbpath: dict = {}      # notebook_id -> str (db_path для callback)
+_bm25_pending_lock = threading.Lock()
+_bm25_rebuilding: set = set()        # notebook_id которые сейчас строят BM25
+
+
+def _schedule_bm25_rebuild(notebook_id: str, db_path: str):
+    """Отложить rebuild BM25. Каждый новый вызов сбрасывает таймер на _BM25_DEBOUNCE_SEC."""
+    with _bm25_pending_lock:
+        old = _bm25_pending_timers.get(notebook_id)
+        if old is not None:
+            try: old.cancel()
+            except Exception: pass
+        _bm25_pending_dbpath[notebook_id] = db_path
+        def _fire():
+            with _bm25_pending_lock:
+                _bm25_pending_timers.pop(notebook_id, None)
+                path = _bm25_pending_dbpath.pop(notebook_id, None)
+            if path is None:
+                return
+            _bm25_rebuilding.add(notebook_id)
+            try:
+                _rebuild_bm25_bg(notebook_id, path)
+            finally:
+                _bm25_rebuilding.discard(notebook_id)
+        t = threading.Timer(_BM25_DEBOUNCE_SEC, _fire)
+        t.daemon = True
+        _bm25_pending_timers[notebook_id] = t
+        t.start()
+        print(f"[RAG] ⏱ BM25 rebuild запланирован через {_BM25_DEBOUNCE_SEC:.0f}с (можно сбросить через flush_bm25_rebuild)")
+
+
+def flush_bm25_rebuild(notebook_id: str, db_path: str = None, wait: bool = False, timeout: float = 120.0):
+    """Форсировать немедленную пересборку BM25. Используется в конце batch-upload.
+
+    Args:
+        notebook_id: ID ноутбука.
+        db_path: путь к ChromaDB (если None — берётся из config).
+        wait: если True — блокирует вызывающий поток до завершения rebuild
+              (нужно перед первым RAG-запросом, если BM25 ещё не было).
+        timeout: макс. время ожидания при wait=True.
+    """
+    with _bm25_pending_lock:
+        timer = _bm25_pending_timers.pop(notebook_id, None)
+        if timer is not None:
+            try: timer.cancel()
+            except Exception: pass
+        path = _bm25_pending_dbpath.pop(notebook_id, None)
+        if path is None and db_path is not None:
+            path = db_path
+        if path is None:
+            paths = config.get_notebook_paths(notebook_id)
+            path = paths["chroma_db"]
+    if path is None:
+        return
+    if not wait:
+        _bm25_rebuilding.add(notebook_id)
+        def _bg():
+            try:
+                _rebuild_bm25_bg(notebook_id, path)
+            finally:
+                _bm25_rebuilding.discard(notebook_id)
+        threading.Thread(target=_bg, daemon=True, name=f"bm25-flush-{notebook_id}").start()
+        return
+    # wait=True: синхронный rebuild в текущем потоке
+    _bm25_rebuilding.add(notebook_id)
+    try:
+        _rebuild_bm25_bg(notebook_id, path)
+    finally:
+        _bm25_rebuilding.discard(notebook_id)
+
+
+def is_bm25_ready(notebook_id: str) -> bool:
+    """True если BM25-индекс существует на диске и нет pending/rebuilding."""
+    paths = config.get_notebook_paths(notebook_id)
+    bm25_dir = os.path.join(paths["base"], "bm25")
+    exists = os.path.exists(os.path.join(bm25_dir, "bm25_retriever_params.json"))
+    with _bm25_pending_lock:
+        has_pending = notebook_id in _bm25_pending_timers
+    is_rebuilding = notebook_id in _bm25_rebuilding
+    return exists and not has_pending and not is_rebuilding
+
 def _rrf_fuse_across_files(file_results, k: int = 60):
     """F2: Merge RRF scores across files so big files don't dominate.
 
@@ -311,17 +400,11 @@ def build_index(nodes, notebook_id: str):
     storage_context = StorageContext.from_defaults(vector_store=vector_store)
     index = VectorStoreIndex(nodes, storage_context=storage_context)
 
-    # Перестройка BM25 в фоне — не блокирует завершение загрузки файла
+    # Debounced BM25 rebuild: при batch из 10 файлов будет ОДНА пересборка
+    # через 30с после последнего файла, а не 10 параллельных (F-fix #4).
     paths = config.get_notebook_paths(notebook_id)
     db_path = paths["chroma_db"]
-    t = threading.Thread(
-        target=_rebuild_bm25_bg,
-        args=(notebook_id, db_path),
-        daemon=True,
-        name=f"bm25-{notebook_id}"
-    )
-    t.start()
-    print(f"[RAG] BM25 перестраивается в фоне...")
+    _schedule_bm25_rebuild(notebook_id, db_path)
     return index
 
 def retrieve_nodes(query: str, notebook_id: str, allowed_files=None, max_tokens=1024):
@@ -348,6 +431,19 @@ def retrieve_nodes(query: str, notebook_id: str, allowed_files=None, max_tokens=
             bm25_retriever = BM25Retriever.from_persist_dir(bm25_dir)
         except Exception as e:
             logger.warning(f"Не удалось загрузить BM25: {e}")
+    else:
+        # BM25-индекс ещё не собран (debounced rebuild в очереди).
+        # Для одного файла — форсируем синхронную сборку, иначе vector-only поиск
+        # не имеет гибридного преимущества. batch-upload сам вызывает flush_bm25_rebuild
+        # в конце — там дублирующая сборка будет отменена.
+        if not is_bm25_ready(notebook_id):
+            print(f"  [RAG] BM25 отсутствует — форсирую синхронную пересборку для первого запроса")
+            flush_bm25_rebuild(notebook_id, db_path=paths["chroma_db"], wait=True, timeout=180)
+            if os.path.exists(os.path.join(bm25_dir, "bm25_retriever_params.json")):
+                try:
+                    bm25_retriever = BM25Retriever.from_persist_dir(bm25_dir)
+                except Exception as e:
+                    logger.warning(f"Не удалось загрузить BM25 после flush: {e}")
 
     all_nodes = []
 
