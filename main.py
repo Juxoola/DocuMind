@@ -32,22 +32,28 @@ from fastapi.middleware.cors import CORSMiddleware
 from llama_index.core import Settings
 from contextlib import asynccontextmanager
 
+_lifespan_cleanup_done = False
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    global _lifespan_cleanup_done
     # При запуске - на всякий случай чистим мусор
     kill_stray_servers()
-    
+
     # Фоновая предзагрузка моделей (сервер запустится мгновенно)
     import threading
     from src.rag_pipeline import preload_all_models
     threading.Thread(target=preload_all_models, daemon=True).start()
-    
+
     yield
-    
-    # Завершение: выгрузка моделей
-    print("[SERVER] Остановка системы...")
-    unload_all_models()
-    kill_stray_servers()
+
+    # Завершение: выгрузка моделей. Под локом — чтобы при uvicorn --reload
+    # (который дёргает lifespan несколько раз) cleanup не дёргался повторно.
+    if not _lifespan_cleanup_done:
+        _lifespan_cleanup_done = True
+        print("[SERVER] Остановка системы...")
+        unload_all_models()
+        kill_stray_servers()
 
 # Регистрация atexit для надежности на Windows
 import atexit
@@ -71,9 +77,6 @@ def safe_filename(filename: str) -> str:
     if clean != filename or not clean or clean.startswith('.'):
         raise HTTPException(status_code=400, detail=f"Недопустимое имя файла: {filename}")
     return clean
-
-# Принудительная очистка старых процессов llama-server при запуске приложения
-kill_stray_servers()
 
 # Монтируем статику
 os.makedirs(os.path.join(config.BASE_DIR, "static"), exist_ok=True)
