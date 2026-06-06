@@ -411,15 +411,24 @@ def get_llm_status() -> Dict:
     return state
 
 
-def get_gguf_embedding_url(gguf_path: str, n_threads: int = None, is_reranker: bool = False) -> str:
-    """Запускает llama-server для эмбеддингов или реранкера и возвращает URL."""
+def get_gguf_embedding_url(gguf_path: str, n_threads: int = None, is_reranker: bool = False, n_parallel: int = 1) -> str:
+    """Запускает llama-server для эмбеддингов или реранкера и возвращает URL.
+
+    Args:
+        n_parallel: количество параллельных слотов на сервере.
+            Должно совпадать с embed_batch_size в OpenAIEmbedding,
+            иначе запросы сериализуются на сервере и рост HTTP overhead.
+    """
     global _server_processes, _server_ports, _server_configs, _server_roles
-    
+
     role = "reranker" if is_reranker else "embedding"
-    
+
+    n_parallel = max(1, int(n_parallel or 1))
+
     current_config = {
         "n_threads": n_threads,
-        "is_reranker": is_reranker
+        "is_reranker": is_reranker,
+        "n_parallel": n_parallel,
     }
 
     with _lock:
@@ -443,8 +452,8 @@ def get_gguf_embedding_url(gguf_path: str, n_threads: int = None, is_reranker: b
         port = s.getsockname()[1]
         s.close()
 
-        cmd = [SERVER_EXE, "-m", gguf_path, "--port", str(port)]
-        
+        cmd = [SERVER_EXE, "-m", gguf_path, "--port", str(port), "--parallel", str(n_parallel)]
+
         # Эмбеддинги требуют --embedding
         if not is_reranker:
             cmd.extend(["--embedding"])
@@ -487,7 +496,7 @@ def get_gguf_embedding_url(gguf_path: str, n_threads: int = None, is_reranker: b
         if n_threads and n_threads > 0:
             cmd.extend(["-t", str(n_threads)])
 
-        print(f"[GGUF Server] Запуск {role}: {os.path.basename(gguf_path)} на порту {port}...")
+        print(f"[GGUF Server] Запуск {role}: {os.path.basename(gguf_path)} на порту {port} (parallel={n_parallel})...")
         
         creationflags = 0x08000000 # CREATE_NO_WINDOW
         process = subprocess.Popen(
@@ -515,6 +524,26 @@ def get_gguf_embedding_url(gguf_path: str, n_threads: int = None, is_reranker: b
         
         process.terminate()
         raise TimeoutError(f"{role.capitalize()} сервер не ответил за 60 секунд")
+
+
+def get_active_embedding_parallel(gguf_path: str = None) -> int:
+    """Возвращает n_parallel запущенного embedding-сервера (по умолчанию 1).
+
+    Если сервер не запущен или gguf_path не указан — возвращает 1.
+    Используется init_settings для синхронизации embed_batch_size с --parallel.
+    """
+    with _lock:
+        if gguf_path:
+            cfg = _server_configs.get(gguf_path)
+            if cfg and cfg.get("n_parallel"):
+                return int(cfg["n_parallel"])
+            return 1
+        for path, role in _server_roles.items():
+            if role == "embedding":
+                cfg = _server_configs.get(path, {})
+                return int(cfg.get("n_parallel", 1))
+        return 1
+
 
 async def stream_gguf_chat(
     llm_url: str,

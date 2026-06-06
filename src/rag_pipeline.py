@@ -70,15 +70,23 @@ def init_settings(max_tokens=1024):
     
     if "embed_model" not in _model_cache:
         model_name = config.EMBEDDING_MODEL_NAME
-        
+
         if model_name.lower().endswith('.gguf') or os.path.isabs(model_name) and os.path.exists(model_name):
             print(f"Инициализация GGUF эмбеддингов: {model_name}")
             from src.gguf_direct import get_gguf_embedding_url
             from llama_index.embeddings.openai import OpenAIEmbedding
-            
+
             model_path = config.resolve_model_path(model_name)
+            # n_parallel пробрасывается в init_settings через init_lock-guarded вызов,
+            # чтобы embed_batch_size == --parallel на embedding-сервере.
             url = get_gguf_embedding_url(model_path)
-            
+            try:
+                from src.gguf_direct import get_active_embedding_parallel
+                n_parallel = get_active_embedding_parallel(model_path)
+            except Exception:
+                n_parallel = 1
+            print(f"[RAG] GGUF embedding server --parallel={n_parallel} → embed_batch_size={n_parallel}")
+
             _model_cache["embed_model"] = OpenAIEmbedding(
                 api_base=f"{url}/v1",
                 api_key="sk-local",
@@ -86,8 +94,8 @@ def init_settings(max_tokens=1024):
                 timeout=120.0,
                 # Сервер запущен с -c 4096 (= максимальный размер 1 чанка).
                 # Каждый документ обрабатывается независимо, батч не складывает токены.
-                # 16 параллельных запросов — безопасно и ускоряет индексацию в ~16×.
-                embed_batch_size=16,
+                # embed_batch_size = n_parallel embedding-сервера: больше слотов — больше параллелизма.
+                embed_batch_size=n_parallel,
                 # Инструкция для Qwen3-Embedding, чтобы он понимал задачу поиска
                 query_header="Instruct: Given a web search query, retrieve relevant passages that answer the query\nQuery: "
             )
