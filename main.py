@@ -684,7 +684,10 @@ class ChatRequest(BaseModel):
     llm_api_key: Optional[str] = "lm-studio"
     llm_model: Optional[str] = "gpt-4o"
     image_base64: Optional[str] = None # Поле для фото
-    
+    # Режим ответа: "concise" (сначала коротко, потом объяснение) или
+    # "detailed" (сразу развёрнуто). По умолчанию — concise.
+    answer_mode: Optional[str] = "concise"
+
     # Расширенные параметры
     gguf_kv_quant: Optional[int] = 2 # 2=Q4_K, 8=Q8_0
     presence_penalty: Optional[float] = 0.0
@@ -826,7 +829,7 @@ async def chat(request: ChatRequest):
             yield f"data: {json.dumps({'type': 'sources', 'sources': sources}, ensure_ascii=False)}\n\n"
 
             if use_direct_gguf:
-                sys_prompt = config.SYSTEM_PROMPT + f"\n\nДоступные источники:\n{context}"
+                sys_prompt = config.get_system_prompt(request.answer_mode) + f"\n\nДоступные источники:\n{context}"
                 
                 if request.image_base64:
                     user_content = [
@@ -907,7 +910,7 @@ async def chat(request: ChatRequest):
             else:
                 # Для API (LM Studio) используем стандартный prompt
                 full_response = ""
-                prompt = make_prompt(request.query, context, thinking_mode=request.thinking_mode, max_tokens=request.max_tokens)
+                prompt = make_prompt(request.query, context, thinking_mode=request.thinking_mode, max_tokens=request.max_tokens, answer_mode=request.answer_mode)
                 for chunk in active_llm.stream_complete(prompt):
                     if chunk.delta:
                         token_count += 1 

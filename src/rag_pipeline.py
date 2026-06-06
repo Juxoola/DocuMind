@@ -724,12 +724,12 @@ def build_file_context(nodes, notebook_id: str):
     context_str = "\n\n" + ("=" * 40 + "\n\n").join(context_parts)
     return sources, context_str
 
-def make_messages(query: str, context_str: str) -> list:
+def make_messages(query: str, context_str: str, answer_mode: str = None) -> list:
     """Формирует список сообщений для Chat API."""
     return [
         {
             "role": "system",
-            "content": config.SYSTEM_PROMPT
+            "content": config.get_system_prompt(answer_mode)
         },
         {
             "role": "user",
@@ -737,9 +737,9 @@ def make_messages(query: str, context_str: str) -> list:
         }
     ]
 
-def make_prompt(query: str, context_str: str, thinking_mode: bool = False, max_tokens: int = 1024) -> str:
+def make_prompt(query: str, context_str: str, thinking_mode: bool = False, max_tokens: int = 1024, answer_mode: str = None) -> str:
     return (
-        config.SYSTEM_PROMPT + "\n"
+        config.get_system_prompt(answer_mode) + "\n"
         "ОТВЕЧАЙ СТРОГО С ИСПОЛЬЗОВАНИЕМ [N] ДЛЯ ССЫЛОК.\n\n"
         f"Доступные источники:\n{context_str}\n\n"
         f"Вопрос пользователя: {query}\n\n"

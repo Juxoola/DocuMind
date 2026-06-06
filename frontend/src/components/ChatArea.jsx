@@ -507,6 +507,11 @@ export default function ChatArea({ notebook, selectedSources, onOpenSource, llmS
   const [contextStrategy, setContextStrategy] = useState(() => localStorage.getItem('chat_context_strategy') || 'sliding');
   const [thinkingMode, setThinkingMode] = useState(() => localStorage.getItem('chat_thinking_mode') === 'true');
   const [thinkingBudget, setThinkingBudget] = useState(() => parseInt(localStorage.getItem('chat_thinking_budget')) || 1024); // -1 = no limit
+  // Режим ответа: "concise" (сначала кратко, потом объяснение) / "detailed" (сразу развёрнуто)
+  const [answerMode, setAnswerMode] = useState(() => {
+    const stored = localStorage.getItem('chat_answer_mode');
+    return stored === 'detailed' ? 'detailed' : 'concise';
+  });
   const [hoveredSource, setHoveredSource] = useState(null);
   const [tooltipCoords, setTooltipCoords] = useState({ x: 0, y: 0 });
   const [abortController, setAbortController] = useState(null);
@@ -524,7 +529,8 @@ export default function ChatArea({ notebook, selectedSources, onOpenSource, llmS
     localStorage.setItem('chat_thinking_mode', thinkingMode.toString());
     localStorage.setItem('chat_thinking_budget', thinkingBudget.toString());
     localStorage.setItem('chat_context_strategy', contextStrategy);
-  }, [maxTokens, thinkingMode, thinkingBudget, contextStrategy]);
+    localStorage.setItem('chat_answer_mode', answerMode);
+  }, [maxTokens, thinkingMode, thinkingBudget, contextStrategy, answerMode]);
 
   useEffect(() => {
     if (textareaRef.current) {
@@ -652,6 +658,7 @@ export default function ChatArea({ notebook, selectedSources, onOpenSource, llmS
           thinking_mode: thinkingMode,
           thinking_budget: thinkingBudget,
           context_strategy: contextStrategy,
+          answer_mode: answerMode,
           image_base64: currentImage,
           ...llmSettings
         })
@@ -755,7 +762,7 @@ export default function ChatArea({ notebook, selectedSources, onOpenSource, llmS
 
   return (
     <div
-      className="flex flex-col h-full w-full max-w-4xl mx-auto relative"
+      className="flex flex-col h-full w-full max-w-[1400px] mx-auto relative"
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
@@ -777,17 +784,17 @@ export default function ChatArea({ notebook, selectedSources, onOpenSource, llmS
       </AnimatePresence>
 
       {/* Шапка */}
-      <div className="flex items-center justify-between p-4 border-b bg-background/80 backdrop-blur-md sticky top-0 z-10">
-        <div className="flex items-center gap-2">
-          <FileText className="text-muted-foreground" size={18} />
-          <h2 className="font-medium text-sm">Ассистент по документам</h2>
+      <div className="flex items-center justify-between gap-3 p-4 border-b bg-background/80 backdrop-blur-md sticky top-0 z-10 flex-wrap">
+        <div className="flex items-center gap-2 min-w-0">
+          <FileText className="text-muted-foreground shrink-0" size={18} />
+          <h2 className="font-medium text-sm whitespace-nowrap">Ассистент по документам</h2>
           {llmSettings.use_gguf === 'true' && (
-            <span className="flex items-center gap-1 px-2 py-0.5 bg-green-500/10 text-green-500 rounded-full text-[9px] font-bold border border-green-500/20">
+            <span className="flex items-center gap-1 px-2 py-0.5 bg-green-500/10 text-green-500 rounded-full text-[9px] font-bold border border-green-500/20 whitespace-nowrap">
               <HardDrive size={10} /> GGUF
             </span>
           )}
         </div>
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-2 flex-wrap justify-end">
           <div className="flex items-center gap-3 bg-muted/30 p-1.5 rounded-xl border border-white/5 px-2">
             <button
               onClick={() => setIsTuningOpen(!isTuningOpen)}
@@ -839,6 +846,22 @@ export default function ChatArea({ notebook, selectedSources, onOpenSource, llmS
             <Sparkles size={11} />
             {thinkingMode ? "Думает" : "Без рассуждений"}
           </button>
+
+          <button
+            onClick={() => setAnswerMode(answerMode === 'concise' ? 'detailed' : 'concise')}
+            title={answerMode === 'concise'
+              ? 'Сейчас: сначала краткий ответ, потом объяснение. Кликните, чтобы переключить на развёрнутый режим.'
+              : 'Сейчас: сразу развёрнутый ответ. Кликните, чтобы вернуть режим «сначала кратко».'}
+            className={cn(
+              "px-3 py-1.5 text-[10px] font-black uppercase tracking-wider rounded-xl transition-all flex items-center gap-1.5 border",
+              answerMode === 'detailed'
+                ? "bg-amber-500/10 text-amber-400 border-amber-500/20 shadow-sm"
+                : "bg-muted/40 text-muted-foreground hover:text-foreground border-transparent hover:border-border/60"
+            )}
+          >
+            {answerMode === 'detailed' ? <FileText size={11} /> : <Zap size={11} />}
+            {answerMode === 'detailed' ? 'Развёрнуто' : 'Кратко → пояснение'}
+          </button>
           
           <button
             onClick={() => setIsSettingsOpen(true)}
@@ -861,7 +884,7 @@ export default function ChatArea({ notebook, selectedSources, onOpenSource, llmS
             transition={{ type: 'spring', damping: 25, stiffness: 220 }}
             className="border-b border-border bg-card/25 backdrop-blur-md overflow-hidden z-10"
           >
-            <div className="p-5 max-w-5xl mx-auto flex flex-col gap-5">
+            <div className="p-5 max-w-[1400px] mx-auto flex flex-col gap-5">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                 {/* 1. Response length slider */}
                 <SleekSlider

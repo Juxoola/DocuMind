@@ -254,8 +254,8 @@ export default function MainApp({ notebook, onExit }) {
                 e.preventDefault();
                 const onMouseMove = (e) => {
                   const newWidth = e.clientX;
-                  // Ограничиваем, чтобы не налезать на чат (max-w-4xl = 896px)
-                  const maxAllowed = (window.innerWidth - 896) / 2 - 20;
+                  // Ограничиваем, чтобы не налезать на чат (max-w-[1400px])
+                  const maxAllowed = (window.innerWidth - 1400) / 2 - 20;
                   if (newWidth > 240 && newWidth < Math.max(240, Math.min(600, maxAllowed))) {
                     setSidebarWidth(newWidth);
                   }
