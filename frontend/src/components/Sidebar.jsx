@@ -1,12 +1,12 @@
 import React, { useState } from 'react';
-import { motion } from 'framer-motion';
-import { 
-  FileText, 
-  Upload, 
-  X, 
-  LogOut, 
-  ChevronLeft, 
-  CheckCircle2, 
+import { motion, AnimatePresence } from 'framer-motion';
+import {
+  FileText,
+  Upload,
+  X,
+  LogOut,
+  ChevronLeft,
+  CheckCircle2,
   AlertCircle,
   Database,
   Trash2,
@@ -16,7 +16,15 @@ import {
   Music,
   FileCode,
   FileSpreadsheet,
-  File
+  File,
+  Bookmark,
+  Search,
+  Tag as TagIcon,
+  Copy,
+  RotateCcw,
+  Eye,
+  Pencil,
+  ExternalLink,
 } from 'lucide-react';
 
 /** Возвращает иконку и цвет по расширению файла */
@@ -61,6 +69,7 @@ function getFileIcon(filename) {
 }
 import { cn } from '../lib/utils';
 import axios from 'axios';
+import { LlmMarkdown } from '../lib/markdownRender';
 
 export default function Sidebar({ 
   notebook, 
@@ -143,6 +152,134 @@ export default function Sidebar({
     } catch (err) {
       alert('Ошибка');
     }
+  };
+
+  // ── Закладки ──
+  const [activeTab, setActiveTab] = useState('files'); // 'files' | 'bookmarks'
+  const [bookmarks, setBookmarks] = useState([]);
+  const [bmSearch, setBmSearch] = useState('');
+  const [bmTagFilter, setBmTagFilter] = useState(null);
+  const [bmLoading, setBmLoading] = useState(false);
+  const [viewingBm, setViewingBm] = useState(null);
+  const [editingBm, setEditingBm] = useState(null); // {id, title, tags}
+
+  const fetchBookmarks = async () => {
+    setBmLoading(true);
+    try {
+      const r = await axios.get('/api/bookmarks', { params: { notebook_id: notebook.id } });
+      setBookmarks(r.data.bookmarks || []);
+    } catch (e) {
+      console.error('bookmarks fetch failed', e);
+    } finally {
+      setBmLoading(false);
+    }
+  };
+
+  // Загружаем при первом переключении на вкладку и при смене блокнота
+  React.useEffect(() => {
+    if (activeTab === 'bookmarks') fetchBookmarks();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, notebook.id]);
+
+  // Слушаем кастомные события от ChatArea, чтобы обновлять список без prop drilling
+  React.useEffect(() => {
+    const onAdded = () => { if (activeTab === 'bookmarks') fetchBookmarks(); };
+    const onDeleted = () => { if (activeTab === 'bookmarks') fetchBookmarks(); };
+    const onStale = () => { if (activeTab === 'bookmarks') fetchBookmarks(); };
+    window.addEventListener('bookmark:added', onAdded);
+    window.addEventListener('bookmark:deleted', onDeleted);
+    window.addEventListener('bookmark:stale', onStale);
+    return () => {
+      window.removeEventListener('bookmark:added', onAdded);
+      window.removeEventListener('bookmark:deleted', onDeleted);
+      window.removeEventListener('bookmark:stale', onStale);
+    };
+  }, [activeTab, notebook.id]);
+
+  // Также обновим, если удалили файл (закладки могли стать stale)
+  const prevSourcesCount = React.useRef(sources.length);
+  React.useEffect(() => {
+    if (sources.length < prevSourcesCount.current && activeTab === 'bookmarks') {
+      fetchBookmarks();
+    }
+    prevSourcesCount.current = sources.length;
+  }, [sources.length, activeTab]);
+
+  const deleteBookmark = async (id) => {
+    if (!confirm('Удалить закладку?')) return;
+    try {
+      await axios.delete(`/api/bookmarks/${id}`, { params: { notebook_id: notebook.id } });
+      setBookmarks(prev => prev.filter(b => b.id !== id));
+      window.dispatchEvent(new CustomEvent('bookmark:deleted', { detail: { id } }));
+    } catch (e) {
+      alert('Не удалось удалить закладку');
+    }
+  };
+
+  const saveBookmarkEdit = async () => {
+    if (!editingBm) return;
+    try {
+      const r = await axios.patch(`/api/bookmarks/${editingBm.id}`, {
+        notebook_id: notebook.id,
+        title: editingBm.title,
+        tags: editingBm.tags,
+      });
+      setBookmarks(prev => prev.map(b => b.id === editingBm.id ? r.data : b));
+      setEditingBm(null);
+    } catch (e) {
+      alert('Не удалось обновить закладку');
+    }
+  };
+
+  const askAgain = (question) => {
+    // Копируем вопрос в буфер + диспатчим событие для ChatArea
+    if (navigator.clipboard) navigator.clipboard.writeText(question);
+    window.dispatchEvent(new CustomEvent('chat:fill-input', { detail: { text: question } }));
+    setViewingBm(null);
+  };
+
+  const copyText = async (text) => {
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch (e) { /* noop */ }
+  };
+
+  // Список уникальных тегов
+  const allTags = React.useMemo(() => {
+    const set = new Set();
+    bookmarks.forEach(b => (b.tags || []).forEach(t => set.add(t)));
+    return Array.from(set).sort();
+  }, [bookmarks]);
+
+  // Отфильтрованный список
+  const filteredBookmarks = React.useMemo(() => {
+    const q = bmSearch.trim().toLowerCase();
+    return bookmarks.filter(b => {
+      if (bmTagFilter && !(b.tags || []).includes(bmTagFilter)) return false;
+      if (!q) return true;
+      const hay = `${b.title || ''}\n${b.question}\n${b.answer}\n${(b.tags || []).join(' ')}`.toLowerCase();
+      return hay.includes(q);
+    });
+  }, [bookmarks, bmSearch, bmTagFilter]);
+
+  const formatRel = (ts) => {
+    if (!ts) return '';
+    const diff = Date.now() / 1000 - ts;
+    if (diff < 60) return 'только что';
+    if (diff < 3600) return `${Math.floor(diff / 60)} мин назад`;
+    if (diff < 86400) return `${Math.floor(diff / 3600)} ч назад`;
+    if (diff < 86400 * 7) return `${Math.floor(diff / 86400)} д назад`;
+    return new Date(ts * 1000).toLocaleDateString('ru-RU');
+  };
+
+  const modelShort = (m) => {
+    if (!m) return '';
+    return m.split(/[\\/]/).filter(Boolean).slice(-1)[0] || m;
+  };
+
+  // Источник уже удалён из блокнота? — кнопку показываем, но блокируем
+  const bmSourceStale = (fileName) => {
+    return viewingBm?.status === 'stale' || !sources.includes(fileName);
   };
 
   return (
@@ -238,9 +375,41 @@ export default function Sidebar({
         </label>
       </div>
 
+      {/* Вкладки: Файлы / Закладки */}
+      <div className="px-4 pt-3 flex-shrink-0">
+        <div className="flex gap-1 p-1 bg-muted/30 rounded-xl border border-white/5">
+          <button
+            onClick={() => setActiveTab('files')}
+            className={cn(
+              "flex-1 flex items-center justify-center gap-1.5 px-2 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all",
+              activeTab === 'files'
+                ? "bg-primary/15 text-primary shadow-sm"
+                : "text-muted-foreground hover:text-foreground"
+            )}
+          >
+            <FileText size={11} />
+            <span>Файлы</span>
+            <span className="text-[9px] opacity-60">({sources.length})</span>
+          </button>
+          <button
+            onClick={() => setActiveTab('bookmarks')}
+            className={cn(
+              "flex-1 flex items-center justify-center gap-1.5 px-2 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all",
+              activeTab === 'bookmarks'
+                ? "bg-amber-500/15 text-amber-400 shadow-sm"
+                : "text-muted-foreground hover:text-foreground"
+            )}
+          >
+            <Bookmark size={11} />
+            <span>Закладки</span>
+            <span className="text-[9px] opacity-60">({bookmarks.length})</span>
+          </button>
+        </div>
+      </div>
+
       {/* Список источников */}
       <div className="flex-1 overflow-y-auto px-4 py-2 space-y-2 custom-scrollbar">
-        {(() => {
+        {activeTab === 'files' && (() => {
           const filtered = sources.filter(s => {
             const low = s.toLowerCase();
             if (low.endsWith('.pdf')) {
@@ -319,6 +488,156 @@ export default function Sidebar({
             </>
           );
         })()}
+
+        {activeTab === 'bookmarks' && (
+          <div className="space-y-2">
+            {/* Поиск */}
+            <div className="relative px-1">
+              <Search size={12} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+              <input
+                value={bmSearch}
+                onChange={(e) => setBmSearch(e.target.value)}
+                placeholder="Поиск по закладкам…"
+                className="w-full bg-muted/30 border border-border/40 rounded-lg pl-8 pr-3 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-primary/50"
+              />
+            </div>
+
+            {/* Фильтр по тегам */}
+            {allTags.length > 0 && (
+              <div className="flex flex-wrap gap-1 px-1">
+                <button
+                  onClick={() => setBmTagFilter(null)}
+                  className={cn(
+                    "px-2 py-0.5 rounded-full text-[9px] font-bold transition-all border",
+                    !bmTagFilter
+                      ? "bg-primary/10 text-primary border-primary/30"
+                      : "bg-muted/30 text-muted-foreground border-transparent hover:border-border/60"
+                  )}
+                >
+                  все
+                </button>
+                {allTags.map(t => (
+                  <button
+                    key={t}
+                    onClick={() => setBmTagFilter(bmTagFilter === t ? null : t)}
+                    className={cn(
+                      "px-2 py-0.5 rounded-full text-[9px] font-bold transition-all border flex items-center gap-1",
+                      bmTagFilter === t
+                        ? "bg-amber-500/15 text-amber-400 border-amber-500/30"
+                        : "bg-muted/30 text-muted-foreground border-transparent hover:border-border/60"
+                    )}
+                  >
+                    <TagIcon size={9} />
+                    {t}
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {/* Список карточек */}
+            {bmLoading ? (
+              <div className="text-center py-8 opacity-40 text-[10px]">Загрузка…</div>
+            ) : filteredBookmarks.length === 0 ? (
+              <div className="text-center py-8 opacity-40">
+                <Bookmark size={32} className="mx-auto mb-2" />
+                <p className="text-[10px]">
+                  {bookmarks.length === 0
+                    ? 'Нет закладок. Нажмите «☆» на ответе, чтобы сохранить.'
+                    : 'Ничего не найдено по фильтру.'}
+                </p>
+              </div>
+            ) : (
+              filteredBookmarks.map(bm => (
+                <div
+                  key={bm.id}
+                  className={cn(
+                    "group p-3 rounded-xl border bg-transparent hover:bg-muted/40 transition-all",
+                    bm.status === 'stale'
+                      ? "border-amber-500/30 bg-amber-500/5"
+                      : "border-border/40"
+                  )}
+                >
+                  {/* Заголовок или первая строка вопроса */}
+                  <div className="flex items-start gap-2 mb-1.5">
+                    <p
+                      className="text-xs font-bold text-foreground line-clamp-2 flex-1 cursor-pointer hover:text-primary transition-colors"
+                      onClick={() => setViewingBm(bm)}
+                      title="Открыть"
+                    >
+                      {bm.title || bm.question}
+                    </p>
+                    {bm.status === 'stale' && (
+                      <span title="Источник удалён — ответ может быть неактуальным" className="shrink-0 text-amber-400">
+                        <AlertCircle size={12} />
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Теги */}
+                  {bm.tags && bm.tags.length > 0 && (
+                    <div className="flex flex-wrap gap-1 mb-1.5">
+                      {bm.tags.map(t => (
+                        <span key={t} className="px-1.5 py-0 rounded-md bg-muted/60 text-[9px] font-medium text-muted-foreground">
+                          #{t}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Мета */}
+                  <div className="flex items-center gap-2 text-[9px] text-muted-foreground/70 mb-2">
+                    {bm.model && (
+                      <span className="truncate max-w-[120px]" title={bm.model}>
+                        {modelShort(bm.model)}
+                      </span>
+                    )}
+                    <span>·</span>
+                    <span>{formatRel(bm.created_at)}</span>
+                    {bm.answer_mode && bm.answer_mode !== 'concise' && (
+                      <>
+                        <span>·</span>
+                        <span className="text-amber-400">разв.</span>
+                      </>
+                    )}
+                  </div>
+
+                  {/* Действия */}
+                  <div className="flex items-center gap-1 opacity-70 group-hover:opacity-100 transition-opacity">
+                    <button
+                      onClick={() => setViewingBm(bm)}
+                      className="flex-1 flex items-center justify-center gap-1 px-2 py-1 hover:bg-primary/10 text-muted-foreground hover:text-primary rounded-md text-[10px] font-bold transition-all"
+                      title="Открыть"
+                    >
+                      <Eye size={11} />
+                      Открыть
+                    </button>
+                    <button
+                      onClick={() => askAgain(bm.question)}
+                      className="flex items-center justify-center gap-1 px-2 py-1 hover:bg-amber-500/10 text-muted-foreground hover:text-amber-400 rounded-md text-[10px] font-bold transition-all"
+                      title="Скопировать вопрос в чат"
+                    >
+                      <RotateCcw size={11} />
+                    </button>
+                    <button
+                      onClick={() => setEditingBm({ id: bm.id, title: bm.title || '', tags: (bm.tags || []).join(', ') })}
+                      className="flex items-center justify-center gap-1 px-2 py-1 hover:bg-muted text-muted-foreground hover:text-foreground rounded-md text-[10px] font-bold transition-all"
+                      title="Редактировать заголовок и теги"
+                    >
+                      <Pencil size={11} />
+                    </button>
+                    <button
+                      onClick={() => deleteBookmark(bm.id)}
+                      className="flex items-center justify-center gap-1 px-2 py-1 hover:bg-destructive/10 text-muted-foreground hover:text-destructive rounded-md text-[10px] font-bold transition-all"
+                      title="Удалить"
+                    >
+                      <Trash2 size={11} />
+                    </button>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        )}
       </div>
 
       <div className="mt-auto flex flex-col border-t bg-muted/5">
@@ -358,6 +677,207 @@ export default function Sidebar({
           </button>
         </div>
       </div>
+
+      {/* ── Модал просмотра закладки ── */}
+      <AnimatePresence>
+        {viewingBm && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            onClick={() => setViewingBm(null)}
+            className="fixed inset-0 z-[200] flex items-center justify-center bg-black/60 backdrop-blur-md p-4"
+          >
+            <motion.div
+              initial={{ scale: 0.92, opacity: 0, y: 20 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.92, opacity: 0, y: 20 }}
+              onClick={(e) => e.stopPropagation()}
+              className="relative w-full max-w-2xl max-h-[85vh] flex flex-col bg-card border border-border shadow-2xl rounded-3xl overflow-hidden"
+            >
+              <div className="flex items-start justify-between p-5 border-b border-border/50 gap-3">
+                <div className="min-w-0 flex-1">
+                  {viewingBm.title && (
+                    <h3 className="text-lg font-bold mb-1 break-words">{viewingBm.title}</h3>
+                  )}
+                  <p className="text-xs text-muted-foreground line-clamp-2">{viewingBm.question}</p>
+                  <div className="flex items-center gap-2 text-[10px] text-muted-foreground/70 mt-1.5">
+                    {viewingBm.model && <span className="truncate max-w-[180px]">{modelShort(viewingBm.model)}</span>}
+                    <span>·</span>
+                    <span>{formatRel(viewingBm.created_at)}</span>
+                    {viewingBm.status === 'stale' && (
+                      <>
+                        <span>·</span>
+                        <span className="text-amber-400 flex items-center gap-1">
+                          <AlertCircle size={10} /> источник удалён
+                        </span>
+                      </>
+                    )}
+                  </div>
+                </div>
+                <button
+                  onClick={() => setViewingBm(null)}
+                  className="p-2 hover:bg-muted rounded-full transition-colors shrink-0"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              <div className="flex-1 overflow-y-auto p-5 space-y-4">
+                <div>
+                  <div className="text-[10px] font-black uppercase tracking-widest text-muted-foreground mb-1.5">Вопрос</div>
+                  <p className="text-sm whitespace-pre-wrap leading-relaxed">{viewingBm.question}</p>
+                </div>
+                <div>
+                  <div className="text-[10px] font-black uppercase tracking-widest text-muted-foreground mb-1.5">Ответ</div>
+                  <LlmMarkdown
+                    text={viewingBm.answer}
+                    sources={viewingBm.sources || []}
+                    onCite={(n, src) => {
+                      // Открываем файл справа, модал закладки НЕ закрываем — он
+                      // не мешает просмотрщику, а пользователю удобно вернуться.
+                      // Передаём полный объект, чтобы page/time доехали до DocumentViewer.
+                      if (src && onOpenFile) {
+                        onOpenFile(src);
+                      }
+                    }}
+                  />
+                </div>
+                {viewingBm.sources && viewingBm.sources.length > 0 && (
+                  <div>
+                    <div className="text-[10px] font-black uppercase tracking-widest text-muted-foreground mb-1.5">
+                      Источники ({viewingBm.sources.length})
+                    </div>
+                    <div className="space-y-1">
+                      {viewingBm.sources.map((s, i) => (
+                        <button
+                          key={i}
+                          type="button"
+                          disabled={!onOpenFile || bmSourceStale(s.file_name)}
+                          onClick={() => { if (onOpenFile) onOpenFile(s); }}
+                          className={cn(
+                            "w-full text-left text-xs text-muted-foreground flex items-start gap-2 p-2 rounded-lg bg-muted/30 hover:bg-primary/10 hover:border-primary/30 border border-transparent transition-all group",
+                            (!onOpenFile || bmSourceStale(s.file_name)) && "opacity-50 cursor-not-allowed hover:bg-muted/30 hover:border-transparent"
+                          )}
+                          title={bmSourceStale(s.file_name) ? 'Файл удалён из блокнота' : `Открыть «${s.file_name}»`}
+                        >
+                          <span className="text-primary font-bold shrink-0">[{i + 1}]</span>
+                          <div className="min-w-0 flex-1">
+                            <span className="font-medium text-foreground/90 group-hover:text-primary transition-colors">{s.file_name}</span>
+                            {s.page != null && <span className="opacity-70"> · стр. {s.page}</span>}
+                            {s.time != null && <span className="opacity-70"> · {s.time}</span>}
+                            {s.snippet && (
+                              <p className="text-[10px] opacity-70 mt-0.5 line-clamp-2">{s.snippet}</p>
+                            )}
+                          </div>
+                          <ExternalLink size={11} className="shrink-0 mt-0.5 opacity-30 group-hover:opacity-100 transition-opacity" />
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {viewingBm.tags && viewingBm.tags.length > 0 && (
+                  <div className="flex flex-wrap gap-1">
+                    {viewingBm.tags.map(t => (
+                      <span key={t} className="px-2 py-0.5 rounded-md bg-muted text-[10px] font-medium text-muted-foreground">
+                        #{t}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div className="flex items-center gap-2 p-4 border-t border-border/50 bg-muted/10">
+                <button
+                  onClick={() => askAgain(viewingBm.question)}
+                  className="flex-1 flex items-center justify-center gap-2 px-3 py-2 bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 rounded-xl text-xs font-black transition-all"
+                >
+                  <RotateCcw size={13} />
+                  Спросить заново
+                </button>
+                <button
+                  onClick={() => copyText(viewingBm.answer)}
+                  className="flex items-center justify-center gap-2 px-3 py-2 hover:bg-muted text-muted-foreground hover:text-foreground rounded-xl text-xs font-black transition-all"
+                  title="Скопировать ответ"
+                >
+                  <Copy size={13} />
+                </button>
+                <button
+                  onClick={() => {
+                    deleteBookmark(viewingBm.id);
+                    setViewingBm(null);
+                  }}
+                  className="flex items-center justify-center gap-2 px-3 py-2 hover:bg-destructive/10 text-muted-foreground hover:text-destructive rounded-xl text-xs font-black transition-all"
+                  title="Удалить"
+                >
+                  <Trash2 size={13} />
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* ── Модал редактирования (title + tags) ── */}
+      <AnimatePresence>
+        {editingBm && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            onClick={() => setEditingBm(null)}
+            className="fixed inset-0 z-[200] flex items-center justify-center bg-black/60 backdrop-blur-md p-4"
+          >
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              onClick={(e) => e.stopPropagation()}
+              className="w-full max-w-md bg-card border border-border shadow-2xl rounded-2xl p-5"
+            >
+              <h3 className="text-base font-bold mb-4">Редактировать закладку</h3>
+              <div className="space-y-3">
+                <div>
+                  <label className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">
+                    Заголовок
+                  </label>
+                  <input
+                    value={editingBm.title}
+                    onChange={(e) => setEditingBm({ ...editingBm, title: e.target.value })}
+                    placeholder="Опционально"
+                    className="w-full mt-1 bg-muted/30 border border-border/50 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary/50"
+                  />
+                </div>
+                <div>
+                  <label className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">
+                    Теги (через запятую)
+                  </label>
+                  <input
+                    value={editingBm.tags}
+                    onChange={(e) => setEditingBm({ ...editingBm, tags: e.target.value })}
+                    placeholder="важно, про X, тест"
+                    className="w-full mt-1 bg-muted/30 border border-border/50 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary/50"
+                  />
+                </div>
+              </div>
+              <div className="flex gap-2 mt-5">
+                <button
+                  onClick={() => setEditingBm(null)}
+                  className="flex-1 px-3 py-2 hover:bg-muted text-muted-foreground rounded-lg text-xs font-bold transition-all"
+                >
+                  Отмена
+                </button>
+                <button
+                  onClick={saveBookmarkEdit}
+                  className="flex-1 px-3 py-2 bg-primary text-primary-foreground rounded-lg text-xs font-bold transition-all hover:opacity-90"
+                >
+                  Сохранить
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

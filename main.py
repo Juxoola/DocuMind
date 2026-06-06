@@ -451,6 +451,13 @@ async def delete_file(filename: str, notebook_id: str):
     vector_store = get_vector_store(notebook_id)
     collection = vector_store._collection
     collection.delete(where={"file_name": filename})
+    # Помечаем связанные закладки как stale (не удаляем — пользователь может захотеть увидеть историю)
+    try:
+        stale_count = mark_stale_for_file(notebook_id, filename)
+        if stale_count:
+            print(f"[BOOKMARKS] {stale_count} закладок помечены как stale после удаления {filename}")
+    except Exception as e:
+        print(f"[BOOKMARKS] Не удалось пометить stale: {e}")
     return {"status": "ok"}
 
 @app.get("/api/source_content")
@@ -496,6 +503,70 @@ async def clear_notebook(notebook_id: str):
         if os.path.exists(p):
             robust_rmtree(p)
         os.makedirs(p, exist_ok=True)
+    return {"status": "ok"}
+
+# ── Закладки (Q&A) ──
+
+from src.bookmarks import (
+    list_bookmarks, get_bookmark, create_bookmark,
+    update_bookmark, delete_bookmark, mark_stale_for_file,
+)
+
+
+@app.get("/api/bookmarks")
+async def api_list_bookmarks(notebook_id: str = Query(...)):
+    return {"bookmarks": list_bookmarks(notebook_id)}
+
+
+@app.get("/api/bookmarks/{bookmark_id}")
+async def api_get_bookmark(bookmark_id: str, notebook_id: str = Query(...)):
+    bm = get_bookmark(notebook_id, bookmark_id)
+    if bm is None:
+        raise HTTPException(status_code=404, detail="Закладка не найдена")
+    return bm
+
+
+class CreateBookmarkRequest(BaseModel):
+    notebook_id: str
+    question: str
+    answer: str
+    sources: List[dict] = []
+    model: Optional[str] = ""
+    answer_mode: Optional[str] = "concise"
+    thinking_mode: Optional[bool] = False
+    title: Optional[str] = ""
+    tags: List[str] = []
+
+
+@app.post("/api/bookmarks")
+async def api_create_bookmark(req: CreateBookmarkRequest):
+    try:
+        bm = create_bookmark(req.notebook_id, req.dict())
+        return bm
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+class UpdateBookmarkRequest(BaseModel):
+    notebook_id: str
+    title: Optional[str] = None
+    tags: Optional[List[str]] = None
+
+
+@app.patch("/api/bookmarks/{bookmark_id}")
+async def api_update_bookmark(bookmark_id: str, req: UpdateBookmarkRequest):
+    patch = {k: v for k, v in req.dict().items() if k != "notebook_id" and v is not None}
+    bm = update_bookmark(req.notebook_id, bookmark_id, patch)
+    if bm is None:
+        raise HTTPException(status_code=404, detail="Закладка не найдена")
+    return bm
+
+
+@app.delete("/api/bookmarks/{bookmark_id}")
+async def api_delete_bookmark(bookmark_id: str, notebook_id: str = Query(...)):
+    ok = delete_bookmark(notebook_id, bookmark_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Закладка не найдена")
     return {"status": "ok"}
 
 # ── Управление GGUF моделями ──

@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Send, Trash2, Sparkles, Clock, Zap, Cpu, FileText, Settings as SettingsIcon, HardDrive, Square, Image as ImageIcon, Plus, X as XIcon, ChevronRight, SlidersHorizontal, RefreshCw } from 'lucide-react';
+import { Send, Trash2, Sparkles, Clock, Zap, Cpu, FileText, Settings as SettingsIcon, HardDrive, Square, Image as ImageIcon, Plus, X as XIcon, ChevronRight, SlidersHorizontal, RefreshCw, Bookmark, BookmarkCheck, Tag as TagIcon, RotateCcw, Eye, Pencil } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
@@ -11,6 +12,8 @@ import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { atomDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import { cn } from '../lib/utils';
 import SettingsModal from './SettingsModal';
+import axios from 'axios';
+import { CitationButton, CitationTooltipPortal } from '../lib/CitationTooltip';
 
 // ── Collapsible Thinking Block ────────────────────────────────────────────────
 const ThinkingBlock = ({ content, isStreaming }) => {
@@ -80,32 +83,16 @@ const ThinkingBlock = ({ content, isStreaming }) => {
 };
 
 const Citation = ({ n, sources, onClick, onHover, onLeave }) => {
-  const src = sources?.[n - 1];
-  const btnRef = useRef(null);
-
-  if (!src) {
-    return <span className="text-muted-foreground opacity-50 whitespace-nowrap">[{n}]</span>;
-  }
-
-  const handleMouseEnter = () => {
-    if (btnRef.current) {
-      const rect = btnRef.current.getBoundingClientRect();
-      onHover(src, { x: rect.left + rect.width / 2, y: rect.top });
-    }
-  };
-
+  // Делегируем в общий компонент. Старая локальная реализация удалена,
+  // API идентично — props один-в-один.
   return (
-    <span className="relative inline-flex items-center align-baseline">
-      <button
-        ref={btnRef}
-        onClick={(e) => { e.preventDefault(); onClick(src); }}
-        onMouseEnter={handleMouseEnter}
-        onMouseLeave={onLeave}
-        className="inline-flex items-center justify-center w-4 h-4 bg-primary/20 text-primary text-[9px] font-bold rounded-full hover:bg-primary hover:text-white transition-all shadow-sm border border-primary/20 relative -top-[1px]"
-      >
-        {n}
-      </button>
-    </span>
+    <CitationButton
+      n={n}
+      src={sources?.[n - 1]}
+      onClick={onClick}
+      onHover={onHover}
+      onLeave={onLeave}
+    />
   );
 };
 
@@ -277,8 +264,96 @@ const MessageItem = React.memo(({
   onOpenSource,
   setHoveredSource,
   setTooltipCoords,
-  tooltipTimeoutRef
+  tooltipTimeoutRef,
+  notebook,
+  question, // текст вопроса пользователя над этим AI-сообщением (для закладки)
+  onBookmarkSaved, // (index, ts) => void
 }) => {
+  const [bmPopover, setBmPopover] = React.useState(false);
+  const [bmTitle, setBmTitle] = React.useState('');
+  const [bmTags, setBmTags] = React.useState('');
+  const [bmSaving, setBmSaving] = React.useState(false);
+  const [bmError, setBmError] = React.useState('');
+  const bmBtnRef = React.useRef(null);
+  const bmPopoverRef = React.useRef(null);
+  const [bmCoords, setBmCoords] = React.useState({ top: 0, left: 0 });
+
+  const openBmPopover = () => {
+    setBmTitle(''); // По умолчанию пусто — на карточке возьмётся question
+    setBmTags('');
+    setBmError('');
+    // Позиционируем относительно кнопки через getBoundingClientRect
+    if (bmBtnRef.current) {
+      const rect = bmBtnRef.current.getBoundingClientRect();
+      // Поповер шириной 320px — выровняем по левому краю кнопки,
+      // но если упрётся в правый край viewport — сдвинем влево
+      const popWidth = 320;
+      const margin = 8;
+      let left = rect.left;
+      if (left + popWidth + margin > window.innerWidth) {
+        left = window.innerWidth - popWidth - margin;
+      }
+      if (left < margin) left = margin;
+      const top = rect.bottom + 6;
+      setBmCoords({ top, left });
+    }
+    setBmPopover(true);
+  };
+
+  // Закрытие по клику вне и по Escape
+  React.useEffect(() => {
+    if (!bmPopover) return;
+    const onDown = (e) => {
+      if (bmPopoverRef.current && !bmPopoverRef.current.contains(e.target)) {
+        // Игнорируем клик по самой кнопке (она сама переключает)
+        if (bmBtnRef.current && bmBtnRef.current.contains(e.target)) return;
+        setBmPopover(false);
+      }
+    };
+    const onKey = (e) => { if (e.key === 'Escape') setBmPopover(false); };
+    // mousedown чтобы успеть до onClick
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [bmPopover]);
+
+  const saveBookmark = async () => {
+    if (!notebook || !question || !msg.content) return;
+    setBmSaving(true);
+    setBmError('');
+    try {
+      // Снэпшот источников (только метаданные, без полного текста — текст устаревает)
+      const sourcesSnap = (msg.sources || []).map(s => ({
+        file_name: s.file_name,
+        page: s.page ?? null,
+        time: s.time ?? null,
+        snippet: (s.text || '').slice(0, 200),
+      }));
+      const payload = {
+        notebook_id: notebook.id,
+        question: question,
+        answer: msg.content,
+        sources: sourcesSnap,
+        model: msg._meta?.model || '',
+        answer_mode: msg._meta?.answer_mode || 'concise',
+        thinking_mode: !!msg._meta?.thinking_mode,
+        title: bmTitle.trim(),
+        tags: bmTags.split(',').map(s => s.trim()).filter(Boolean),
+      };
+      await axios.post('/api/bookmarks', payload);
+      // Сообщаем ChatArea, чтобы пометить сообщение как сохранённое
+      if (onBookmarkSaved) onBookmarkSaved(msg.id || index, Date.now());
+      window.dispatchEvent(new CustomEvent('bookmark:added'));
+      setBmPopover(false);
+    } catch (e) {
+      setBmError(e?.response?.data?.detail || 'Не удалось сохранить');
+    } finally {
+      setBmSaving(false);
+    }
+  };
   const preProcessMessage = (text) => {
     if (!text) return "";
     
@@ -459,6 +534,32 @@ const MessageItem = React.memo(({
               ))}
             </div>
           )}
+
+          {/* Кнопка «Сохранить в закладки» (только для AI и только когда стрим завершён) */}
+          {msg.role === 'ai' && !msg.loading && msg.content && notebook && (
+            <div className="mt-3 pt-2 border-t border-border/20 flex items-center gap-2">
+              {msg._savedAt ? (
+                <span className="flex items-center gap-1.5 text-[10px] font-bold text-amber-400/80">
+                  <BookmarkCheck size={12} />
+                  Сохранено в закладки
+                </span>
+              ) : (
+                <button
+                  ref={bmBtnRef}
+                  onClick={openBmPopover}
+                  className="flex items-center gap-1.5 text-[10px] font-bold text-muted-foreground hover:text-amber-400 transition-colors"
+                >
+                  <Bookmark size={12} />
+                  Сохранить в закладки
+                </button>
+              )}
+              {msg._savedAt && (
+                <span className="text-[9px] text-muted-foreground/50">
+                  {new Date(msg._savedAt).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}
+                </span>
+              )}
+            </div>
+          )}
         </div>
       </div>
     );
@@ -479,6 +580,69 @@ const MessageItem = React.memo(({
       )} style={{ zIndex: messagesLength - index }}>
         {renderContent()}
       </div>
+
+      {/* Поповер «Сохранить в закладки» — рендерим в портал, чтобы overflow-hidden
+          родительского chat-bubble-ai не обрезал форму. */}
+      {bmPopover && msg.role === 'ai' && createPortal(
+        <AnimatePresence>
+          <motion.div
+            ref={bmPopoverRef}
+            initial={{ opacity: 0, y: -4, scale: 0.96 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -4, scale: 0.96 }}
+            transition={{ duration: 0.12 }}
+            style={{ position: 'fixed', top: bmCoords.top, left: bmCoords.left, zIndex: 9999 }}
+            className="w-80 p-3 bg-card border border-border shadow-2xl rounded-2xl"
+            onClick={(e) => e.stopPropagation()}
+            onMouseDown={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-[10px] font-black uppercase tracking-widest text-muted-foreground flex items-center gap-1.5">
+                <Bookmark size={11} className="text-amber-400" />
+                Новая закладка
+              </span>
+              <button
+                onClick={() => setBmPopover(false)}
+                className="p-1 hover:bg-muted rounded-md text-muted-foreground"
+              >
+                <XIcon size={12} />
+              </button>
+            </div>
+            <input
+              autoFocus
+              value={bmTitle}
+              onChange={(e) => setBmTitle(e.target.value)}
+              placeholder="Заголовок (опц.)"
+              className="w-full bg-muted/30 border border-border/50 rounded-lg px-2.5 py-1.5 text-xs mb-2 focus:outline-none focus:ring-1 focus:ring-amber-500/50"
+            />
+            <input
+              value={bmTags}
+              onChange={(e) => setBmTags(e.target.value)}
+              placeholder="Теги через запятую"
+              className="w-full bg-muted/30 border border-border/50 rounded-lg px-2.5 py-1.5 text-xs mb-2 focus:outline-none focus:ring-1 focus:ring-amber-500/50"
+            />
+            {bmError && (
+              <p className="text-[10px] text-destructive mb-2">{bmError}</p>
+            )}
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setBmPopover(false)}
+                className="flex-1 px-2.5 py-1.5 hover:bg-muted text-muted-foreground rounded-lg text-[10px] font-bold transition-all"
+              >
+                Отмена
+              </button>
+              <button
+                onClick={saveBookmark}
+                disabled={bmSaving}
+                className="flex-1 px-2.5 py-1.5 bg-amber-500/15 hover:bg-amber-500/25 text-amber-400 disabled:opacity-50 rounded-lg text-[10px] font-black transition-all"
+              >
+                {bmSaving ? 'Сохранение…' : 'Сохранить'}
+              </button>
+            </div>
+          </motion.div>
+        </AnimatePresence>,
+        document.body
+      )}
     </motion.div>
   );
 }, (prev, next) => {
@@ -490,7 +654,10 @@ const MessageItem = React.memo(({
     prev.msg.thinkingDone === next.msg.thinkingDone &&
     prev.messagesLength === next.messagesLength &&
     prev.index === next.index &&
-    prev.msg.sources === next.msg.sources
+    prev.msg.sources === next.msg.sources &&
+    prev.msg._savedAt === next.msg._savedAt &&
+    prev.notebook === next.notebook &&
+    prev.question === next.question
   );
 });
 
@@ -522,6 +689,21 @@ export default function ChatArea({ notebook, selectedSources, onOpenSource, llmS
   const tooltipTimeoutRef = useRef(null);
   const messagesEndRef = useRef(null);
   const textareaRef = useRef(null);
+
+  // Коллбэк: MessageItem сообщает, что Q&A сохранён — помечаем сообщение
+  const markMessageSaved = React.useCallback((msgIndex, ts) => {
+    setMessages(prev => prev.map((m, i) => i === msgIndex ? { ...m, _savedAt: ts } : m));
+  }, []);
+
+  // Слушаем событие «заполни input» от закладки (Sidebar.askAgain)
+  React.useEffect(() => {
+    const onFill = (e) => {
+      const text = e.detail?.text || '';
+      if (text) setInput(text);
+    };
+    window.addEventListener('chat:fill-input', onFill);
+    return () => window.removeEventListener('chat:fill-input', onFill);
+  }, []);
 
   // Сохранение настроек при изменении
   useEffect(() => {
@@ -640,7 +822,19 @@ export default function ChatArea({ notebook, selectedSources, onOpenSource, llmS
     setStats(null);
 
     const aiMsgIndex = messages.length + 1;
-    setMessages(prev => [...prev, { role: 'ai', content: '', thinkingContent: '', thinkingDone: false, loading: true }]);
+    setMessages(prev => [...prev, {
+      role: 'ai',
+      content: '',
+      thinkingContent: '',
+      thinkingDone: false,
+      loading: true,
+      // Снимок настроек на момент вопроса — для закладки
+      _meta: {
+        model: llmSettings?.gguf_model_path || llmSettings?.llm_model || '',
+        answer_mode: answerMode,
+        thinking_mode: thinkingMode,
+      },
+    }]);
 
     const controller = new AbortController();
     setAbortController(controller);
@@ -1011,6 +1205,9 @@ export default function ChatArea({ notebook, selectedSources, onOpenSource, llmS
               setHoveredSource={setHoveredSource}
               setTooltipCoords={setTooltipCoords}
               tooltipTimeoutRef={tooltipTimeoutRef}
+              notebook={notebook}
+              question={msg.role === 'ai' && i > 0 ? messages[i - 1]?.content : ''}
+              onBookmarkSaved={markMessageSaved}
             />
           ))}
         </AnimatePresence>
@@ -1179,6 +1376,16 @@ export default function ChatArea({ notebook, selectedSources, onOpenSource, llmS
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* Глобальный портал для тултипов — единый компонент, общий с модалом закладки */}
+      <CitationTooltipPortal
+        hoveredSource={hoveredSource && tooltipCoords.x ? { src: hoveredSource, ...tooltipCoords } : null}
+        onClose={() => setHoveredSource(null)}
+        onCancelClose={() => clearTimeout(tooltipTimeoutRef.current)}
+        onResumeClose={() => {
+          tooltipTimeoutRef.current = setTimeout(() => setHoveredSource(null), 100);
+        }}
+      />
     </div>
   );
 }

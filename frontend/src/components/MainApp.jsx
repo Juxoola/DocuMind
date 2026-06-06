@@ -208,8 +208,8 @@ export default function MainApp({ notebook, onExit }) {
     }
   };
 
-  const openViewer = (filename) => {
-    setViewerFile(filename);
+  const openViewer = (file) => {
+    setViewerFile(file);
     setIsViewerOpen(true);
   };
 
