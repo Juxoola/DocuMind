@@ -16,7 +16,7 @@ export default function SettingsModal({ isOpen, onClose, settings, onSave }) {
     const [llmLoadState, setLlmLoadState] = useState({ state: 'idle', phase: null, model: null, elapsed: 0, eta: null, error: null });
     const [ggufConfig, setGgufConfig] = useState({
         search_dirs: '',
-        gguf_kv_quant: 2,
+        gguf_kv_quant: 4,
         presence_penalty: 0.0,
         frequency_penalty: 0.0,
         repeat_penalty: 1.1,
@@ -447,10 +447,10 @@ export default function SettingsModal({ isOpen, onClose, settings, onSave }) {
                                                             onChange={(e) => setLocalSettings({...localSettings, gguf_kv_quant: parseInt(e.target.value)})}
                                                             className="bg-background border border-border rounded px-2 py-1 text-foreground"
                                                         >
-                                                            <option value={1}>F16</option>
+                                                            <option value={0}>F16</option>
                                                             <option value={8}>Q8_0</option>
-                                                            <option value={12}>Q5_K</option>
-                                                            <option value={2}>Q4_K</option>
+                                                            <option value={6}>Q5_K</option>
+                                                            <option value={4}>Q4_K</option>
                                                         </select>
                                                     </label>
                                                     <label className="flex flex-col gap-1 text-[10px] text-muted-foreground" title="Штраф за повторения. Помогает модели не зацикливаться на одних и тех же словах.">
@@ -544,14 +544,14 @@ export default function SettingsModal({ isOpen, onClose, settings, onSave }) {
                                                     <label className="flex flex-col gap-1 text-[10px] text-muted-foreground" title="Сжатие памяти кэша для Vision модели. Помогает при анализе длинных видео.">
                                                         KV Cache Quant ℹ️
                                                         <select 
-                                                            value={localSettings.vision_kv_quant || 2}
+                                                            value={localSettings.vision_kv_quant || 4}
                                                             onChange={(e) => setLocalSettings({...localSettings, vision_kv_quant: parseInt(e.target.value)})}
                                                             className="bg-background border border-border rounded px-2 py-1 text-foreground"
                                                         >
-                                                            <option value={1}>F16</option>
+                                                            <option value={0}>F16</option>
                                                             <option value={8}>Q8_0</option>
-                                                            <option value={12}>Q5_K</option>
-                                                            <option value={2}>Q4_K</option>
+                                                            <option value={6}>Q5_K</option>
+                                                            <option value={4}>Q4_K</option>
                                                         </select>
                                                     </label>
                                                     <label className="flex flex-col gap-1 text-[10px] text-muted-foreground" title="Штраф за повторения для Vision модели.">

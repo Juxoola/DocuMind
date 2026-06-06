@@ -104,12 +104,17 @@ def _start_llm_server_sync(
     # Для параллельной работы нужно расширить общий контекст, чтобы каждому слоту хватило места
     total_ctx = current_config["ctx_size"] * current_config["n_parallel"]
 
-    # Маппинг типов квантования для llama-server
+    # Маппинг типов квантования для llama-server.
+    # Ключ — значение gguf_kv_quant из UI/Settings; значение — флаг --cache-type-k/v.
+    # Раньше q4_k отсутствовал в map (UI отправлял 2, получал q4_0) — квантование было слабее ожидаемого.
     CACHE_TYPE_MAP = {
         0: "f16",
         1: "f32",
-        2: "q4_0", # q4_k часто мапится на q4_0 в простых версиях
-        8: "q8_0"
+        2: "q4_0",
+        3: "q4_1",
+        4: "q4_k",
+        6: "q5_k",
+        8: "q8_0",
     }
     type_k_str = CACHE_TYPE_MAP.get(current_config["type_k"], "f16")
     type_v_str = CACHE_TYPE_MAP.get(current_config["type_v"], "f16")
