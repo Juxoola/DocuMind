@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect, lazy, Suspense } from 'react';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Send, Trash2, Sparkles, Clock, Zap, Cpu, FileText, Settings as SettingsIcon, HardDrive, Square, Image as ImageIcon, Plus, X as XIcon, ChevronRight, ChevronDown, SlidersHorizontal, RefreshCw, Bookmark, BookmarkCheck, Tag as TagIcon, RotateCcw, Eye, Pencil, Copy, Check, ListChecks, ListOrdered, AlignLeft } from 'lucide-react';
+import { Send, Trash2, Sparkles, Clock, Zap, Cpu, FileText, Settings as SettingsIcon, HardDrive, Square, Image as ImageIcon, Plus, X as XIcon, ChevronRight, ChevronDown, SlidersHorizontal, RefreshCw, Bookmark, BookmarkCheck, Tag as TagIcon, RotateCcw, Eye, Pencil, Copy, Check, ListChecks, ListOrdered, AlignLeft, Scale, GraduationCap, Smile } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
@@ -721,7 +721,13 @@ const MessageItem = React.memo(({
 // Метки и иконки — UI-уровень, живут здесь.
 // При добавлении нового режима в config.SYSTEM_PROMPT_RULES нужно
 // добавить запись и сюда, иначе в дропдауне он не появится.
+//
+// Логические группы (отображаются в дропдауне в этом порядке):
+//   1) По длине:        concise → moderate → detailed
+//   2) По формату:      summary → step_by_step → checklist
+//   3) По аудитории:    expert → eli5
 const ANSWER_MODE_OPTIONS = [
+  // ── Длина ответа ──
   {
     key: 'concise',
     label: 'Кратко + пояснение',
@@ -730,12 +736,20 @@ const ANSWER_MODE_OPTIONS = [
     accent: 'text-amber-400',
   },
   {
+    key: 'moderate',
+    label: 'Умеренно',
+    description: '2-4 абзаца: суть + ключевые детали, без статьи',
+    Icon: Scale,
+    accent: 'text-yellow-400',
+  },
+  {
     key: 'detailed',
     label: 'Развёрнуто',
     description: 'Сразу полный ответ в формате связной статьи',
     Icon: FileText,
     accent: 'text-blue-400',
   },
+  // ── Формат вывода ──
   {
     key: 'summary',
     label: 'TL;DR — 1-3 предложения',
@@ -756,6 +770,21 @@ const ANSWER_MODE_OPTIONS = [
     description: 'Практический список действий с галочками [ ]',
     Icon: ListChecks,
     accent: 'text-rose-400',
+  },
+  // ── Аудитория ──
+  {
+    key: 'expert',
+    label: 'Экспертный',
+    description: 'Терминология, формулы, нюансы и edge-cases',
+    Icon: GraduationCap,
+    accent: 'text-indigo-400',
+  },
+  {
+    key: 'eli5',
+    label: 'Простым языком',
+    description: 'Объяснение через бытовые аналогии, без терминов',
+    Icon: Smile,
+    accent: 'text-pink-400',
   },
 ];
 
