@@ -49,6 +49,15 @@ HTTP_POOL_SIZE_RERANK = int(os.getenv("HTTP_POOL_SIZE_RERANK", 4))
 # Настройки LM Studio
 LM_STUDIO_URL = os.getenv("LM_STUDIO_URL", "http://localhost:1234/v1")
 
+# F-fix #placeholder: дефолтные значения для OpenAI-совместимого клиента, когда
+# пользователь не передал свои. Это НЕ реальные секреты — LM Studio и любой
+# локальный llama-server игнорируют api_key. Но в OpenAPI-схеме/логах видно,
+# что эти строки — placeholder, а не production-ключ.
+LLM_DEFAULT_API_KEY = os.getenv("LLM_DEFAULT_API_KEY", "lm-studio")
+LLM_DEFAULT_MODEL = os.getenv("LLM_DEFAULT_MODEL", "local-model")
+EMBEDDING_DEFAULT_API_KEY = os.getenv("EMBEDDING_DEFAULT_API_KEY", "lm-studio")
+EMBEDDING_DEFAULT_MODEL = os.getenv("EMBEDDING_DEFAULT_MODEL", "text-embedding")
+
 # Настройки эмбеддингов
 EMBEDDING_MODEL_NAME = os.getenv("EMBEDDING_MODEL_NAME", "Qwen3-Embedding-0.6B-v2.Q8_0.gguf")
 RERANKER_MODEL_NAME = os.getenv("RERANKER_MODEL_NAME", "Qwen3-Reranker-0.6B-v2.Q8_0.gguf")

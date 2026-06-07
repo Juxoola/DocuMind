@@ -947,8 +947,8 @@ class ChatRequest(BaseModel):
     notebook_id: str
     thinking_mode: bool = False
     llm_url: Optional[str] = None
-    llm_api_key: Optional[str] = "lm-studio"
-    llm_model: Optional[str] = "gpt-4o"
+    llm_api_key: Optional[str] = config.LLM_DEFAULT_API_KEY
+    llm_model: Optional[str] = config.LLM_DEFAULT_MODEL
     image_base64: Optional[str] = None # Поле для фото
     # Режим ответа: "concise" (сначала коротко, потом объяснение) или
     # "detailed" (сразу развёрнуто). По умолчанию — concise.
@@ -1045,8 +1045,8 @@ async def chat(request: ChatRequest):
         from llama_index.llms.openai import OpenAI
         active_llm = OpenAI(
             api_base=request.llm_url,
-            api_key=request.llm_api_key or "lm-studio",
-            model=request.llm_model or "gpt-4o",
+            api_key=request.llm_api_key or config.LLM_DEFAULT_API_KEY,
+            model=request.llm_model or config.LLM_DEFAULT_MODEL,
             temperature=0.1,
             max_tokens=request.max_tokens
         )

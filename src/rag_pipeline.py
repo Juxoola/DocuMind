@@ -109,8 +109,8 @@ def init_settings(max_tokens=1024):
 
                 _model_cache["embed_model"] = OpenAIEmbedding(
                     api_base=f"{url}/v1",
-                    api_key="sk-local",
-                    model="text-embedding-ada-002",
+                    api_key=config.EMBEDDING_DEFAULT_API_KEY,
+                    model=config.EMBEDDING_DEFAULT_MODEL,
                     timeout=120.0,
                     # Сервер запущен с -c 4096 (= максимальный размер 1 чанка).
                     # Каждый документ обрабатывается независимо, батч не складывает токены.
@@ -145,8 +145,8 @@ def init_settings(max_tokens=1024):
 
     Settings.llm = OpenAI(
         api_base=config.LM_STUDIO_URL,
-        api_key="lm-studio",
-        model="gpt-4o",
+        api_key=config.LLM_DEFAULT_API_KEY,
+        model=config.LLM_DEFAULT_MODEL,
         temperature=config.CHAT_TEMPERATURE,
         max_tokens=max_tokens
     )
@@ -209,8 +209,8 @@ def _get_qe_llm():
     from llama_index.llms.openai import OpenAI as _OpenAI
     return _OpenAI(
         api_base=url if url.endswith("/v1") else f"{url}/v1",
-        api_key="sk-local",
-        model="gpt-4o",
+        api_key=config.LLM_DEFAULT_API_KEY,
+        model=config.LLM_DEFAULT_MODEL,
         temperature=0.3,
         max_tokens=512,       # Достаточно для генерации 3 простых фраз
         timeout=20.0,          # Запас таймаута

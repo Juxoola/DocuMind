@@ -267,8 +267,8 @@ def describe_image_with_lmstudio(image_path, llm_settings=None, existing_llm_url
 
     # Резервный вариант через LM Studio или другой OpenAI API
     api_url = (llm_settings.get("llm_url") if llm_settings else None) or config.LM_STUDIO_URL
-    api_key = (llm_settings.get("llm_api_key") if llm_settings else None) or "lm-studio"
-    model_name = (llm_settings.get("llm_model") if llm_settings else None) or "gpt-4o"
+    api_key = (llm_settings.get("llm_api_key") if llm_settings else None) or config.LLM_DEFAULT_API_KEY
+    model_name = (llm_settings.get("llm_model") if llm_settings else None) or config.LLM_DEFAULT_MODEL
     try:
         v_temp = float(llm_settings.get("vision_temperature") or 0.2)
         payload = {
