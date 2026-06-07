@@ -1,14 +1,12 @@
 import os
-import re
 import sys
 import subprocess
 import time
 import requests
 import json
-import signal
 import threading
 import logging
-from typing import Dict, Optional, Tuple, List
+from typing import Dict, Optional, List
 import config
 
 logger = logging.getLogger(__name__)

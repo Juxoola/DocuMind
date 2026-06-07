@@ -25,7 +25,7 @@ import asyncio
 
 logger = logging.getLogger(__name__)
 from src.ingestion import ingest_file
-from src.rag_pipeline import build_index, retrieve_nodes, build_file_context, make_prompt, make_messages, close_all_clients, preload_all_models
+from src.rag_pipeline import build_index, retrieve_nodes, build_file_context, make_prompt, close_all_clients, preload_all_models
 from src.gguf_manager import scan_gguf_dirs
 from src.gguf_direct import (
     get_gguf_llm, preload_gguf_llm, get_llm_status, unload_all_models, get_loaded_models,

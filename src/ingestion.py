@@ -1,16 +1,14 @@
 import os
 import sys
 import logging
-import types
 import warnings
 import subprocess
 import shutil
 import cv2
 import uuid
 import numpy as np
-import fitz  # библиотека PyMuPDF
+import fitz
 from pptx import Presentation
-import concurrent.futures
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import torch
 from llama_index.core.schema import TextNode
@@ -21,7 +19,7 @@ import time
 import gc
 import threading
 from llama_index.core.node_parser import SentenceSplitter
-from src.gguf_direct import detect_model_family, get_gguf_llm, unload_all_models
+from src.gguf_direct import get_gguf_llm, unload_all_models
 import config
 
 logger = logging.getLogger(__name__)
