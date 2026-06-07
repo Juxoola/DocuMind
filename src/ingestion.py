@@ -22,6 +22,7 @@ import gc
 import threading
 from llama_index.core.node_parser import SentenceSplitter
 from src.gguf_direct import detect_model_family, get_gguf_llm, unload_all_models
+import config
 
 logger = logging.getLogger(__name__)
 
@@ -134,7 +135,6 @@ except Exception:
     pass
 
 import whisperx
-import config
 
 def cleanup_gpu():
     """Принудительная очистка всей видеопамяти перед тяжелыми задачами."""
