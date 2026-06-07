@@ -773,6 +773,23 @@ export default function ChatArea({ notebook, selectedSources, onOpenSource, llmS
 
   useEffect(scrollToBottom, [messages]);
 
+  // F-fix #28: cleanup для активного streaming fetch при unmount ChatArea.
+  // Без этого при смене блокнота / закрытии вкладки fetch() продолжает
+  // работать, setState вызывает "Can't perform a React state update on an
+  // unmounted component" warning (в React 18 — silenced, но всё равно баг).
+  // Используем setState-обновление через callback ref, чтобы не
+  // зависеть от stale state в cleanup.
+  const abortControllerRef = useRef(null);
+  useEffect(() => {
+    return () => {
+      // abort() на latest controller (не на stale state)
+      if (abortControllerRef.current) {
+        try { abortControllerRef.current.abort(); } catch { /* ignore */ }
+        abortControllerRef.current = null;
+      }
+    };
+  }, []);
+
   // Подписка на статус LLM (для блокировки Send пока грузится модель)
   const [llmStatus, setLlmStatus] = useState({ state: 'ready', phase: null, model: null, error: null });
   useEffect(() => {
@@ -883,6 +900,7 @@ export default function ChatArea({ notebook, selectedSources, onOpenSource, llmS
     }]);
 
     const controller = new AbortController();
+    abortControllerRef.current = controller;
     setAbortController(controller);
 
     try {
@@ -978,6 +996,7 @@ export default function ChatArea({ notebook, selectedSources, onOpenSource, llmS
     } finally {
       setIsLoading(false);
       setAbortController(null);
+      abortControllerRef.current = null;
     }
   };
 
@@ -993,6 +1012,7 @@ export default function ChatArea({ notebook, selectedSources, onOpenSource, llmS
 
   const clearChat = () => {
     if (abortController) abortController.abort();
+    abortControllerRef.current = null;
     setMessages([{ role: 'ai', content: 'Чат очищен. Какой новый вопрос?' }]);
     setStats(null);
     setIsLoading(false);
@@ -1310,7 +1330,7 @@ export default function ChatArea({ notebook, selectedSources, onOpenSource, llmS
             />
             {isLoading ? (
               <button
-                onClick={() => abortController?.abort()}
+                onClick={() => { if (abortController) { abortController.abort(); abortControllerRef.current = null; } }}
                 className="p-3 bg-red-500 hover:bg-red-600 text-white rounded-xl transition-all shadow-lg shadow-red-500/20"
                 title="Остановить генерацию"
               >
