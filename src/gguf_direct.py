@@ -194,8 +194,15 @@ def _start_llm_server_sync(
                 stderr = b""
             # F-fix #31: process.communicate() может вернуть None для stderr,
             # если stream был DEVNULL и pipe уже закрыт. None.decode() → AttributeError.
+            # F-fix #32: добавляем return code и pid в сообщение, иначе при OOM
+            # или corrupt model файл непонятно что произошло.
             stderr_text = (stderr or b"").decode('utf-8', errors='ignore')[:500]
-            raise RuntimeError(f"Сервер упал при запуске: {stderr_text}")
+            retcode = process.returncode
+            raise RuntimeError(
+                f"Сервер llama-server упал при запуске (pid={process.pid}, retcode={retcode}). "
+                f"Возможные причины: OOM GPU, повреждённый .gguf, отсутствует mmproj для vision, "
+                f"несовместимая версия llama-server. stderr: {stderr_text}"
+            )
 
         time.sleep(0.5)
 
@@ -493,16 +500,19 @@ def get_gguf_embedding_url(gguf_path: str, n_threads: int = None, is_reranker: b
         #   -b 512 (вместо 2048): для 0.6B модели 2048 batch выделяет огромные pre-allocated attention buffers
         #   (~3-4GB на процесс через CUDA scratch). 512 хватает для чанков ≤2048 символов (≈1500 токенов).
         #
-        # Reranker: -c 4096, -b 512, -ub 512
+        # Reranker: -c 4096, -b 1024, -ub 512
         #   /v1/rerank оценивает каждую пару (query + doc) НЕЗАВИСИМО.
         #   -c 4096: достаточно для query(~50) + doc(2048) = 2100 токенов с запасом
-        #   -b 512 (вместо 2048): с -b 32 чанк делится на микро-части, pooling даёт неправильный score (0.0).
-        #   512 — компромисс: больше batch = 2-3 micro-batch для 2100-токенного запроса, но VRAM в 4 раза ниже.
+        #   -b 1024 (было 512): с -b 512 llama-server выдаёт 500 при RAG_RERANK_POOL=10
+        #   и средних чанках (10 × ~80 токенов = 833 > 512). 1024 хватает с запасом
+        #   на 12-15 чанков или на крупные vision-описания (один 1500-токенный чанк).
+        #   VRAM overhead: +100-200 MB на 0.6B модели (attention buffer × 2).
+        #   -b 32 — pool делится на микро-части, pooling даёт неправильный score (0.0).
         if is_reranker:
-            ctx, b_size = "4096", "512"
+            ctx, b_size, ub_size = "4096", "1024", "512"
         else:
-            ctx, b_size = "4096", "512"
-        cmd.extend(["-c", ctx, "-b", b_size, "-ub", b_size])
+            ctx, b_size, ub_size = "4096", "512", "512"
+        cmd.extend(["-c", ctx, "-b", b_size, "-ub", ub_size])
         
         # Квантование KV-cache: q8_0 = 50% экономии памяти против f16.
         # Безопасно для embedding/reranker: они не генерируют текст авторегрессивно,
