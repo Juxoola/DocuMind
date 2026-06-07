@@ -12,8 +12,16 @@ from llama_index.core.schema import TextNode
 import config
 import torch
 import threading
+import requests
+import requests.adapters
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from transformers import BitsAndBytesConfig
+
+# F-fix #15: Session для rerank-запросов (см. также ingestion.py _http_session).
+# Без Session каждый POST /v1/rerank открывает новый TCP-коннект.
+_rerank_session = requests.Session()
+_rerank_session.mount("http://", requests.adapters.HTTPAdapter(pool_connections=4, pool_maxsize=4))
+_rerank_session.mount("https://", requests.adapters.HTTPAdapter(pool_connections=4, pool_maxsize=4))
 
 logger = logging.getLogger(__name__)
 
@@ -671,7 +679,6 @@ def retrieve_nodes(query: str, notebook_id: str, allowed_files=None, max_tokens=
             payload = {"model": "gguf-reranker", "query": query, "documents": documents, "top_n": len(documents)}
             
             try:
-                import requests
                 import time as _time
                 _rerank_start = _time.time()
 
@@ -682,9 +689,10 @@ def retrieve_nodes(query: str, notebook_id: str, allowed_files=None, max_tokens=
                 # параллелит обработку внутри одного запроса.
                 # Экономия: 3× HTTP roundtrip (~50-100 мс каждый) + упрощение кода.
                 # 30 doc × 0.3с = 9с — вписывается в timeout=120с.
+                # F-fix #15: используем _rerank_session (HTTP connection pool) вместо requests.post напрямую.
                 scores = [0.0] * len(all_nodes)
                 success = True
-                resp = requests.post(
+                resp = _rerank_session.post(
                     f"{url}/v1/rerank",
                     json={"model": "gguf-reranker", "query": query, "documents": documents, "top_n": len(documents)},
                     timeout=120,

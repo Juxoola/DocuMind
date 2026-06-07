@@ -16,6 +16,8 @@ from typing import List, Optional
 import config
 import gc
 import stat
+import requests
+import requests.adapters
 
 import asyncio
 
@@ -62,6 +64,12 @@ atexit.register(unload_all_models)
 atexit.register(kill_stray_servers)
 
 app = FastAPI(title="NotebookLM Local Clone", lifespan=lifespan)
+
+# F-fix #15: общий HTTP session для chat/vision completion запросов и slot clear.
+# Каждый запрос — TCP handshake. Session переиспользует keep-alive соединения.
+_http_session = requests.Session()
+_http_session.mount("http://", requests.adapters.HTTPAdapter(pool_connections=10, pool_maxsize=10))
+_http_session.mount("https://", requests.adapters.HTTPAdapter(pool_connections=10, pool_maxsize=10))
 
 app.add_middleware(
     CORSMiddleware,
@@ -996,7 +1004,7 @@ async def chat(request: ChatRequest):
                 ]
                 try:
                     v_payload = {"messages": vision_messages, "stream": False, "max_tokens": 1024}
-                    r_vision = await asyncio.to_thread(requests.post, f"{active_llm}/v1/chat/completions", json=v_payload, timeout=60)
+                    r_vision = await asyncio.to_thread(_http_session.post, f"{active_llm}/v1/chat/completions", json=v_payload, timeout=60)
                     extracted = r_vision.json()["choices"][0]["message"]["content"].strip()
                     
                     print(f"\n  [OCR] 📷 Распознанный текст с изображения:")
@@ -1133,7 +1141,7 @@ async def chat(request: ChatRequest):
                 try:
                     # Сбрасываем состояние слота чтобы контекст не копился между запросами,
                     # но НЕ убиваем процесс сервера.
-                    requests.post(f"{active_llm}/slots/0/clear", timeout=1)
+                    _http_session.post(f"{active_llm}/slots/0/clear", timeout=1)
                 except Exception: pass
 
     return StreamingResponse(generate(), media_type="text/event-stream")

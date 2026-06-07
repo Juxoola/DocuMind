@@ -34,6 +34,15 @@ _whisper_model_cache: dict = {}
 _whisper_lock = threading.Lock()
 
 
+# F-fix #15: общий requests.Session с HTTPAdapter.
+# В OCR batch'е делается 60+ vision-запросов подряд. Без Session каждый
+# запрос открывает новый TCP-коннект (50-100 мс handshake). С Session —
+# переиспользуется. Экономия: 1-3 секунды на 60-кадровое видео.
+_http_session = requests.Session()
+_http_session.mount("http://", requests.adapters.HTTPAdapter(pool_connections=10, pool_maxsize=10))
+_http_session.mount("https://", requests.adapters.HTTPAdapter(pool_connections=10, pool_maxsize=10))
+
+
 def get_or_load_whisper(model_name: str = "medium", device: str = "cuda", compute_type: str = "int8"):
     """Возвращает кешированную WhisperX-модель или грузит и кладёт в кеш.
 
@@ -236,7 +245,7 @@ def describe_image_with_lmstudio(image_path, llm_settings=None, existing_llm_url
                     "presence_penalty": v_pres,
                     "frequency_penalty": v_freq
                 }
-                r = requests.post(f"{existing_llm_url}/v1/chat/completions", json=payload, timeout=300)
+                r = _http_session.post(f"{existing_llm_url}/v1/chat/completions", json=payload, timeout=300)
                 if r.status_code == 200:
                     res = r.json()
                     if "choices" in res:
@@ -267,7 +276,7 @@ def describe_image_with_lmstudio(image_path, llm_settings=None, existing_llm_url
             "messages": [{"role":"user","content":[{"type":"text","text":prompt},{"type":"image_url","image_url":{"url":f"data:image/jpeg;base64,{get_image_base64(image_path)}"}}]}], 
             "temperature": v_temp
         }
-        r = requests.post(f"{api_url.rstrip('/')}/chat/completions", headers={"Authorization":f"Bearer {api_key}"}, json=payload, timeout=30)
+        r = _http_session.post(f"{api_url.rstrip('/')}/chat/completions", headers={"Authorization":f"Bearer {api_key}"}, json=payload, timeout=30)
         ans = r.json()["choices"][0]["message"]["content"]
         return _clean_think_tags(ans)
     except Exception as e:
