@@ -6,7 +6,25 @@
     <title>NotebookLM Local</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <!-- F-fix #fonts-renderblock: media="print" + onload="this.media='all'" —
+         классический трюк для не-блокирующей загрузки CSS. Браузер:
+         1) Скачивает CSS как print-stylesheet (приоритет низкий, рендер не ждёт).
+         2) После onload переключает media на 'all' — стили применяются.
+         3) fallback <noscript> для пользователей без JS.
+         Плюс display=swap в запросе (был уже) — текст виден сразу
+         системным шрифтом, Inter подменяется когда загрузится. -->
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap"
+      rel="stylesheet"
+      media="print"
+      onload="this.media='all'"
+    >
+    <noscript>
+      <link
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap"
+        rel="stylesheet"
+      >
+    </noscript>
   </head>
   <body>
     <div id="root"></div>
