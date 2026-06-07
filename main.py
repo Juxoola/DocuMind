@@ -332,12 +332,15 @@ async def upload_file(
             # НЕ выгрузит vision-сервер по окончании OCR — это сделает main.py
             # после последнего файла. Экономим 4× старт 4B модели (~2-3 минуты)
             # и предотвращаем 4 потенциальных orphan CUDA-контекста на Windows.
+            # F-fix #11: то же самое для WhisperX — в batch'е аудио/видео модель
+            # грузится 1 раз, а не N раз. Экономия ~30 сек на каждый файл после первого.
             is_last_in_batch = (current_idx >= total_count)
             nodes = ingest_file(
                 file_path, notebook_id,
                 progress_cb=prog, llm_settings=llm_settings,
                 cancel_check=cancel_event.is_set,
                 keep_vision_alive=not is_last_in_batch,
+                keep_whisper_alive=not is_last_in_batch,
             )
 
             prog(90, "Построение индекса (ChromaDB)...")
@@ -359,6 +362,12 @@ async def upload_file(
                     print(f"[INGESTION] Vision-сервер выгружен после batch.")
                 except Exception as llm_err:
                     print(f"[INGESTION] Ошибка выгрузки vision-сервера: {llm_err}")
+                # F-fix #11: WhisperX тоже удерживался живым в batch'е аудио/видео — выгружаем.
+                try:
+                    from src.ingestion import unload_whisper_model
+                    unload_whisper_model()
+                except Exception as whisper_err:
+                    print(f"[INGESTION] Ошибка выгрузки WhisperX: {whisper_err}")
                 try:
                     from src.rag_pipeline import flush_bm25_rebuild
                     flush_bm25_rebuild(notebook_id)

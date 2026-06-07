@@ -19,10 +19,51 @@ import requests
 import json
 import time
 import gc
+import threading
 from llama_index.core.node_parser import SentenceSplitter
 from src.gguf_direct import detect_model_family, get_gguf_llm, unload_all_models
 
 logger = logging.getLogger(__name__)
+
+# F-fix #11: модульный кеш WhisperX-модели.
+# Ключ — (model_name, device, compute_type). Без кеша load_model занимает
+# ~30 сек и загружает ~1.5 GB в VRAM при КАЖДОМ аудио/видео файле.
+# В batch'е из 5 mp3 это лишние 2 минуты загрузок. С кешем — 1 раз за batch.
+# Сбрасывается через unload_whisper_model() (вызывается из main.py в конце batch'а).
+_whisper_model_cache: dict = {}
+_whisper_lock = threading.Lock()
+
+
+def get_or_load_whisper(model_name: str = "medium", device: str = "cuda", compute_type: str = "int8"):
+    """Возвращает кешированную WhisperX-модель или грузит и кладёт в кеш.
+
+    Потокобезопасно (lock). При первом вызове — load_model (~30 сек, 1.5 GB VRAM).
+    При последующих — возврат ссылки на тот же объект.
+    """
+    import whisperx
+    key = (model_name, device, compute_type)
+    with _whisper_lock:
+        if key in _whisper_model_cache:
+            return _whisper_model_cache[key]
+        _safe_print(f"[WhisperX] Загрузка модели {model_name} ({device}, {compute_type})...")
+        model = whisperx.load_model(model_name, device, compute_type=compute_type)
+        _whisper_model_cache[key] = model
+        return model
+
+
+def unload_whisper_model():
+    """Выгружает ВСЕ кешированные WhisperX-модели и освобождает VRAM.
+
+    Вызывается из main.py после последнего аудио/видео файла в batch'е.
+    """
+    with _whisper_lock:
+        if not _whisper_model_cache:
+            return
+        _safe_print(f"[WhisperX] Выгрузка {len(_whisper_model_cache)} кешированных моделей...")
+        _whisper_model_cache.clear()
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
 
 # Подавляем шумные предупреждения
 warnings.filterwarnings("ignore", message="Module 'speechbrain")
@@ -241,7 +282,7 @@ def save_high_res_frame(video_path, time_sec, output_path):
     except Exception as e:
         logger.warning(f"Ошибка FFmpeg при сохранении кадра: {e}")
 
-def process_audio_video(file_path, images_dir, is_video=False, progress_cb=None, llm_settings=None, cancel_check=None, notebook_id=None, keep_vision_alive=False):
+def process_audio_video(file_path, images_dir, is_video=False, progress_cb=None, llm_settings=None, cancel_check=None, notebook_id=None, keep_vision_alive=False, keep_whisper_alive=False):
     def _is_cancelled():
         return bool(cancel_check and cancel_check())
 
@@ -257,18 +298,21 @@ def process_audio_video(file_path, images_dir, is_video=False, progress_cb=None,
     frame_data = []
 
     # 1. ТРАНСКРИБАЦИЯ
+    # F-fix #11: используем модульный кеш. В batch'е WhisperX грузится 1 раз,
+    # а не N раз. keep_whisper_alive=False → выгрузить после текущего файла.
     prog(15, "Транскрибация речи (WhisperX)...")
     device = "cuda" if torch.cuda.is_available() else "cpu"
     try:
-        model = whisperx.load_model("medium", device, compute_type="int8")
+        import whisperx
+        model = get_or_load_whisper("medium", device, "int8")
         audio = whisperx.load_audio(file_path)
         result = model.transcribe(audio, batch_size=16)
         for seg in result.get('segments', []):
             transcript_data.append({"start": seg['start'], "end": seg['end'], "text": seg['text'].strip()})
     except Exception as e: print(f"WhisperX error: {e}")
     finally:
-        if 'model' in locals(): del model
-        gc.collect(); torch.cuda.empty_cache()
+        if not keep_whisper_alive:
+            unload_whisper_model()
 
     if transcript_data:
         chunk_text = ""; chunk_start = 0
@@ -796,7 +840,7 @@ def ensure_mp3_audio(file_path, prog_cb=None):
     if os.path.exists(temp_path): os.remove(file_path); return temp_path
     return file_path
 
-def ingest_file(file_path, notebook_id, progress_cb=None, llm_settings=None, cancel_check=None, keep_vision_alive=False):
+def ingest_file(file_path, notebook_id, progress_cb=None, llm_settings=None, cancel_check=None, keep_vision_alive=False, keep_whisper_alive=False):
     def _is_cancelled():
         return bool(cancel_check and cancel_check())
 
@@ -807,7 +851,7 @@ def ingest_file(file_path, notebook_id, progress_cb=None, llm_settings=None, can
     if ext in ['.mp4', '.avi', '.mkv', '.mov']: file_path = ensure_720p_video(file_path, progress_cb, cancel_check=cancel_check, notebook_id=notebook_id)
     elif ext in ['.mp3', '.wav', '.m4a']: file_path = ensure_mp3_audio(file_path, progress_cb); ext = ".mp3"
     if _is_cancelled(): raise IngestionCancelled("Cancelled after media conversion")
-    if ext in ['.mp4', '.avi', '.mkv', '.mov', '.mp3']: return process_audio_video(file_path, images_dir, ext != ".mp3", progress_cb, llm_settings, cancel_check=cancel_check, notebook_id=notebook_id, keep_vision_alive=keep_vision_alive)
+    if ext in ['.mp4', '.avi', '.mkv', '.mov', '.mp3']: return process_audio_video(file_path, images_dir, ext != ".mp3", progress_cb, llm_settings, cancel_check=cancel_check, notebook_id=notebook_id, keep_vision_alive=keep_vision_alive, keep_whisper_alive=keep_whisper_alive)
     # Больше не запускаем Vision-сервер заранее.
     # Он запустится лениво (lazy-load) только если внутри PDF/PPTX/DOCX обнаружится реальное изображение.
     shared_llm_url = None
