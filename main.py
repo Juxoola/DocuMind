@@ -43,6 +43,19 @@ async def lifespan(app: FastAPI):
     # При запуске - на всякий случай чистим мусор
     kill_stray_servers()
 
+    # F-fix #startup-cleanup: чистим .pending_delete_* папки, оставшиеся
+    # от прошлой сессии (когда ChromaDB mmap не отпустил handles).
+    # Теперь (после рестарта) handles точно мёртвы — можно удалить.
+    try:
+        import glob
+        for pending in glob.glob(os.path.join(config.NOTEBOOKS_DIR, "*.pending_delete_*")):
+            print(f"[STARTUP] Удаляю отложенную папку: {pending}")
+            success, err = robust_rmtree(pending)
+            if not success:
+                print(f"[STARTUP] Не удалось удалить {pending}: {err}")
+    except Exception as e:
+        print(f"[STARTUP] Ошибка cleanup pending_delete: {e}")
+
     # Фоновая предзагрузка моделей (сервер запустится мгновенно)
     import threading
     from src.rag_pipeline import preload_all_models
@@ -166,18 +179,24 @@ migrate_old_data()
 def robust_rmtree(path, max_retries=10, delay=1.0):
     """Надежное удаление директории для Windows (с обработкой блокировок ChromaDB).
 
-    F-fix #notebook-delete: ChromaDB на Windows иногда держит mmap'нутые
-    дескрипторы на data_level0.bin даже после close_all_clients() — это
-    связано с тем, что PersistentClient кеширует индексы в HNSW, и ОС
-    не освобождает файл, пока GC не отработает. Раньше было 5 ретраев
-    по 0.5с = 2.5с, чего не хватало. Теперь 10 ретраев по 1с = 10с, и
-    если ВСЁ РАВНО не получилось — переименовываем в .pending_delete_<ts>,
-    чтобы пользователь смог удалить вручную или повторить позже.
+    F-fix #notebook-delete: ChromaDB на Windows через HNSW (C++) держит
+    mmap-дескрипторы на data_level0.bin на уровне ОС, не Python.
+    Python-уровневый client.close() + gc.collect() НЕ освобождают их
+    сразу — нужно либо ждать, либо использовать cmd.exe rmdir (у него
+    свой пул хэндлов), либо MoveFileExW с DELAY_UNTIL_REBOOT.
+
+    Стратегия:
+    1) shutil.rmtree с затухающим backoff (1с → 5.5с) — пытаемся Python-способом.
+    2) cmd.exe rmdir /s /q — Windows-вариант, иногда работает когда Python нет.
+    3) os.rename → .pending_delete_<ts> — soft-delete (пользователь может
+       повторить DELETE позже, или удалить вручную, или дождаться startup cleanup).
+    4) Возвращаем (success: bool, error: str|None) — вызывающий код решает,
+       отдавать 200 или 503.
     """
     if not os.path.exists(path):
-        return
+        return True, None
 
-    # Сначала пытаемся снять атрибут 'только для чтеты'
+    # Снимаем read-only (наследие от прошлых ошибок)
     for root, dirs, files in os.walk(path):
         for f in files:
             try: os.chmod(os.path.join(root, f), stat.S_IWRITE)
@@ -186,49 +205,87 @@ def robust_rmtree(path, max_retries=10, delay=1.0):
             try: os.chmod(os.path.join(root, d), stat.S_IWRITE)
             except Exception: pass
 
+    # ── Попытка 1: shutil.rmtree с затухающим backoff ──
     last_err = None
     for i in range(max_retries):
         try:
-            gc.collect() # Принудительно закрываем дескрипторы файлов
+            gc.collect()
+            gc.collect()  # двойной GC для mmap
             shutil.rmtree(path)
-            return True
+            return True, None
         except PermissionError as e:
             last_err = e
-            # Затухающий backoff: 1с, 1.5с, 2с, 2.5с ... 5.5с = 35с суммарно
             wait = delay + i * 0.5
-            logger.debug(f"[robust_rmtree] PermissionError попытка {i+1}/{max_retries}, "
-                         f"ждём {wait:.1f}с: {e}")
+            logger.debug(f"[robust_rmtree] shutil rmtree попытка {i+1}/{max_retries}, ждём {wait:.1f}с: {e}")
             if i < max_retries - 1:
                 time.sleep(wait)
-            else:
-                # F-fix #defer-delete: даже после 10 ретраев файл может быть
-                # залочен (HNSW mmap не освободился). Вместо краша — переименовываем
-                # в .pending_delete_<timestamp>. Папка исчезает из UI (мы обновим
-                # список блокнотов), ноутбук становится 'soft-deleted'. Можно
-                # удалить вручную или повторным DELETE после рестарта (когда
-                # ChromaDB точно отпустит handles).
-                ts = int(time.time())
-                deferred = f"{path}.pending_delete_{ts}"
-                try:
-                    os.rename(path, deferred)
-                    logger.warning(
-                        f"[robust_rmtree] Не удалось удалить {path} после {max_retries} "
-                        f"попыток. Переименовано в {deferred}. Удалите вручную или "
-                        f"повторите DELETE после рестарта."
-                    )
-                    return True
-                except Exception as rename_err:
-                    logger.error(
-                        f"[robust_rmtree] FAILED to remove or rename {path}: "
-                        f"original={e}, rename={rename_err}"
-                    )
-                    raise
         except Exception as e:
-            print(f"Ошибка при удалении {path}: {e}")
+            last_err = e
+            logger.debug(f"[robust_rmtree] shutil rmtree неожиданная ошибка попытка {i+1}: {e}")
             if i < max_retries - 1:
-                time.sleep(delay)
-            else:
-                raise
+                time.sleep(delay + i * 0.5)
+
+    # ── Попытка 2: cmd.exe rmdir /s /q (Windows-специфичный обход) ──
+    # F-fix #cmd-rmdir: cmd.exe rmdir использует NtSetInformationFile
+    # напрямую и иногда может удалить файлы, которые Python-обёртка
+    # считает залоченными (chromadb/HNSW mmap).
+    if sys.platform == "win32":
+        try:
+            logger.debug(f"[robust_rmtree] shutil не смог, пробуем cmd.exe rmdir /s /q")
+            # rmdir возвращает exit code != 0 если что-то не удалилось, но
+            # exit code 0 = "всё удалено". Игнорируем exit code — читаем
+            # stderr, и если папки больше нет — успех.
+            result = subprocess.run(
+                ["cmd.exe", "/c", "rmdir", "/s", "/q", path],
+                capture_output=True, text=True, timeout=30
+            )
+            if not os.path.exists(path):
+                logger.info(f"[robust_rmtree] Удалено через cmd.exe rmdir: {path}")
+                return True, None
+            logger.debug(f"[robust_rmtree] cmd rmdir тоже не смог: {result.stderr[:200]}")
+        except Exception as e:
+            logger.debug(f"[robust_rmtree] cmd rmdir упал: {e}")
+
+    # ── Попытка 3: soft-delete (rename в .pending_delete_<ts>) ──
+    # На Windows os.rename() падает с WinError 5 если хоть один файл в
+    # дереве залочен. Поэтому пробуем cmd.exe move:
+    ts = int(time.time())
+    deferred = f"{path}.pending_delete_{ts}"
+    try:
+        os.rename(path, deferred)
+        logger.warning(
+            f"[robust_rmtree] Не удалось удалить {path} после {max_retries} попыток. "
+            f"Переименовано в {deferred}. Удалите вручную или перезапустите сервер."
+        )
+        return True, None
+    except Exception as rename_err:
+        # Последний fallback: cmd.exe move (тоже может упасть)
+        if sys.platform == "win32":
+            try:
+                result = subprocess.run(
+                    ["cmd.exe", "/c", "move", path, deferred],
+                    capture_output=True, text=True, timeout=10
+                )
+                if not os.path.exists(path):
+                    logger.warning(
+                        f"[robust_rmtree] Soft-deleted через cmd move: {deferred}. "
+                        f"Удалите вручную или перезапустите сервер."
+                    )
+                    return True, None
+            except Exception as move_err:
+                pass
+        # Всё провалилось. Возвращаем (False, error_msg) — вызывающий
+        # решит, показать 503 или 500.
+        err_msg = (
+            f"Не удалось удалить {path}: {last_err}. "
+            f"Вероятно, процесс (ChromaDB/HNSW) держит mmap-дескриптор. "
+            f"Подождите 1-2 минуты и попробуйте снова, или перезапустите сервер."
+        )
+        logger.error(
+            f"[robust_rmtree] FAILED to remove or rename {path}: "
+            f"shutil_err={last_err}, rename_err={rename_err}"
+        )
+        return False, err_msg
 
 
 
@@ -266,12 +323,14 @@ async def delete_notebook(nb_id: str):
     """Удаление ноутбука. F-fix #notebook-delete: комплексная очистка.
 
     1) Закрываем ВСЕ ChromaDB клиенты (снимает блокировки на .bin файлы).
-    2) Отменяем отложенный BM25 rebuild для этого ноутбука (иначе он
-       дёрнется ПОСЛЕ удаления и упадёт с FileNotFoundError, плюс
-       откроет новый клиент на удалённой папке).
-    3) Двойной gc.collect() — после close_all_clients Python не сразу
-       освобождает mmap-дескрипторы, нужен принудительный GC.
-    4) robust_rmtree с 10 ретраями и fallback в .pending_delete_<ts>.
+    2) Отменяем отложенный BM25 rebuild для этого ноутбука.
+    3) Двойной gc.collect() — для mmap-дескрипторов HNSW.
+    4) robust_rmtree с 3-уровневым fallback:
+       - shutil.rmtree с backoff
+       - cmd.exe rmdir /s /q (Windows-специфичный обход)
+       - soft-delete через .pending_delete_<ts> (rename)
+    5) Если ВСЁ провалилось — возвращаем 503, а не 500.
+       Пользователь увидит понятное сообщение "попробуйте через минуту".
     """
     close_all_clients()
     # Отменяем BM25-rebuild — иначе фоновый таймер через 30с попытается
@@ -282,12 +341,17 @@ async def delete_notebook(nb_id: str):
     except Exception as e:
         logger.debug(f"[delete_notebook] cancel_bm25_rebuild: {e}")
     gc.collect()
-    gc.collect()  # F-fix #chroma-mmap: второй GC нужен т.к. HNSW-индекс
-                 # в ChromaDB может держать mmap-дескриптор, который
-                 # освобождается только при следующем цикле GC.
+    gc.collect()  # двойной GC для mmap
     paths = config.get_notebook_paths(nb_id)
     if os.path.exists(paths["base"]):
-        robust_rmtree(paths["base"])
+        success, err_msg = robust_rmtree(paths["base"])
+        if not success:
+            # Не крашим сервер — пользователь увидит 503 с понятным
+            # сообщением и сможет повторить через минуту.
+            raise HTTPException(
+                status_code=503,
+                detail=err_msg or "Не удалось удалить ноутбук. Попробуйте позже."
+            )
     return {"status": "ok"}
 
 # ── Операции с файлами ──
