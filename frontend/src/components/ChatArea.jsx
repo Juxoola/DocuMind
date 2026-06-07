@@ -730,11 +730,12 @@ export default function ChatArea({ notebook, selectedSources, onOpenSource, llmS
   const [abortController, setAbortController] = useState(null);
   const [selectedImage, setSelectedImage] = useState(null);
   const [imagePreview, setImagePreview] = useState(null);
-  // F-fix #30: ref для батчинга streaming updates. setMessages вызывается
-  // максимум раз в 16мс (rAF), даже если чанки приходят чаще.
-  // Без этого длинный LLM-ответ (2000 токенов × 4 чанка/токен = 8000 setMessages
-  // × O(n_messages) reconciliation = видимый jank).
-  const streamBatchRef = useRef({ pendingContent: '', pendingThinking: '', rafId: null, aiMsgIndex: -1 });
+  // F-fix #30: streaming updates. Используем plain setState (не rAF-батчинг).
+  // rAF-батчинг через ref вызывал race: новые чанки перетирали старые при
+  // быстром стриме. Простой подход (setMessages каждый чанк с fullContent)
+  // надёжнее — React 18 сам батчит синхронные setState, а per-chunk
+  // setMessages гарантирует, что state.content === fullContent на момент
+  // рендера. Если перф станет проблемой — обернуть в startTransition.
   const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = useRef(null);
   const tooltipTimeoutRef = useRef(null);
@@ -932,32 +933,16 @@ export default function ChatArea({ notebook, selectedSources, onOpenSource, llmS
       let fullContent = '';
       let buffer = ''; // Буфер для склейки разорванных строк
 
-      // F-fix #30: helper для батчинга streaming updates через rAF.
-      // Накапливает pendingContent/pendingThinking в ref, setMessages
-      // триггерится не чаще 1 раза в 16мс. Полная очистка в finally.
-      const batch = streamBatchRef.current;
-      batch.pendingContent = '';
-      batch.pendingThinking = '';
-      batch.aiMsgIndex = aiMsgIndex;
-      if (batch.rafId != null) { cancelAnimationFrame(batch.rafId); batch.rafId = null; }
-      const flushBatch = () => {
-        batch.rafId = null;
-        const pc = batch.pendingContent;
-        const pt = batch.pendingThinking;
-        if (!pc && !pt) return;
-        batch.pendingContent = '';
-        batch.pendingThinking = '';
-        const idx = batch.aiMsgIndex;
+      // F-fix #30: per-chunk setMessages. fullContent — единый источник
+      // истины для ответа, накапливается в closure. thinkingContent
+      // аккумулируется функционально (prev.thinkingContent + data.text).
+      // Никаких ref — никаких race между rAF и новыми чанками.
+      const updateAi = (patch) => {
         setMessages(prev => {
-          if (idx < 0 || idx >= prev.length) return prev;
           const next = prev.slice();
-          next[idx] = { ...next[idx], content: pc || next[idx].content, thinkingContent: pt || next[idx].thinkingContent, loading: false };
+          if (next[aiMsgIndex]) next[aiMsgIndex] = { ...next[aiMsgIndex], ...patch };
           return next;
         });
-      };
-      const scheduleFlush = () => {
-        if (batch.rafId != null) return;
-        batch.rafId = requestAnimationFrame(flushBatch);
       };
 
       while (true) {
@@ -980,61 +965,41 @@ export default function ChatArea({ notebook, selectedSources, onOpenSource, llmS
           try {
             const data = JSON.parse(payload);
             if (data.type === 'sources') {
-              // F-fix #30: sources обновляются сразу, не батчатся (важно для UI citation)
-              setMessages(prev => {
-                const next = prev.slice();
-                if (next[aiMsgIndex]) next[aiMsgIndex] = { ...next[aiMsgIndex], sources: data.sources };
-                return next;
-              });
+              updateAi({ sources: data.sources });
             } else if (data.type === 'thinking_start') {
-              setMessages(prev => {
-                const next = prev.slice();
-                if (next[aiMsgIndex]) next[aiMsgIndex] = { ...next[aiMsgIndex], loading: false, thinkingContent: '', thinkingDone: false };
-                return next;
-              });
+              updateAi({ loading: false, thinkingContent: '', thinkingDone: false });
             } else if (data.type === 'thinking_chunk') {
-              batch.pendingThinking += data.text;
-              scheduleFlush();
-            } else if (data.type === 'thinking_done') {
               setMessages(prev => {
                 const next = prev.slice();
-                if (next[aiMsgIndex]) next[aiMsgIndex] = { ...next[aiMsgIndex], thinkingDone: true };
+                if (next[aiMsgIndex]) {
+                  const cur = next[aiMsgIndex].thinkingContent || '';
+                  next[aiMsgIndex] = { ...next[aiMsgIndex], thinkingContent: cur + data.text };
+                }
                 return next;
               });
+            } else if (data.type === 'thinking_done') {
+              updateAi({ thinkingDone: true });
             } else if (data.type === 'chunk') {
               fullContent += data.text;
-              batch.pendingContent = fullContent;  // заменяем, не аккумулируем
-              scheduleFlush();
+              updateAi({ content: fullContent });
             } else if (data.type === 'stats') {
               setStats(data);
             } else if (data.type === 'error') {
               fullContent = '⚠️ Ошибка: ' + data.text;
-              if (batch.rafId != null) { cancelAnimationFrame(batch.rafId); batch.rafId = null; }
-              updateAiMessage(aiMsgIndex, fullContent, []);
+              updateAi({ content: fullContent, loading: false });
             }
           } catch (e) {
             console.error('Ошибка парсинга SSE:', e, payload);
           }
         }
       }
-      // F-fix #30: финальный flush чтобы не потерять последние символы
-      if (batch.rafId != null) { cancelAnimationFrame(batch.rafId); batch.rafId = null; }
-      flushBatch();
     } catch (err) {
       if (err.name === 'AbortError') {
-        const batch = streamBatchRef.current;
-        if (batch.rafId != null) { cancelAnimationFrame(batch.rafId); batch.rafId = null; }
         updateAiMessage(aiMsgIndex, '*(Генерация остановлена)*', []);
       } else {
-        const batch = streamBatchRef.current;
-        if (batch.rafId != null) { cancelAnimationFrame(batch.rafId); batch.rafId = null; }
         updateAiMessage(aiMsgIndex, '⚠️ Ошибка связи с сервером.', []);
       }
     } finally {
-      const batch = streamBatchRef.current;
-      if (batch.rafId != null) { cancelAnimationFrame(batch.rafId); batch.rafId = null; }
-      batch.pendingContent = '';
-      batch.pendingThinking = '';
       setIsLoading(false);
       setAbortController(null);
       abortControllerRef.current = null;
