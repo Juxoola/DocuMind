@@ -481,22 +481,23 @@ def get_gguf_embedding_url(gguf_path: str, n_threads: int = None, is_reranker: b
         # Embedding/Reranker не генерируют текст авторегрессивно.
         # Параметры зависят от роли:
         #
-        # Embedding: -c 4096, -b 2048
+        # Embedding: -c 4096, -b 512, -ub 512
         #   v_splitter в process_pdf режет vision-описания на чанки по 2048 символов.
         #   Для русского текста 2048 chars ≈ 600-1500 токенов + prefix "Изображение PDF имя стр N: " ≈ 200-300 токенов.
         #   С -c 2048 длинные описания (3000+ символов) превышали контекст → 500 "Context size has been exceeded"
         #   и падение build_index. -c 4096 даёт запас с учётом prefix и Cyrillic-токенизации.
+        #   -b 512 (вместо 2048): для 0.6B модели 2048 batch выделяет огромные pre-allocated attention buffers
+        #   (~3-4GB на процесс через CUDA scratch). 512 хватает для чанков ≤2048 символов (≈1500 токенов).
         #
-        # Reranker: -c 4096, -b 2048
+        # Reranker: -c 4096, -b 512, -ub 512
         #   /v1/rerank оценивает каждую пару (query + doc) НЕЗАВИСИМО.
         #   -c 4096: достаточно для query(~50) + doc(2048) = 2100 токенов с запасом
-        #   -b 2048: обрабатывать весь документ за один forward-pass.
-        #   Без этого (-b 32) 2048-токенный чанк делится на 64 микро-части,
-        #   pooling даёт неправильный score (0.0).
+        #   -b 512 (вместо 2048): с -b 32 чанк делится на микро-части, pooling даёт неправильный score (0.0).
+        #   512 — компромисс: больше batch = 2-3 micro-batch для 2100-токенного запроса, но VRAM в 4 раза ниже.
         if is_reranker:
-            ctx, b_size = "4096", "2048"
+            ctx, b_size = "4096", "512"
         else:
-            ctx, b_size = "4096", "2048"
+            ctx, b_size = "4096", "512"
         cmd.extend(["-c", ctx, "-b", b_size, "-ub", b_size])
         
         # Квантование KV-cache: q8_0 = 50% экономии памяти против f16.
