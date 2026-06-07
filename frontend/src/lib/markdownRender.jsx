@@ -3,7 +3,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
-import rehypeRaw from 'rehype-raw';
+// import rehypeRaw from 'rehype-raw'; // XSS fix: rehype-raw позволял LLM-выводу выполнять произвольный HTML
 import { CitationButton, CitationTooltipPortal } from './CitationTooltip';
 
 /**
@@ -83,7 +83,7 @@ export function LlmMarkdown({ text, sources = [], onCite, className = '' }) {
       <div className={`prose prose-invert prose-sm max-w-none ${className}`}>
         <ReactMarkdown
           remarkPlugins={[remarkGfm, remarkMath]}
-          rehypePlugins={[rehypeRaw, rehypeKatex]}
+          rehypePlugins={[rehypeKatex]}
           components={{
             a: ({ href, children }) => {
               if (href?.startsWith('#cite:')) {
