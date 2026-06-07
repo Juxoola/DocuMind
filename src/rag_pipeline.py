@@ -595,18 +595,32 @@ def retrieve_nodes(query: str, notebook_id: str, allowed_files=None, max_tokens=
                 else:
                     print(f"  [RAG] 🔍 Вектор по 1 файлу: {len(all_nodes)} фрагм.")
             else:
-                # N файлов — per-file RRF, затем cross-file RRF
+                # F-fix #13: 1 IN-filter vector query вместо N per-file queries.
+                # N=5 файлов × 1 запрос = 5 ChromaDB round-trips. С IN-filter — 1 round-trip.
+                # Семантика per-file RRF (равный голос каждого файла) СОХРАНЯЕТСЯ:
+                # берём top_k_per_file × N результатов, группируем по file_name,
+                # затем берём top_k_per_file из каждой группы → RRF merge.
+                fetch_k = top_k_per_file * len(allowed_files)
+                vec_results_all = vector_retriever.retrieve(query)[:fetch_k]
+                bm25_all = bm25_retriever.retrieve(query) if bm25_retriever else []
+
+                # Группируем vector results по файлу
+                vec_by_file: dict = {}
+                for n in vec_results_all:
+                    fn = n.node.metadata.get("file_name", "")
+                    if fn in allowed_files:
+                        vec_by_file.setdefault(fn, []).append(n)
+                # Оставляем top_k_per_file из каждого файла
+                vec_results = []
+                for fn in allowed_files:
+                    vec_results.extend(vec_by_file.get(fn, [])[:top_k_per_file])
+
                 file_results = []
                 for fname in allowed_files:
-                    ff = MetadataFilters(
-                        filters=[MetadataFilter(key="file_name", value=fname, operator=FilterOperator.EQ)]
-                    )
-                    v = index.as_retriever(similarity_top_k=top_k_per_file, filters=ff)
-                    vec = v.retrieve(query)
-                    bm = []
-                    if bm25_retriever:
-                        bm_all = bm25_retriever.retrieve(query)
-                        bm = [n for n in bm_all if n.node.metadata.get("file_name") == fname][:top_k_per_file]
+                    # BM25: берём общий результат, фильтруем по файлу, top_k_per_file
+                    bm = [n for n in bm25_all if n.node.metadata.get("file_name") == fname][:top_k_per_file]
+                    # Vector: уже отфильтровано и capped выше
+                    vec = [n for n in vec_results if n.node.metadata.get("file_name") == fname]
                     fused = _rrf_fuse(vec, bm)
                     file_results.append((fname, fused))
                 all_nodes = _rrf_fuse_across_files(file_results)
