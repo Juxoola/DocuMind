@@ -545,7 +545,7 @@ def process_pdf(file_path, images_dir, llm_settings=None, shared_llm_url=None, o
                 raise IngestionCancelled(f"Cancelled at page {page_num+1}")
             page = doc.load_page(page_num)
             text, has_real_graphics = _analyze_page_for_vision(page)
-            page_results[page_num] = (text, has_real_graphics)
+            page_results[page_num] = (text, has_real_graphics, page)
     else:
         with ThreadPoolExecutor(max_workers=n_workers) as ex:
             cancel_check_every = max(1, total_pages // (n_workers * 4))
@@ -562,10 +562,15 @@ def process_pdf(file_path, images_dir, llm_settings=None, shared_llm_url=None, o
             for fut in as_completed(future_to_pn):
                 pn = future_to_pn[fut]
                 try:
-                    page_results[pn] = fut.result()
+                    text, has_real_graphics = fut.result()
+                    # F-fix #pdf-doubleparse: сохраняем page reference, чтобы
+                    # второй проход (_build_page_artifacts) не вызывал
+                    # load_page() повторно. PyMuPDF-страница — это объект
+                    # в памяти, его можно безопасно использовать повторно.
+                    page_results[pn] = (text, has_real_graphics, doc.load_page(pn))
                 except Exception as e:
                     logger.warning(f"Ошибка разбора страницы {pn+1}: {e}")
-                    page_results[pn] = ("", False)
+                    page_results[pn] = ("", False, None)
 
     # Параллельная фаза: создание нод + Pixmap-ов.
     # F-fix #22: PyMuPDF >= 1.24 (у нас 1.27.2.3) — get_pixmap() thread-safe.
@@ -573,16 +578,23 @@ def process_pdf(file_path, images_dir, llm_settings=None, shared_llm_url=None, o
     # PyMuPDF < 1.24", но версия давно превысила 1.24, а комментарий остался.
     # Для 100-страничного PDF экономим до 5-7 сек на вводе-выводе.
     def _build_page_artifacts(page_num: int):
-        text, has_real_graphics = page_results[page_num]
+        # F-fix #pdf-doubleparse: используем закешированный page object из
+        # page_results[3], а не вызываем doc.load_page() повторно.
+        # Каждый load_page на PyMuPDF — это повторный парсинг xref-таблицы
+        # и decode-стримов, на 100-страничном PDF тратилось 1-2 секунды
+        # впустую. Теперь страница уже в памяти.
+        result = page_results[page_num]
+        text, has_real_graphics = result[0], result[1]
+        page = result[2] if len(result) > 2 else doc.load_page(page_num)
         local_nodes = []
         image_path = None
         if text and text.strip():
             local_nodes = splitter.get_nodes_from_documents([
                 TextNode(text=text, metadata={"file_name":file_name, "page":page_num+1})
             ])
-        if has_real_graphics:
+        if has_real_graphics and page is not None:
             image_path = os.path.join(images_dir, f"p_{page_num+1}_{uuid.uuid4().hex[:6]}.png")
-            doc.load_page(page_num).get_pixmap(dpi=150).save(image_path)
+            page.get_pixmap(dpi=150).save(image_path)
         return page_num, local_nodes, image_path
 
     if total_pages <= 1 or n_workers <= 1:
