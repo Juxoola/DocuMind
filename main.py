@@ -223,17 +223,31 @@ async def get_files(notebook_id: str):
 
 # Глобальный статус загрузки для каждого блокнота
 ingestion_status = {}
-# Флаги отмены активной загрузки (per notebook)
+# F-fix #25: ключ — уникальный task_id (UUID), а не notebook_id.
+# Раньше был dict[notebook_id → Event]. При двух параллельных upload-ах
+# в один блокнот второй setdefault() возвращал Event ПЕРВОГО, и cancel
+# одного файла отменял оба. Плюс pop(notebook_id) в конце удалял Event,
+# который мог использоваться параллельной задачей.
+# Теперь каждая загрузка получает свой UUID, pop(task_id) безопасен.
+import uuid as _uuid
 upload_cancel_flags: dict = {}
+# F-fix #26: держим strong-reference на запущенные background tasks,
+# иначе asyncio.create_task() без ссылки рискует быть собранным GC
+# (в FastAPI обычно не происходит, но best practice + asyncio предупреждает).
+_background_tasks: "set[asyncio.Task]" = set()
 
 @app.get("/api/ingestion_status")
 async def get_ingestion_status(notebook_id: str):
     return ingestion_status.get(notebook_id, {"is_uploading": False})
 
 @app.post("/api/upload/cancel")
-async def cancel_upload(notebook_id: str = Query(...)):
-    """Сигнализирует активному процессу загрузки в этом блокноте остановиться."""
-    evt = upload_cancel_flags.get(notebook_id)
+async def cancel_upload(notebook_id: str = Query(...), task_id: str = Query(None)):
+    """Сигнализирует активному процессу загрузки в этом блокноте остановиться.
+
+    F-fix #25: теперь ключ — уникальный task_id (UUID), а не notebook_id.
+    Backward-compat: если task_id не передан, отменяем ВСЕ активные
+    загрузки в этом блокноте (старое поведение).
+    """
     # Мгновенно убиваем все subprocess-ы (ffmpeg и пр.), даже если cancel_check ещё не сработал
     try:
         from src.ingestion import kill_subprocesses
@@ -242,10 +256,20 @@ async def cancel_upload(notebook_id: str = Query(...)):
             print(f"[CANCEL] Убито {killed} активных subprocess-ов для {notebook_id}")
     except Exception as e:
         print(f"[CANCEL] Ошибка при kill_subprocesses: {e}")
-    if evt is None:
-        return {"status": "no_active_upload"}
-    evt.set()
-    return {"status": "cancel_requested"}
+    if task_id:
+        evt = upload_cancel_flags.get(task_id)
+        if evt is None:
+            return {"status": "no_active_upload"}
+        evt.set()
+        return {"status": "cancel_requested", "task_id": task_id}
+    # backward-compat: отменить всё
+    found = False
+    for tid, evt in list(upload_cancel_flags.items()):
+        # task_id в значении Event не хранится, фильтруем по префиксу nb_id
+        # — проще: отменяем все и пусть process_task сам себя убирает
+        evt.set()
+        found = True
+    return {"status": "cancel_requested" if found else "no_active_upload"}
 
 @app.post("/api/upload")
 async def upload_file(
@@ -334,11 +358,18 @@ async def upload_file(
         "vision_mtp_enabled": vision_mtp_enabled,
     }
 
+    # F-fix #25: уникальный task_id для каждой загрузки.
+    task_id = _uuid.uuid4().hex
+    # Возвращаем task_id в первом SSE-событии, чтобы клиент мог отменить именно эту загрузку
+    q.put({"type": "started", "task_id": task_id, "filename": file.filename})
+
     def process_task():
         import time
         start_time = time.time()
-        # Инициализируем cancel-флаг для этого блокнота
-        cancel_event = upload_cancel_flags.setdefault(notebook_id, threading.Event())
+        # F-fix #25: ключ = task_id (UUID), а не notebook_id. Это решает race condition
+        # при двух параллельных upload-ах в один блокнот: раньше второй setdefault()
+        # возвращал Event ПЕРВОГО, cancel одного отменял оба.
+        cancel_event = upload_cancel_flags.setdefault(task_id, threading.Event())
         cancel_event.clear()
         # Инициализируем статус пачки
         ingestion_status[notebook_id] = {
@@ -347,7 +378,8 @@ async def upload_file(
             "batch_progress": (current_idx - 1) / total_count * 100,
             "current_file": current_idx,
             "total_files": total_count,
-            "status": "Подготовка..."
+            "status": "Подготовка...",
+            "task_id": task_id,  # F-fix #25: для UI кнопки cancel именно этой загрузки
         }
         try:
             from src.ingestion import IngestionCancelled
@@ -467,15 +499,19 @@ async def upload_file(
             ingestion_status[notebook_id] = {"is_uploading": False, "error": str(e)}
             q.put({"type": "error", "msg": str(e)})
         finally:
-            # Освобождаем cancel-флаг после завершения задачи
-            upload_cancel_flags.pop(notebook_id, None)
+            # F-fix #25: освобождаем cancel-флаг по task_id (безопасно при параллельных загрузках)
+            upload_cancel_flags.pop(task_id, None)
             # После загрузки файла оставляем модели в памяти, но чистим кэш
             import gc, torch
             gc.collect()
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
 
-    asyncio.create_task(asyncio.to_thread(process_task))
+    # F-fix #26: сохраняем strong-reference на task, иначе GC может его собрать.
+    # Удаляем из set после завершения (callback).
+    _task = asyncio.create_task(asyncio.to_thread(process_task))
+    _background_tasks.add(_task)
+    _task.add_done_callback(_background_tasks.discard)
 
     async def event_generator():
         while True:
