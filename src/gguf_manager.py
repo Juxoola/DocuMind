@@ -213,8 +213,14 @@ def stop_gguf_server() -> Dict:
     global _server_process, _server_info
     if _server_process:
         _server_process.terminate()
-        try: _server_process.wait(timeout=5)
-        except: _server_process.kill()
+        try:
+            _server_process.wait(timeout=5)
+        except Exception:
+            # F-fix #17: bare except ловит BaseException (включая KeyboardInterrupt
+            # и SystemExit), что маскирует Ctrl+C от пользователя. Ловим только
+            # реальные ошибки ожидания процесса.
+            try: _server_process.kill()
+            except Exception: pass
     _server_process = None
     _server_info = {}
     return {"status": "ok"}
