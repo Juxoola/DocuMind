@@ -327,10 +327,17 @@ async def upload_file(
                     })
 
             prog(5, "Файл сохранён, подготовка...")
+            # F-fix #7: держим Vision-сервер живым между файлами в batch.
+            # keep_vision_alive=True означает, что process_pdf/process_audio_video
+            # НЕ выгрузит vision-сервер по окончании OCR — это сделает main.py
+            # после последнего файла. Экономим 4× старт 4B модели (~2-3 минуты)
+            # и предотвращаем 4 потенциальных orphan CUDA-контекста на Windows.
+            is_last_in_batch = (current_idx >= total_count)
             nodes = ingest_file(
                 file_path, notebook_id,
                 progress_cb=prog, llm_settings=llm_settings,
                 cancel_check=cancel_event.is_set,
+                keep_vision_alive=not is_last_in_batch,
             )
 
             prog(90, "Построение индекса (ChromaDB)...")
@@ -343,8 +350,15 @@ async def upload_file(
 
             # Если это последний файл в пачке — форсируем пересборку BM25 сейчас,
             # иначе debounce в build_index подождёт _BM25_DEBOUNCE_SEC.
-            if current_idx >= total_count:
+            if is_last_in_batch:
                 print(f"[INGESTION] Пачка завершена. {total_count} файлов обработано.")
+                # Vision-сервер удерживался живым всё время batch — выгружаем сейчас один раз.
+                try:
+                    from src.gguf_direct import unload_all_models
+                    unload_all_models(role="llm")
+                    print(f"[INGESTION] Vision-сервер выгружен после batch.")
+                except Exception as llm_err:
+                    print(f"[INGESTION] Ошибка выгрузки vision-сервера: {llm_err}")
                 try:
                     from src.rag_pipeline import flush_bm25_rebuild
                     flush_bm25_rebuild(notebook_id)
