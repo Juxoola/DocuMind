@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import Sidebar from './Sidebar';
+import { useDragWidth } from '../lib/useDragWidth';
 import ChatArea from './ChatArea';
 import DocumentViewer from './DocumentViewer';
 import { ChevronLeft, ChevronRight, X } from 'lucide-react';
@@ -13,7 +14,10 @@ export default function MainApp({ notebook, onExit }) {
   const [isViewerOpen, setIsViewerOpen] = useState(false);
   const [viewerWidth, setViewerWidth] = useState(600);
   const [isResizing, setIsResizing] = useState(false);
-  const [sidebarWidth, setSidebarWidth] = useState(300);
+  const [sidebarWidth, onSidebarMouseDown] = useDragWidth({ initial: 300, min: 240, max: 600 });
+  // F-fix #29: для viewer-resizer нужны snapshot-значения (startX/startWidth),
+  // поэтому хук useDragWidth не подходит. Делаем cleanup вручную через ref.
+  const viewerDragCleanupRef = useRef(null);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [uploadState, setUploadState] = useState({
     isUploading: false,
@@ -159,6 +163,16 @@ export default function MainApp({ notebook, onExit }) {
   };
 
   useEffect(() => {
+    // F-fix #29: при unmount снять viewer-resizer listeners если drag в процессе
+    return () => {
+      if (viewerDragCleanupRef.current) {
+        try { viewerDragCleanupRef.current(); } catch { /* ignore */ }
+        viewerDragCleanupRef.current = null;
+      }
+    };
+  }, []);
+
+  useEffect(() => {
     fetchSources();
     let timerId;
     const checkStatus = async () => {
@@ -251,26 +265,10 @@ export default function MainApp({ notebook, onExit }) {
               onUpload={handleUpload}
             />
 
-            {/* Ресайзер боковой панели */}
-            <div 
+            {/* Ресайзер боковой панели (F-fix #29: см. useDragWidth cleanup) */}
+            <div
               className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize z-50 group/s-resizer hover:bg-primary/30 transition-colors"
-              onMouseDown={(e) => {
-                e.preventDefault();
-                const onMouseMove = (e) => {
-                  const newWidth = e.clientX;
-                  // Ограничиваем, чтобы не налезать на чат (max-w-[1400px])
-                  const maxAllowed = (window.innerWidth - 1400) / 2 - 20;
-                  if (newWidth > 240 && newWidth < Math.max(240, Math.min(600, maxAllowed))) {
-                    setSidebarWidth(newWidth);
-                  }
-                };
-                const onMouseUp = () => {
-                  document.removeEventListener('mousemove', onMouseMove);
-                  document.removeEventListener('mouseup', onMouseUp);
-                };
-                document.addEventListener('mousemove', onMouseMove);
-                document.addEventListener('mouseup', onMouseUp);
-              }}
+              onMouseDown={onSidebarMouseDown}
             />
           </motion.div>
         )}
@@ -325,7 +323,7 @@ export default function MainApp({ notebook, onExit }) {
               {isResizing && <div className="fixed inset-0 z-[100] cursor-col-resize" />}
 
               {/* Ресайзер просмотрщика */}
-              <div 
+              <div
                 className="absolute left-0 top-0 bottom-0 w-4 -left-2 cursor-col-resize z-[60] group/resizer"
                 onMouseDown={(e) => {
                   e.preventDefault();
@@ -342,7 +340,10 @@ export default function MainApp({ notebook, onExit }) {
                     setIsResizing(false);
                     document.removeEventListener('mousemove', onMouseMove);
                     document.removeEventListener('mouseup', onMouseUp);
+                    viewerDragCleanupRef.current = null;
                   };
+                  // F-fix #29: сохраняем cleanup для unmount-safety
+                  viewerDragCleanupRef.current = onMouseUp;
                   document.addEventListener('mousemove', onMouseMove);
                   document.addEventListener('mouseup', onMouseUp);
                 }}
