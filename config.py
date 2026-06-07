@@ -56,7 +56,14 @@ LM_STUDIO_URL = os.getenv("LM_STUDIO_URL", "http://localhost:1234/v1")
 LLM_DEFAULT_API_KEY = os.getenv("LLM_DEFAULT_API_KEY", "lm-studio")
 LLM_DEFAULT_MODEL = os.getenv("LLM_DEFAULT_MODEL", "local-model")
 EMBEDDING_DEFAULT_API_KEY = os.getenv("EMBEDDING_DEFAULT_API_KEY", "lm-studio")
-EMBEDDING_DEFAULT_MODEL = os.getenv("EMBEDDING_DEFAULT_MODEL", "text-embedding")
+# F-fix #embedding-model: имя модели ВАЛИДИРУЕТСЯ llama_index'ом через
+# OpenAIEmbeddingModelType enum. Нужно реальное имя из списка:
+#   text-embedding-3-small / text-embedding-3-large / text-embedding-ada-002
+# llama-server / LM Studio игнорируют это поле, но enum-check падает
+# на любую отсебятину ('text-embedding', 'local-model' и т.п.).
+# Возвращаем валидный text-embedding-ada-002 — он совместим со всеми
+# локальными серверами и не блокирует startup.
+EMBEDDING_DEFAULT_MODEL = os.getenv("EMBEDDING_DEFAULT_MODEL", "text-embedding-ada-002")
 
 # F-fix #upload-limit: максимальный размер одного загружаемого файла в МБ.
 # Раньше лимита не было — пользователь мог загрузить 100 ГБ файл, и uvicorn
