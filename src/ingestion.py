@@ -360,7 +360,7 @@ def process_audio_video(file_path, images_dir, is_video=False, progress_cb=None,
         try:
             prev_saved_thumb = None; last_seen_thumb = None; stable_since_sec = 0; current_sec = 0
             chunk_size = COMPARE_SIZE[0] * COMPARE_SIZE[1] * 3
-            cancel_check_every = 30  # проверяем cancel каждые ~30 кадров (~30с видео)
+            cancel_check_every = 5  # F-fix #video-cancel: проверяем cancel каждые ~5 кадров (~5с видео)
             frame_counter = 0
             while True:
                 if frame_counter % cancel_check_every == 0 and _is_cancelled():
