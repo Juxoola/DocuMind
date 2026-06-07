@@ -507,16 +507,19 @@ def get_gguf_embedding_url(gguf_path: str, n_threads: int = None, is_reranker: b
         #   -b 512 (вместо 2048): для 0.6B модели 2048 batch выделяет огромные pre-allocated attention buffers
         #   (~3-4GB на процесс через CUDA scratch). 512 хватает для чанков ≤2048 символов (≈1500 токенов).
         #
-        # Reranker: -c 4096, -b 1024, -ub 1024
+        # Reranker: -c 4096, -b 2048, -ub 2048
         #   /v1/rerank оценивает каждую пару (query + doc) НЕЗАВИСИМО.
         #   -c 4096: достаточно для query(~50) + doc(2048) = 2100 токенов с запасом
-        #   -b 1024 / -ub 1024: llama.cpp использует "physical batch size" = -ub
-        #   (micro-batch). 10 чанков × ~80 токенов = 833 > 512 → 500 ошибка.
-        #   С -ub 1024 хватает с запасом на 12-15 чанков или крупные vision-описания.
-        #   VRAM: +100-200 MB на 0.6B модели по сравнению с -ub 512.
+        #   -b 2048 / -ub 2048: llama.cpp использует "physical batch size" = -ub
+        #   (micro-batch). Реальные замеры:
+        #     * 10 чанков × ~80 токенов + query+template = 1025 токенов
+        #     * с Query Expansion (3 запроса × 35 чанков) = 1048-1181 токенов
+        #   -b 1024 не хватало — 1025 > 1024 → 500 "physical batch size".
+        #   -b 2048 даёт 2x запас на крупные vision-описания и QE.
+        #   VRAM: +150-250 MB на 0.6B модели (KV-cache scratch × 2).
         #   -ub 32 — pool делится на микро-части, pooling даёт неправильный score (0.0).
         if is_reranker:
-            ctx, b_size, ub_size = "4096", "1024", "1024"
+            ctx, b_size, ub_size = "4096", "2048", "2048"
         else:
             ctx, b_size, ub_size = "4096", "512", "512"
         cmd.extend(["-c", ctx, "-b", b_size, "-ub", ub_size])
