@@ -163,12 +163,21 @@ def migrate_old_data():
 
 migrate_old_data()
 
-def robust_rmtree(path, max_retries=5, delay=0.5):
-    """Надежное удаление директории для Windows (с обработкой блокировок ChromaDB)."""
+def robust_rmtree(path, max_retries=10, delay=1.0):
+    """Надежное удаление директории для Windows (с обработкой блокировок ChromaDB).
+
+    F-fix #notebook-delete: ChromaDB на Windows иногда держит mmap'нутые
+    дескрипторы на data_level0.bin даже после close_all_clients() — это
+    связано с тем, что PersistentClient кеширует индексы в HNSW, и ОС
+    не освобождает файл, пока GC не отработает. Раньше было 5 ретраев
+    по 0.5с = 2.5с, чего не хватало. Теперь 10 ретраев по 1с = 10с, и
+    если ВСЁ РАВНО не получилось — переименовываем в .pending_delete_<ts>,
+    чтобы пользователь смог удалить вручную или повторить позже.
+    """
     if not os.path.exists(path):
         return
 
-    # Сначала пытаемся снять атрибут 'только для чтения'
+    # Сначала пытаемся снять атрибут 'только для чтеты'
     for root, dirs, files in os.walk(path):
         for f in files:
             try: os.chmod(os.path.join(root, f), stat.S_IWRITE)
@@ -177,16 +186,43 @@ def robust_rmtree(path, max_retries=5, delay=0.5):
             try: os.chmod(os.path.join(root, d), stat.S_IWRITE)
             except Exception: pass
 
+    last_err = None
     for i in range(max_retries):
         try:
             gc.collect() # Принудительно закрываем дескрипторы файлов
             shutil.rmtree(path)
             return True
-        except PermissionError:
+        except PermissionError as e:
+            last_err = e
+            # Затухающий backoff: 1с, 1.5с, 2с, 2.5с ... 5.5с = 35с суммарно
+            wait = delay + i * 0.5
+            logger.debug(f"[robust_rmtree] PermissionError попытка {i+1}/{max_retries}, "
+                         f"ждём {wait:.1f}с: {e}")
             if i < max_retries - 1:
-                time.sleep(delay)
+                time.sleep(wait)
             else:
-                raise
+                # F-fix #defer-delete: даже после 10 ретраев файл может быть
+                # залочен (HNSW mmap не освободился). Вместо краша — переименовываем
+                # в .pending_delete_<timestamp>. Папка исчезает из UI (мы обновим
+                # список блокнотов), ноутбук становится 'soft-deleted'. Можно
+                # удалить вручную или повторным DELETE после рестарта (когда
+                # ChromaDB точно отпустит handles).
+                ts = int(time.time())
+                deferred = f"{path}.pending_delete_{ts}"
+                try:
+                    os.rename(path, deferred)
+                    logger.warning(
+                        f"[robust_rmtree] Не удалось удалить {path} после {max_retries} "
+                        f"попыток. Переименовано в {deferred}. Удалите вручную или "
+                        f"повторите DELETE после рестарта."
+                    )
+                    return True
+                except Exception as rename_err:
+                    logger.error(
+                        f"[robust_rmtree] FAILED to remove or rename {path}: "
+                        f"original={e}, rename={rename_err}"
+                    )
+                    raise
         except Exception as e:
             print(f"Ошибка при удалении {path}: {e}")
             if i < max_retries - 1:
@@ -227,7 +263,28 @@ async def create_notebook(req: CreateNotebookRequest):
 
 @app.delete("/api/notebooks/{nb_id}")
 async def delete_notebook(nb_id: str):
-    close_all_clients() # Закрываем базу перед удалением
+    """Удаление ноутбука. F-fix #notebook-delete: комплексная очистка.
+
+    1) Закрываем ВСЕ ChromaDB клиенты (снимает блокировки на .bin файлы).
+    2) Отменяем отложенный BM25 rebuild для этого ноутбука (иначе он
+       дёрнется ПОСЛЕ удаления и упадёт с FileNotFoundError, плюс
+       откроет новый клиент на удалённой папке).
+    3) Двойной gc.collect() — после close_all_clients Python не сразу
+       освобождает mmap-дескрипторы, нужен принудительный GC.
+    4) robust_rmtree с 10 ретраями и fallback в .pending_delete_<ts>.
+    """
+    close_all_clients()
+    # Отменяем BM25-rebuild — иначе фоновый таймер через 30с попытается
+    # открыть удалённый chroma_db и нагенерирует FileNotFoundError.
+    try:
+        from src.rag_pipeline import cancel_bm25_rebuild
+        cancel_bm25_rebuild(nb_id)
+    except Exception as e:
+        logger.debug(f"[delete_notebook] cancel_bm25_rebuild: {e}")
+    gc.collect()
+    gc.collect()  # F-fix #chroma-mmap: второй GC нужен т.к. HNSW-индекс
+                 # в ChromaDB может держать mmap-дескриптор, который
+                 # освобождается только при следующем цикле GC.
     paths = config.get_notebook_paths(nb_id)
     if os.path.exists(paths["base"]):
         robust_rmtree(paths["base"])

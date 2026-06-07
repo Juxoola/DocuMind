@@ -345,6 +345,23 @@ def _schedule_bm25_rebuild(notebook_id: str, db_path: str):
         print(f"[RAG] ⏱ BM25 rebuild запланирован через {_BM25_DEBOUNCE_SEC:.0f}с (можно сбросить через flush_bm25_rebuild)")
 
 
+def cancel_bm25_rebuild(notebook_id: str):
+    """Отменить отложенный BM25 rebuild для ноутбука БЕЗ немедленного rebuild.
+
+    F-fix #notebook-delete: при удалении ноутбука нужно гарантировать, что
+    фоновый таймер (если есть) НЕ дёрнется через 30с и не попытается открыть
+    уже удалённый chroma_db с FileNotFoundError. flush_bm25_rebuild
+    форсирует пересборку — это нам не нужно при delete.
+    """
+    with _bm25_pending_lock:
+        timer = _bm25_pending_timers.pop(notebook_id, None)
+        _bm25_pending_dbpath.pop(notebook_id, None)
+        if timer is not None:
+            try: timer.cancel()
+            except Exception as e:
+                logger.debug(f"[cancel_bm25_rebuild] timer.cancel: {e}")
+
+
 def flush_bm25_rebuild(notebook_id: str, db_path: str = None, wait: bool = False, timeout: float = 120.0):
     """Форсировать немедленную пересборку BM25. Используется в конце batch-upload.
 
