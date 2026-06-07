@@ -73,7 +73,7 @@ _http_session.mount("https://", requests.adapters.HTTPAdapter(pool_connections=1
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173", "http://localhost:8000", "http://127.0.0.1:8000"],
+    allow_origins=config.CORS_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -111,21 +111,32 @@ app.mount("/files", StaticFiles(directory=config.NOTEBOOKS_DIR), name="notebooks
 
 # Миграция старых данных в "default" ноутбук
 def migrate_old_data():
-    old_data = os.path.join(config.BASE_DIR, "data")
-    old_db = os.path.join(config.BASE_DIR, "chroma_db")
-    old_imgs = os.path.join(config.BASE_DIR, "images")
-    
-    if os.path.exists(old_data) or os.path.exists(old_db) or os.path.exists(old_imgs):
+    """Переносит старые data/chroma_db/images в новый default-блокнот.
+    F-fix #18: обёрнуто в try/except, чтобы при ошибке (битый файл, permission)
+    приложение НЕ падало на старте. Логируем и продолжаем.
+    """
+    try:
+        old_data = os.path.join(config.BASE_DIR, "data")
+        old_db = os.path.join(config.BASE_DIR, "chroma_db")
+        old_imgs = os.path.join(config.BASE_DIR, "images")
+
+        if not (os.path.exists(old_data) or os.path.exists(old_db) or os.path.exists(old_imgs)):
+            return
+
         print("Обнаружены старые данные. Миграция в ноутбук 'default'...")
         paths = config.get_notebook_paths("default")
         os.makedirs(paths["base"], exist_ok=True)
         if os.path.exists(old_data): shutil.move(old_data, paths["data"])
         if os.path.exists(old_db): shutil.move(old_db, paths["chroma_db"])
         if os.path.exists(old_imgs): shutil.move(old_imgs, paths["images"])
-        
+
         # Создаем meta.json
         with open(os.path.join(paths["base"], "meta.json"), "w", encoding="utf-8") as f:
             json.dump({"id": "default", "name": "Мой первый блокнот", "created_at": time.time()}, f)
+    except Exception as e:
+        # F-fix #18: ошибка миграции НЕ должна ронять весь uvicorn.
+        # Это best-effort — лучше запустить приложение без миграции, чем не запустить вообще.
+        print(f"[migrate_old_data] Ошибка миграции (продолжаем без неё): {e}")
 
 migrate_old_data()
 
@@ -1170,4 +1181,4 @@ if __name__ == "__main__":
     import uvicorn
     # Отключаем логирование каждого HTTP-запроса (access_log=False)
     # и оставляем только предупреждения и ошибки (log_level="warning")
-    uvicorn.run("main:app", host=config.HOST, port=config.PORT, reload=True, access_log=False, log_level="warning")
+    uvicorn.run("main:app", host=config.HOST, port=config.PORT, reload=config.RELOAD, access_log=False, log_level="warning")

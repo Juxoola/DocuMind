@@ -25,6 +25,12 @@ def get_notebook_paths(notebook_id: str):
 # Настройки сервера
 HOST = os.getenv("HOST", "0.0.0.0")
 PORT = int(os.getenv("PORT", 8000))
+# F-fix #19: reload=True удобен в dev (авто-restart на save), но в prod он
+# жрёт +500 MB RAM и по 5-10 сек на каждый restart. По умолчанию выключен.
+RELOAD = os.getenv("RELOAD", "false").lower() in ("1", "true", "yes")
+# F-fix #20: CORS origins через переменную окружения (для деплоя не на localhost).
+# Дефолт — dev-окружение (Vite на 5173, uvicorn на 8000).
+CORS_ORIGINS = [o.strip() for o in os.getenv("CORS_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173,http://localhost:8000,http://127.0.0.1:8000").split(",") if o.strip()]
 
 # Настройки LM Studio
 LM_STUDIO_URL = os.getenv("LM_STUDIO_URL", "http://localhost:1234/v1")
