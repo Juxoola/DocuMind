@@ -289,13 +289,23 @@ export default function SettingsModal({ isOpen, onClose, settings, onSave }) {
                                     <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest flex items-center gap-2">
                                         <Key size={12} /> API Key
                                     </label>
-                                    <input 
+                                    <input
                                         type="password"
                                         value={localSettings.llm_api_key}
                                         onChange={(e) => setLocalSettings({...localSettings, llm_api_key: e.target.value})}
                                         placeholder="lm-studio"
+                                        autoComplete="off"
+                                        spellCheck="false"
                                         className="w-full bg-muted/30 border border-border/50 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all"
                                     />
+                                    {/* F-fix #27: предупреждаем что ключ в localStorage.
+                                        В идеале — sessionStorage (живёт в одной вкладке),
+                                        но это ломает UX (надо вводить каждый раз).
+                                        Best-effort: предупреждение + autoComplete=off. */}
+                                    <p className="text-[10px] text-amber-500/80 italic flex items-start gap-1">
+                                        <span>⚠</span>
+                                        <span>API-ключ хранится в localStorage браузера. Не используйте здесь production-ключи — только локальные (lm-studio, no-key).</span>
+                                    </p>
                                 </div>
 
                                 <div className="space-y-2">

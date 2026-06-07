@@ -1376,7 +1376,13 @@ export default function ChatArea({ notebook, selectedSources, onOpenSource, llmS
         settings={llmSettings}
         onSave={(newSettings) => {
           setLlmSettings(newSettings);
-          localStorage.setItem('llm_settings', JSON.stringify(newSettings));
+          // F-fix #27: API-ключ выносим в sessionStorage (живёт только в текущей вкладке).
+          // В localStorage — всё остальное (модели, температуры, URL).
+          // При компрометации скрипта через XSS злоумышленник получит доступ
+          // к localStorage, но НЕ к ключу (если вкладка закрыта — ключа уже нет).
+          const { llm_api_key, ...rest } = newSettings;
+          try { sessionStorage.setItem('llm_api_key', llm_api_key || ''); } catch (e) { /* sessionStorage disabled */ }
+          localStorage.setItem('llm_settings', JSON.stringify(rest));
         }}
       />
 

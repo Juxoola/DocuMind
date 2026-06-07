@@ -25,9 +25,13 @@ export default function MainApp({ notebook, onExit }) {
   });
   const [llmSettings, setLlmSettings] = useState(() => {
 		const saved = localStorage.getItem('llm_settings');
-		return saved ? JSON.parse(saved) : {
+		// F-fix #27: API-ключ читаем из sessionStorage (а не localStorage).
+		// Если ключа нет (новая вкладка / после закрытия) — fallback 'lm-studio'.
+		let apiKey = 'lm-studio';
+		try { apiKey = sessionStorage.getItem('llm_api_key') || apiKey; } catch {}
+		return saved ? { ...JSON.parse(saved), llm_api_key: apiKey } : {
 			llm_url: 'http://localhost:1234/v1',
-			llm_api_key: 'lm-studio',
+			llm_api_key: apiKey,
 			llm_model: 'gpt-4o',
 			use_gguf: '',
 			gguf_model_path: '',
