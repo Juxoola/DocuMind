@@ -1,4 +1,5 @@
 import os
+import sys
 import shutil
 import json
 import time
@@ -7,6 +8,7 @@ import logging
 import requests
 import traceback
 import threading
+import subprocess
 from pathlib import Path
 from fastapi import FastAPI, UploadFile, File, HTTPException, Query
 from fastapi.responses import StreamingResponse
