@@ -226,24 +226,7 @@ def get_system_prompt(mode: str = None) -> str:
 
 # ── Сохранение настроек ──
 
-LAST_MODELS_FILE = os.path.join(BASE_DIR, "last_models.json")
 RAG_CONFIG_FILE = os.path.join(BASE_DIR, "rag_config.json")
-
-def save_last_model(gguf_path, mmproj_path):
-    try:
-        with open(LAST_MODELS_FILE, "w", encoding="utf-8") as f:
-            json.dump({"gguf": gguf_path, "mmproj": mmproj_path}, f)
-    except Exception as e:
-        logger.warning(f"Не удалось сохранить last_models: {e}")
-
-def load_last_model():
-    try:
-        if os.path.exists(LAST_MODELS_FILE):
-            with open(LAST_MODELS_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
-    except Exception as e:
-        logger.warning(f"Не удалось загрузить last_models: {e}")
-    return {"gguf": None, "mmproj": None}
 
 def save_rag_config():
     config_data = {

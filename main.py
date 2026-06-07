@@ -563,8 +563,6 @@ async def upload_file(
         # Используем прямой API вместо сервера
         use_gguf_direct = True
         effective_llm_model = os.path.basename(gguf_model_path)
-        # Сохраняем как последнюю удачную конфигурацию
-        config.save_last_model(gguf_model_path, gguf_mmproj_path)
 
     llm_settings = {
         "llm_url": effective_llm_url,
@@ -1267,7 +1265,6 @@ async def chat(request: ChatRequest):
                 thinking_budget=request.thinking_budget,
                 mtp_enabled=request.mtp_enabled
             )
-            config.save_last_model(request.gguf_model_path, request.gguf_mmproj_path)
         except Exception as e:
             error_msg = f"Ошибка загрузки LLM: {str(e)}"
             async def error_gen():
