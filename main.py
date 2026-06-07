@@ -629,6 +629,90 @@ async def api_gguf_kill_all():
     return {"status": "ok", "msg": "Все процессы llama-server завершены"}
 
 
+@app.get("/api/vram")
+async def api_vram():
+    """Возвращает текущее использование VRAM + список загруженных моделей.
+
+    F-fix #9: после инцидента с 6.5GB утечки пользователь не видел, что именно
+    держит память. Этот endpoint даёт прозрачность: какие процессы llama-server
+    запущены, сколько VRAM они занимают (по данным nvidia-smi), и каков общий
+    расход vs свободная VRAM.
+    """
+    import subprocess
+    used_mib = 0
+    total_mib = 0
+    free_mib = 0
+    gpu_name = "unknown"
+    try:
+        out = subprocess.run(
+            ["nvidia-smi", "--query-gpu=name,memory.used,memory.free,memory.total",
+             "--format=csv,noheader,nounits"],
+            capture_output=True, text=True, timeout=3
+        )
+        if out.returncode == 0 and out.stdout.strip():
+            parts = [p.strip() for p in out.stdout.strip().split(",")]
+            if len(parts) >= 4:
+                gpu_name = parts[0]
+                used_mib = int(parts[1])
+                free_mib = int(parts[2])
+                total_mib = int(parts[3])
+    except Exception as e:
+        logger.debug(f"[VRAM] nvidia-smi query failed: {e}")
+
+    # Per-process VRAM (если nvidia-smi поддерживает --query-compute-apps)
+    per_process = []
+    try:
+        out = subprocess.run(
+            ["nvidia-smi", "--query-compute-apps=pid,process_name,used_memory",
+             "--format=csv,noheader,nounits"],
+            capture_output=True, text=True, timeout=3
+        )
+        if out.returncode == 0:
+            for line in out.stdout.strip().splitlines():
+                parts = [p.strip() for p in line.split(",")]
+                if len(parts) >= 3:
+                    try:
+                        per_process.append({
+                            "pid": int(parts[0]),
+                            "name": parts[1],
+                            "vram_mib": int(parts[2]),
+                        })
+                    except (ValueError, IndexError):
+                        continue
+    except Exception:
+        pass
+
+    # Какие GGUF-серверы мы знаем (по нашему внутреннему реестру)
+    from src.gguf_direct import get_loaded_models
+    known_servers = []
+    try:
+        from src.gguf_direct import _server_processes, _server_ports, _server_roles
+        for path, proc in _server_processes.items():
+            known_servers.append({
+                "model": os.path.basename(path),
+                "role": _server_roles.get(path, "?"),
+                "port": _server_ports.get(path),
+                "alive": proc.poll() is None,
+            })
+    except Exception:
+        pass
+
+    return {
+        "gpu": {
+            "name": gpu_name,
+            "used_mib": used_mib,
+            "free_mib": free_mib,
+            "total_mib": total_mib,
+            "used_gb": round(used_mib / 1024, 2),
+            "free_gb": round(free_mib / 1024, 2),
+            "total_gb": round(total_mib / 1024, 2),
+            "utilization_pct": round(used_mib / max(total_mib, 1) * 100, 1),
+        },
+        "per_process": per_process,
+        "gguf_servers": known_servers,
+    }
+
+
 class PreloadLlmRequest(BaseModel):
     gguf_model_path: str
     gguf_mmproj_path: Optional[str] = None
