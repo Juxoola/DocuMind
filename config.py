@@ -54,7 +54,14 @@ LM_STUDIO_URL = os.getenv("LM_STUDIO_URL", "http://localhost:1234/v1")
 # локальный llama-server игнорируют api_key. Но в OpenAPI-схеме/логах видно,
 # что эти строки — placeholder, а не production-ключ.
 LLM_DEFAULT_API_KEY = os.getenv("LLM_DEFAULT_API_KEY", "lm-studio")
-LLM_DEFAULT_MODEL = os.getenv("LLM_DEFAULT_MODEL", "local-model")
+# F-fix #qe-validation: Query Expansion (и любой llama_index-вызов через
+# Settings.llm) передаёт model= в LM Studio. LM Studio ВАЛИДИРУЕТ имя
+# модели по своему списку загруженных. Отсебятина типа 'local-model'
+# приводит к ValueError с 100+ строками валидных имён — спам в логах.
+# Возвращаем 'gpt-4o' — это валидное placeholder-имя для OpenAI-совместимых
+# API, которое LM Studio пропускает, если у пользователя загружена любая
+# instruct-модель. llama-server тоже его принимает.
+LLM_DEFAULT_MODEL = os.getenv("LLM_DEFAULT_MODEL", "gpt-4o")
 EMBEDDING_DEFAULT_API_KEY = os.getenv("EMBEDDING_DEFAULT_API_KEY", "lm-studio")
 # F-fix #embedding-model: имя модели ВАЛИДИРУЕТСЯ llama_index'ом через
 # OpenAIEmbeddingModelType enum. Нужно реальное имя из списка:
