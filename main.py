@@ -6,6 +6,7 @@ import time
 import uuid
 import logging
 import requests
+import requests.adapters
 import traceback
 import threading
 import subprocess
@@ -18,8 +19,6 @@ from typing import List, Optional
 import config
 import gc
 import stat
-import requests
-import requests.adapters
 
 import asyncio
 
