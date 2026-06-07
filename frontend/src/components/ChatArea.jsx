@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect, lazy, Suspense } from 'react';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Send, Trash2, Sparkles, Clock, Zap, Cpu, FileText, Settings as SettingsIcon, HardDrive, Square, Image as ImageIcon, Plus, X as XIcon, ChevronRight, SlidersHorizontal, RefreshCw, Bookmark, BookmarkCheck, Tag as TagIcon, RotateCcw, Eye, Pencil, Copy, Check } from 'lucide-react';
+import { Send, Trash2, Sparkles, Clock, Zap, Cpu, FileText, Settings as SettingsIcon, HardDrive, Square, Image as ImageIcon, Plus, X as XIcon, ChevronRight, ChevronDown, SlidersHorizontal, RefreshCw, Bookmark, BookmarkCheck, Tag as TagIcon, RotateCcw, Eye, Pencil, Copy, Check, ListChecks, ListOrdered, AlignLeft } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
@@ -716,6 +716,193 @@ const MessageItem = React.memo(({
   );
 });
 
+// ── Режимы ответа ──────────────────────────────────────────────────────────────
+// Канонический список ключей — в config.ANSWER_MODES (backend).
+// Метки и иконки — UI-уровень, живут здесь.
+// При добавлении нового режима в config.SYSTEM_PROMPT_RULES нужно
+// добавить запись и сюда, иначе в дропдауне он не появится.
+const ANSWER_MODE_OPTIONS = [
+  {
+    key: 'concise',
+    label: 'Кратко + пояснение',
+    description: 'Сначала прямой ответ, затем разбор по источникам',
+    Icon: Zap,
+    accent: 'text-amber-400',
+  },
+  {
+    key: 'detailed',
+    label: 'Развёрнуто',
+    description: 'Сразу полный ответ в формате связной статьи',
+    Icon: FileText,
+    accent: 'text-blue-400',
+  },
+  {
+    key: 'summary',
+    label: 'TL;DR — 1-3 предложения',
+    description: 'Только суть, без вступлений и пояснений',
+    Icon: AlignLeft,
+    accent: 'text-emerald-400',
+  },
+  {
+    key: 'step_by_step',
+    label: 'Пошагово',
+    description: 'Нумерованная инструкция с пояснением к каждому шагу',
+    Icon: ListOrdered,
+    accent: 'text-purple-400',
+  },
+  {
+    key: 'checklist',
+    label: 'Чек-лист',
+    description: 'Практический список действий с галочками [ ]',
+    Icon: ListChecks,
+    accent: 'text-rose-400',
+  },
+];
+
+const ANSWER_MODE_KEYS = ANSWER_MODE_OPTIONS.map(o => o.key);
+const ANSWER_MODE_DEFAULT = ANSWER_MODE_KEYS[0];
+
+// Валидирует значение из localStorage: при обновлении приложения старые
+// режимы (или мусор) не должны ломать UI — fallback на дефолт.
+const normalizeAnswerMode = (raw) =>
+  ANSWER_MODE_KEYS.includes(raw) ? raw : ANSWER_MODE_DEFAULT;
+
+// ── Дропдаун режима ответа ─────────────────────────────────────────────────────
+function AnswerModeSelect({ value, onChange }) {
+  const [open, setOpen] = useState(false);
+  const [menuPos, setMenuPos] = useState({ top: 0, left: 0, width: 0 });
+  const triggerRef = useRef(null);
+  const menuRef = useRef(null);
+
+  const current = ANSWER_MODE_OPTIONS.find(o => o.key === value) || ANSWER_MODE_OPTIONS[0];
+  const CurrentIcon = current.Icon;
+
+  // Закрытие по клику снаружи и по Escape
+  useEffect(() => {
+    if (!open) return;
+    const onDocClick = (e) => {
+      if (triggerRef.current?.contains(e.target)) return;
+      if (menuRef.current?.contains(e.target)) return;
+      setOpen(false);
+    };
+    const onKey = (e) => { if (e.key === 'Escape') setOpen(false); };
+    document.addEventListener('mousedown', onDocClick);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDocClick);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [open]);
+
+  // Пересчёт координат меню при открытии и при ресайзе/скролле
+  useEffect(() => {
+    if (!open) return;
+    const recalc = () => {
+      const r = triggerRef.current?.getBoundingClientRect();
+      if (!r) return;
+      // Меню рендерится в портале, position: fixed, координаты viewport.
+      // Привязка по левому краю триггера, отступ 4px сверху.
+      setMenuPos({ top: r.bottom + 4, left: r.left, width: r.width });
+    };
+    recalc();
+    window.addEventListener('resize', recalc);
+    window.addEventListener('scroll', recalc, true);
+    return () => {
+      window.removeEventListener('resize', recalc);
+      window.removeEventListener('scroll', recalc, true);
+    };
+  }, [open]);
+
+  const handleSelect = (key) => {
+    onChange(key);
+    setOpen(false);
+  };
+
+  return (
+    <>
+      <button
+        ref={triggerRef}
+        onClick={() => setOpen(o => !o)}
+        title={`Стиль ответа: ${current.label}. Кликните, чтобы сменить.`}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        className={cn(
+          "px-3 py-1.5 text-[10px] font-black uppercase tracking-wider rounded-xl transition-all flex items-center gap-1.5 border",
+          open
+            ? "bg-primary/10 text-primary border-primary/30 shadow-sm"
+            : "bg-muted/40 text-muted-foreground hover:text-foreground border-transparent hover:border-border/60"
+        )}
+      >
+        <CurrentIcon size={11} className={current.accent} />
+        <span className="hidden sm:inline">{current.label}</span>
+        <span className="sm:hidden">{current.label.split(' ')[0]}</span>
+        <ChevronDown size={10} className={cn("transition-transform", open && "rotate-180")} />
+      </button>
+
+      {open && createPortal(
+        <AnimatePresence>
+          <motion.div
+            ref={menuRef}
+            role="listbox"
+            initial={{ opacity: 0, y: -4, scale: 0.98 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -4, scale: 0.98 }}
+            transition={{ duration: 0.12 }}
+            style={{
+              position: 'fixed',
+              top: menuPos.top,
+              left: menuPos.left,
+              minWidth: 280,
+              maxWidth: 360,
+            }}
+            className="z-[100] bg-popover/95 backdrop-blur-xl border border-border/60 rounded-xl shadow-2xl overflow-hidden"
+            onMouseDown={(e) => e.stopPropagation()}
+          >
+            <div className="px-3 py-2 text-[9px] font-black uppercase tracking-widest text-muted-foreground/70 border-b border-white/5">
+              Стиль ответа
+            </div>
+            {ANSWER_MODE_OPTIONS.map((opt) => {
+              const Icon = opt.Icon;
+              const selected = opt.key === value;
+              return (
+                <button
+                  key={opt.key}
+                  role="option"
+                  aria-selected={selected}
+                  onClick={() => handleSelect(opt.key)}
+                  className={cn(
+                    "w-full px-3 py-2.5 flex items-start gap-2.5 text-left transition-colors",
+                    selected
+                      ? "bg-primary/15"
+                      : "hover:bg-muted/50"
+                  )}
+                >
+                  <Icon size={14} className={cn("mt-0.5 shrink-0", opt.accent)} />
+                  <div className="flex-1 min-w-0">
+                    <div className={cn(
+                      "text-[11px] font-bold leading-tight",
+                      selected ? "text-foreground" : "text-foreground/90"
+                    )}>
+                      {opt.label}
+                    </div>
+                    <div className="text-[10px] text-muted-foreground/80 leading-snug mt-0.5">
+                      {opt.description}
+                    </div>
+                  </div>
+                  {selected && (
+                    <Check size={12} className="mt-0.5 text-primary shrink-0" />
+                  )}
+                </button>
+              );
+            })}
+          </motion.div>
+        </AnimatePresence>,
+        document.body
+      )}
+    </>
+  );
+}
+
 export default function ChatArea({ notebook, selectedSources, onOpenSource, llmSettings, setLlmSettings }) {
   const [messages, setMessages] = useState([
     { role: 'ai', content: 'Привет! Я проанализировал ваши источники и готов ответить на любые вопросы. Что вас интересует?' }
@@ -729,11 +916,10 @@ export default function ChatArea({ notebook, selectedSources, onOpenSource, llmS
   const [contextStrategy, setContextStrategy] = useState(() => localStorage.getItem('chat_context_strategy') || 'sliding');
   const [thinkingMode, setThinkingMode] = useState(() => localStorage.getItem('chat_thinking_mode') === 'true');
   const [thinkingBudget, setThinkingBudget] = useState(() => parseInt(localStorage.getItem('chat_thinking_budget')) || 1024); // -1 = no limit
-  // Режим ответа: "concise" (сначала кратко, потом объяснение) / "detailed" (сразу развёрнуто)
-  const [answerMode, setAnswerMode] = useState(() => {
-    const stored = localStorage.getItem('chat_answer_mode');
-    return stored === 'detailed' ? 'detailed' : 'concise';
-  });
+  // Режим ответа: см. ANSWER_MODE_OPTIONS. Ключ — произвольная строка,
+  // backend выбирает правила из config.SYSTEM_PROMPT_RULES; неизвестный
+  // ключ → ANSWER_MODE_DEFAULT на стороне сервера.
+  const [answerMode, setAnswerMode] = useState(() => normalizeAnswerMode(localStorage.getItem('chat_answer_mode')));
   const [hoveredSource, setHoveredSource] = useState(null);
   const [tooltipCoords, setTooltipCoords] = useState({ x: 0, y: 0 });
   const [abortController, setAbortController] = useState(null);
@@ -1189,21 +1375,7 @@ export default function ChatArea({ notebook, selectedSources, onOpenSource, llmS
             {thinkingMode ? "Думает" : "Без рассуждений"}
           </button>
 
-          <button
-            onClick={() => setAnswerMode(answerMode === 'concise' ? 'detailed' : 'concise')}
-            title={answerMode === 'concise'
-              ? 'Сейчас: сначала краткий ответ, потом объяснение. Кликните, чтобы переключить на развёрнутый режим.'
-              : 'Сейчас: сразу развёрнутый ответ. Кликните, чтобы вернуть режим «сначала кратко».'}
-            className={cn(
-              "px-3 py-1.5 text-[10px] font-black uppercase tracking-wider rounded-xl transition-all flex items-center gap-1.5 border",
-              answerMode === 'detailed'
-                ? "bg-amber-500/10 text-amber-400 border-amber-500/20 shadow-sm"
-                : "bg-muted/40 text-muted-foreground hover:text-foreground border-transparent hover:border-border/60"
-            )}
-          >
-            {answerMode === 'detailed' ? <FileText size={11} /> : <Zap size={11} />}
-            {answerMode === 'detailed' ? 'Развёрнуто' : 'Кратко → пояснение'}
-          </button>
+          <AnswerModeSelect value={answerMode} onChange={setAnswerMode} />
           
           <button
             onClick={() => setIsSettingsOpen(true)}
