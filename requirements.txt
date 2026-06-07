@@ -31,6 +31,7 @@ imageio-ffmpeg
 # --- Document Processing ---
 pymupdf
 python-docx
+python-pptx
 
 # --- Utils ---
 watchfiles

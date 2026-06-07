@@ -1,25 +1,21 @@
 # ── Опциональные зависимости: Windows-only функции ──
 #
-# Этот файл нужен ТОЛЬКО на Windows. В нём — pywin32 для нативного
+# Этот файл нужен ТОЛЬКО на Windows. Содержит pywin32 для нативного
 # COM-доступа к MS Office (более точное извлечение текста/таблиц из
 # .pptx/.docx, чем python-pptx, но требует установленный Office).
 #
-# python-pptx (cross-platform fallback) нужен ЗДЕСЬ, а не в основном
-# requirements.txt, потому что: (1) без него процессы process_pptx /
-# process_docx не смогут откатиться на pure-Python чтение при отсутствии
-# Office; (2) он тянет за собой lxml + pillow, это лишние ~25 МБ, если
-# пользователь не планирует загружать .pptx/.docx вообще.
+# python-pptx — кросс-платформенный fallback, он уже в requirements.txt.
+# pywin32 — Windows-only, используется в process_pptx/process_docx
+# ТОЛЬКО если у пользователя установлен Office; иначе код автоматически
+# откатывается на python-pptx и python-docx.
 #
-# ⚠️  Требует установленный Microsoft Office на той же машине (для COM).
+# ⚠️  Требует установленный Microsoft Office на той же машине.
 # ⚠️  На Linux/macOS эти зависимости не установятся.
 #
 # Установка (только на Windows с Office):
 #   pip install -r requirements-windows.txt
 #
-# Размер на диске: ~30 МБ.
-
-# --- Чистая Python-библиотека для .pptx (fallback, кросс-платформенная) ---
-python-pptx
+# Размер на диске: ~5 МБ (только pywin32).
 
 # --- COM-интерфейс MS Office (только Windows, требует Office) ---
 pywin32
