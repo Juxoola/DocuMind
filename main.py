@@ -31,6 +31,7 @@ from src.gguf_direct import (
 )
 from src.rag_pipeline import unload_rag_models # Импортируем для очистки
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from llama_index.core import Settings
 from contextlib import asynccontextmanager
 
@@ -64,6 +65,28 @@ atexit.register(unload_all_models)
 atexit.register(kill_stray_servers)
 
 app = FastAPI(title="NotebookLM Local Clone", lifespan=lifespan)
+
+# F-fix #upload-limit: middleware, который проверяет Content-Length ДО чтения
+# тела запроса. Без него FastAPI начнёт читать файл в RAM и свалится с OOM
+# на многогигабайтной загрузке. Если Content-Length не передан (chunked
+# transfer) — пропускаем и полагаемся на лимит в эндпоинте /api/upload.
+@app.middleware("http")
+async def enforce_upload_size(request, call_next):
+    if request.url.path.startswith("/api/upload"):
+        cl = request.headers.get("content-length")
+        if cl and cl.isdigit() and int(cl) > config.UPLOAD_MAX_SIZE_BYTES:
+            mb = int(cl) / (1024 * 1024)
+            return JSONResponse(
+                status_code=413,
+                content={
+                    "detail": (
+                        f"Файл слишком большой: {mb:.1f} МБ. "
+                        f"Лимит: {config.UPLOAD_MAX_SIZE_MB} МБ. "
+                        f"Измените через env UPLOAD_MAX_SIZE_MB."
+                    )
+                },
+            )
+    return await call_next(request)
 
 # F-fix #15: общий HTTP session для chat/vision completion запросов и slot clear.
 # Каждый запрос — TCP handshake. Session переиспользует keep-alive соединения.
@@ -303,13 +326,46 @@ async def upload_file(
     vision_mtp_enabled: Optional[bool] = False, # Multi-Token Prediction для Vision модели
 ):
     print(f"[API] Новый запрос загрузки для блокнота {notebook_id}. Файл: {file.filename} ({current_idx}/{total_count})")
+    # F-fix #mime-validation: отклоняем файлы с неподдерживаемым расширением
+    # ДО записи на диск. Иначе загрузим 2 ГБ .exe, он попадёт в общий
+    # text-pipeline и нагенерирует мусор-чанков.
+    _ext = os.path.splitext(file.filename or "")[1].lower()
+    if _ext not in config.ALLOWED_UPLOAD_EXTENSIONS:
+        raise HTTPException(
+            status_code=415,
+            detail=(
+                f"Тип файла '{_ext}' не поддерживается. "
+                f"Разрешено: {', '.join(sorted(config.ALLOWED_UPLOAD_EXTENSIONS))}."
+            ),
+        )
     paths = config.get_notebook_paths(notebook_id)
     os.makedirs(paths["data"], exist_ok=True)
     file_path = os.path.join(paths["data"], file.filename)
     def save_upload():
+        # F-fix #upload-limit: контроль размера во время записи.
+        # Content-Length middleware ловит обычные загрузки, но chunked /
+        # отсутствующий CL проскочат. Считаем байты по ходу — если превышен
+        # лимит, удаляем файл и поднимаем 413.
+        written = 0
         with open(file_path, "wb") as f:
-            shutil.copyfileobj(file.file, f)
-            
+            while True:
+                chunk = file.file.read(1024 * 1024)  # 1 МБ
+                if not chunk:
+                    break
+                written += len(chunk)
+                if written > config.UPLOAD_MAX_SIZE_BYTES:
+                    f.close()
+                    try: os.remove(file_path)
+                    except Exception: pass
+                    raise HTTPException(
+                        status_code=413,
+                        detail=(
+                            f"Файл превысил {config.UPLOAD_MAX_SIZE_MB} МБ во время записи. "
+                            f"Загрузка отменена."
+                        ),
+                    )
+                f.write(chunk)
+
     await asyncio.to_thread(save_upload)
 
     import threading

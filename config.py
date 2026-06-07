@@ -58,6 +58,24 @@ LLM_DEFAULT_MODEL = os.getenv("LLM_DEFAULT_MODEL", "local-model")
 EMBEDDING_DEFAULT_API_KEY = os.getenv("EMBEDDING_DEFAULT_API_KEY", "lm-studio")
 EMBEDDING_DEFAULT_MODEL = os.getenv("EMBEDDING_DEFAULT_MODEL", "text-embedding")
 
+# F-fix #upload-limit: максимальный размер одного загружаемого файла в МБ.
+# Раньше лимита не было — пользователь мог загрузить 100 ГБ файл, и uvicorn
+# сначала съел бы RAM под буфер, а потом диск под финальный .pdf. По умолчанию
+# 500 МБ — комфортно для часового видео, но отсекает абьюз.
+UPLOAD_MAX_SIZE_MB = int(os.getenv("UPLOAD_MAX_SIZE_MB", "500"))
+UPLOAD_MAX_SIZE_BYTES = UPLOAD_MAX_SIZE_MB * 1024 * 1024
+
+# F-fix #mime-validation: разрешённые расширения файлов для загрузки.
+# Если прилетает файл с другим расширением — отдаём 415 Unsupported Media Type
+# сразу на upload, до того как мы сожрём диск и время на ингест.
+# Список синхронизирован с тем, что умеет src/ingestion.ingest_file().
+ALLOWED_UPLOAD_EXTENSIONS = frozenset({
+    ".pdf", ".pptx", ".docx",
+    ".mp4", ".avi", ".mkv", ".mov",
+    ".mp3", ".wav", ".m4a",
+    ".txt", ".md", ".png", ".jpg", ".jpeg", ".webp",
+})
+
 # Настройки эмбеддингов
 EMBEDDING_MODEL_NAME = os.getenv("EMBEDDING_MODEL_NAME", "Qwen3-Embedding-0.6B-v2.Q8_0.gguf")
 RERANKER_MODEL_NAME = os.getenv("RERANKER_MODEL_NAME", "Qwen3-Reranker-0.6B-v2.Q8_0.gguf")
