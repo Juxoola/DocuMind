@@ -730,12 +730,12 @@ export default function ChatArea({ notebook, selectedSources, onOpenSource, llmS
   const [abortController, setAbortController] = useState(null);
   const [selectedImage, setSelectedImage] = useState(null);
   const [imagePreview, setImagePreview] = useState(null);
-  // F-fix #30: streaming updates. Используем plain setState (не rAF-батчинг).
-  // rAF-батчинг через ref вызывал race: новые чанки перетирали старые при
-  // быстром стриме. Простой подход (setMessages каждый чанк с fullContent)
-  // надёжнее — React 18 сам батчит синхронные setState, а per-chunk
-  // setMessages гарантирует, что state.content === fullContent на момент
-  // рендера. Если перф станет проблемой — обернуть в startTransition.
+  // F-fix #30: streaming state. Используем closure-vars (fullContent/
+  // thinkingContent) + rAF throttle. rAF-callback читает closure-vars
+  // напрямую при срабатывании — нет race между "новый чанк пришёл" и
+  // "rAF сработал" (что ломало pc || next[idx].content в предыдущей
+  // версии с промежуточным ref). Per-chunk накопление в closure,
+  // setState раз в ~16мс (60fps). Финальный flushNow() после стрима.
   const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = useRef(null);
   const tooltipTimeoutRef = useRef(null);
@@ -931,18 +931,37 @@ export default function ChatArea({ notebook, selectedSources, onOpenSource, llmS
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let fullContent = '';
+      let thinkingContent = '';
       let buffer = ''; // Буфер для склейки разорванных строк
 
-      // F-fix #30: per-chunk setMessages. fullContent — единый источник
-      // истины для ответа, накапливается в closure. thinkingContent
-      // аккумулируется функционально (prev.thinkingContent + data.text).
-      // Никаких ref — никаких race между rAF и новыми чанками.
-      const updateAi = (patch) => {
+      // F-fix #30: rAF-throttled streaming. Closure-переменные fullContent/
+      // thinkingContent — единственный источник истины. rAF-callback читает
+      // их напрямую при срабатывании (НЕ через промежуточный ref/state), что
+      // устраняет race с pc || next[idx].content из предыдущей версии.
+      // Скорость: ~60 setMessages/сек вместо ~100/сек от plain setState.
+      let rafId = null;
+      let lastRenderedContent = '';
+      let lastRenderedThinking = '';
+      const flushStreaming = () => {
+        rafId = null;
+        if (fullContent === lastRenderedContent && thinkingContent === lastRenderedThinking) return;
+        lastRenderedContent = fullContent;
+        lastRenderedThinking = thinkingContent;
         setMessages(prev => {
           const next = prev.slice();
-          if (next[aiMsgIndex]) next[aiMsgIndex] = { ...next[aiMsgIndex], ...patch };
+          if (next[aiMsgIndex]) {
+            next[aiMsgIndex] = { ...next[aiMsgIndex], content: fullContent, thinkingContent, loading: false };
+          }
           return next;
         });
+      };
+      const scheduleFlush = () => {
+        if (rafId != null) return;
+        rafId = requestAnimationFrame(flushStreaming);
+      };
+      const flushNow = () => {
+        if (rafId != null) { cancelAnimationFrame(rafId); rafId = null; }
+        flushStreaming();
       };
 
       while (true) {
@@ -965,34 +984,45 @@ export default function ChatArea({ notebook, selectedSources, onOpenSource, llmS
           try {
             const data = JSON.parse(payload);
             if (data.type === 'sources') {
-              updateAi({ sources: data.sources });
-            } else if (data.type === 'thinking_start') {
-              updateAi({ loading: false, thinkingContent: '', thinkingDone: false });
-            } else if (data.type === 'thinking_chunk') {
               setMessages(prev => {
                 const next = prev.slice();
-                if (next[aiMsgIndex]) {
-                  const cur = next[aiMsgIndex].thinkingContent || '';
-                  next[aiMsgIndex] = { ...next[aiMsgIndex], thinkingContent: cur + data.text };
-                }
+                if (next[aiMsgIndex]) next[aiMsgIndex] = { ...next[aiMsgIndex], sources: data.sources };
                 return next;
               });
+            } else if (data.type === 'thinking_start') {
+              thinkingContent = '';
+              lastRenderedThinking = '';
+              setMessages(prev => {
+                const next = prev.slice();
+                if (next[aiMsgIndex]) next[aiMsgIndex] = { ...next[aiMsgIndex], loading: false, thinkingContent: '', thinkingDone: false };
+                return next;
+              });
+            } else if (data.type === 'thinking_chunk') {
+              thinkingContent += data.text;
+              scheduleFlush();
             } else if (data.type === 'thinking_done') {
-              updateAi({ thinkingDone: true });
+              setMessages(prev => {
+                const next = prev.slice();
+                if (next[aiMsgIndex]) next[aiMsgIndex] = { ...next[aiMsgIndex], thinkingDone: true };
+                return next;
+              });
             } else if (data.type === 'chunk') {
               fullContent += data.text;
-              updateAi({ content: fullContent });
+              scheduleFlush();
             } else if (data.type === 'stats') {
               setStats(data);
             } else if (data.type === 'error') {
               fullContent = '⚠️ Ошибка: ' + data.text;
-              updateAi({ content: fullContent, loading: false });
+              flushNow();
             }
           } catch (e) {
             console.error('Ошибка парсинга SSE:', e, payload);
           }
         }
       }
+      // Финальный flush: гарантирует, что последние символы
+      // (которые могли прийти после последнего rAF) отображены.
+      flushNow();
     } catch (err) {
       if (err.name === 'AbortError') {
         updateAiMessage(aiMsgIndex, '*(Генерация остановлена)*', []);
