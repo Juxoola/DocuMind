@@ -1117,20 +1117,15 @@ async def chat(request: ChatRequest):
             yield f"data: {json.dumps({'type': 'error', 'text': str(e)}, ensure_ascii=False)}\n\n"
             yield "data: [DONE]\n\n"
         finally:
-            # Очистка только временных объектов и кэша CUDA, не выгружая модели
+            # Очистка только KV-слота в llama-server, не выгружая модели и не трогая CUDA-кэш.
+            # gc.collect() + torch.cuda.empty_cache() УБРАНЫ: они занимают 200-800 мс на КАЖДЫЙ чат
+            # и не нужны — модели живут в VRAM постоянно, а KV-cache освобождается через /slots/0/clear.
             if use_direct_gguf and active_llm:
                 try:
-                    # Пытаемся сбросить состояние слота в llama-server, чтобы контекст не копился
-                    # но НЕ убиваем сам процесс сервера.
+                    # Сбрасываем состояние слота чтобы контекст не копился между запросами,
+                    # но НЕ убиваем процесс сервера.
                     requests.post(f"{active_llm}/slots/0/clear", timeout=1)
-                except: pass
-
-            import gc
-            gc.collect()
-            import torch
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
-            print(f"[MEMORY] Кэш очищен, модели остались в VRAM.")
+                except Exception: pass
 
     return StreamingResponse(generate(), media_type="text/event-stream")
 
