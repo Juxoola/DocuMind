@@ -58,7 +58,12 @@ def _assign_to_job(process):
             import ctypes
             from ctypes import wintypes
             ctypes.windll.kernel32.AssignProcessToJobObject(_win32_job, wintypes.HANDLE(int(process._handle)))
-        except Exception: pass
+        except Exception as e:
+            # F-fix #silent-except: Job Object — best-effort. Если привязка
+            # не удалась (старый pywin32, нет прав), процесс не умрёт с
+            # родителем, но в любом случае сработает kill_all в lifespan.
+            # Логируем debug — это не критично, но полезно при диагностике.
+            logger.debug(f"AssignProcessToJobObject failed (non-critical): {e}")
 
 
 SERVER_EXE = os.path.join(config.BASE_DIR, "bin", "llama-server.exe")
@@ -222,11 +227,18 @@ def _start_llm_server_sync(
             )
         else:
             process.kill()
-    except Exception:
+    except Exception as e:
+        # F-fix #silent-except: первый terminate() упал. Пробуем kill().
+        # Если и он упадёт — процесс скорее всего уже мёртв.
+        logger.debug(f"terminate() failed: {e}, trying kill()")
         try: process.kill()
-        except Exception: pass
+        except Exception as kill_err:
+            logger.debug(f"kill() also failed (process likely already dead): {kill_err}")
     try: process.wait(timeout=5)
-    except Exception: pass
+    except Exception as e:
+        # wait() может таймаутить если процесс завис. Логируем — это
+        # индикатор проблемы с завершением на Windows.
+        logger.debug(f"process.wait() timed out (process may be stuck): {e}")
     raise TimeoutError("Сервер не ответил за 60 секунд")
 
 
@@ -681,7 +693,10 @@ def count_running_servers() -> int:
         else:
             output = subprocess.check_output(['pgrep', '-c', 'llama-server'], text=True)
             return int(output.strip())
-    except Exception:
+    except Exception as e:
+        # F-fix #silent-except: pgrep/tasklist упал. На Windows это часто
+        # бывает если tasklist не в PATH. Возвращаем 0 (best guess) и логируем.
+        logger.debug(f"count llama-server processes failed: {e}")
         return 0
 
 def unload_all_models(role: str = None):
@@ -710,10 +725,14 @@ def unload_all_models(role: str = None):
                     try:
                         import requests as _r
                         _r.post(f"http://127.0.0.1:{port}/slots/0/clear", timeout=0.5)
-                    except Exception:
-                        pass
-            except Exception:
-                pass
+                    except Exception as slot_err:
+                        # F-fix #silent-except: slot clear — best-effort перед
+                        # kill. Не критично, но полезно знать если падает.
+                        logger.debug(f"slot clear failed: {slot_err}")
+            except Exception as kill_err:
+                # F-fix #silent-except: процесс уже мёртв или нет прав на taskkill.
+                # Не критично для unload_all_models — мы и так пытаемся освободить VRAM.
+                logger.debug(f"taskkill failed (process may be dead): {kill_err}")
             try:
                 if sys.platform == "win32":
                     # /F — force, /T — вместе с дочерними процессами. Это единственный

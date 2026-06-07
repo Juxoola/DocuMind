@@ -111,7 +111,10 @@ def unregister_subprocess(notebook_id, popen):
     lst = _active_subprocesses.get(notebook_id)
     if lst and popen in lst:
         try: lst.remove(popen)
-        except Exception: pass
+        except Exception as e:
+            # F-fix #silent-except: list.remove() падает только если popen
+            # уже удалён другим потоком. Это норма при concurrent cleanup.
+            logger.debug(f"unregister_subprocess: popen already removed: {e}")
     if lst is not None and not lst:
         _active_subprocesses.pop(notebook_id, None)
 
@@ -299,7 +302,10 @@ def process_audio_video(file_path, images_dir, is_video=False, progress_cb=None,
     _safe_print(f"[process_audio_video] Начало: {file_name}, is_video={is_video}")
     def prog(pct, msg):
         try: print(f"  [{pct}%] {msg}")
-        except Exception: pass
+        except Exception as e:
+            # F-fix #silent-except: print() в cp1251-PowerShell может упасть
+            # на unicode (русские символы). Это legacy-обход safe_print.
+            logger.debug(f"progress print failed (encoding issue?): {e}")
         if progress_cb: progress_cb(pct, msg)
 
     nodes = []
@@ -366,7 +372,10 @@ def process_audio_video(file_path, images_dir, is_video=False, progress_cb=None,
                 if frame_counter % cancel_check_every == 0 and _is_cancelled():
                     print(f"[Ingestion] Отмена во время извлечения кадров видео ({format_seconds(current_sec)})")
                     try: process.terminate()
-                    except Exception: pass
+                    except Exception as e:
+                        # F-fix #silent-except: terminate() упал. Скорее всего
+                        # ffmpeg уже мёртв. Не блокируем cancel.
+                        logger.debug(f"ffmpeg terminate failed during cancel: {e}")
                     raise IngestionCancelled(f"Cancelled during frame extraction at {format_seconds(current_sec)}")
                 frame_counter += 1
                 raw_frame = process.stdout.read(chunk_size)
@@ -391,9 +400,13 @@ def process_audio_video(file_path, images_dir, is_video=False, progress_cb=None,
                                     save_high_res_frame(file_path, current_sec, img_path)
                                     if saved_pct >= NEW_SLIDE_PCT: frame_list.append((img_path, current_sec))
                                     else:
-                                        if frame_list: 
+                                        if frame_list:
                                             try: os.remove(frame_list[-1][0])
-                                            except Exception: pass
+                                            except Exception as e:
+                                                # F-fix #silent-except: file locked
+                                                # другим процессом. Не критично —
+                                                # images_dir чистится при cancel.
+                                                logger.debug(f"failed to remove old frame: {e}")
                                             frame_list[-1] = (img_path, current_sec)
                                     prev_saved_thumb = thumb
                             stable_since_sec = current_sec
