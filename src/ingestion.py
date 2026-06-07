@@ -754,13 +754,20 @@ def process_docx(file_path, images_dir, llm_settings=None, shared_llm_url=None, 
     return nodes
 
 def _safe_print(msg):
-    """Print с защитой от cp1251 PowerShell (emoji/non-ASCII)."""
+    """Print с защитой от cp1251 PowerShell (emoji/non-ASCII).
+
+    F-fix #23: НЕ мутируем глобальный sys.stdout — это racy в
+    ThreadPoolExecutor (один поток reconfigure()s, другой в этот момент
+    print()-ит в старой кодировке → битый вывод). Вместо этого пишем
+    напрямую в sys.stdout.buffer в utf-8 (он не зависит от text-stream
+    кодировки sys.stdout).
+    """
     try:
         print(msg)
     except UnicodeEncodeError:
         try:
-            sys.stdout.reconfigure(encoding='utf-8', errors='replace')
-            print(msg)
+            sys.stdout.buffer.write((str(msg) + "\n").encode("utf-8", errors="replace"))
+            sys.stdout.buffer.flush()
         except Exception:
             print(msg.encode('ascii', errors='replace').decode('ascii'))
 
