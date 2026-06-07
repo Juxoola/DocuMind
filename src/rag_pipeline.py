@@ -225,7 +225,13 @@ def _get_qe_llm():
     )
 
 def _rebuild_bm25_bg(notebook_id: str, db_path: str):
-    """Перестройка BM25-индекса в фоновом потоке. Не блокирует основной поток."""
+    """Перестройка BM25-индекса в фоновом потоке. Не блокирует основной поток.
+
+    F-fix #bm25-pagination: раньше collection.get() без limit тянул ВСЮ коллекцию
+    в память за один вызов. На ноутбуке с 50k+ чанков это 1-2 ГБ RAM-спайк.
+    Теперь читаем порциями по _BM25_PAGE_SIZE, аккумулируя в список.
+    """
+    _PAGE_SIZE = 2000
     try:
         paths = config.get_notebook_paths(notebook_id)
         bm25_dir = os.path.join(paths["base"], "bm25")
@@ -234,23 +240,40 @@ def _rebuild_bm25_bg(notebook_id: str, db_path: str):
         import chromadb as _chromadb
         tmp_client = _chromadb.PersistentClient(path=db_path)
         collection = tmp_client.get_or_create_collection("multimodal_rag")
-        result = collection.get()
         bm25_nodes = []
-        for i, doc_id in enumerate(result['ids']):
-            text = result['documents'][i]
-            meta = result['metadatas'][i] or {}
-            # F1: BM25 видит координаты чанка. Только для BM25-токенизации;
-            # embedding-вектора в ChromaDB не меняются, переиндексация не нужна.
-            fname = meta.get('file_name', '')
-            page = meta.get('page', '')
-            t = meta.get('start', meta.get('time', ''))
-            coord_parts = []
-            if fname: coord_parts.append(str(fname))
-            if page not in ('', None): coord_parts.append(f"стр.{page}")
-            elif t not in ('', None): coord_parts.append(f"@{t}")
-            if coord_parts:
-                text = f"[{' '.join(coord_parts)}]: {text}"
-            bm25_nodes.append(TextNode(text=text, id_=doc_id, metadata=meta))
+        # Пaguinруем: limit/offset, чтобы не сожрать RAM на больших коллекциях.
+        # ChromaDB API: collection.get(limit=N, offset=M) — стейбл с 0.4.x.
+        offset = 0
+        total_seen = 0
+        while True:
+            result = collection.get(limit=_PAGE_SIZE, offset=offset)
+            ids = result.get('ids', [])
+            if not ids:
+                break
+            documents = result.get('documents', []) or []
+            metadatas = result.get('metadatas', []) or []
+            for i, doc_id in enumerate(ids):
+                text = documents[i] if i < len(documents) else ""
+                meta = metadatas[i] if i < len(metadatas) else {}
+                if meta is None:
+                    meta = {}
+                # F1: BM25 видит координаты чанка. Только для BM25-токенизации;
+                # embedding-вектора в ChromaDB не меняются, переиндексация не нужна.
+                fname = meta.get('file_name', '')
+                page = meta.get('page', '')
+                t = meta.get('start', meta.get('time', ''))
+                coord_parts = []
+                if fname: coord_parts.append(str(fname))
+                if page not in ('', None): coord_parts.append(f"стр.{page}")
+                elif t not in ('', None): coord_parts.append(f"@{t}")
+                if coord_parts:
+                    text = f"[{' '.join(coord_parts)}]: {text}"
+                bm25_nodes.append(TextNode(text=text, id_=doc_id, metadata=meta))
+            total_seen += len(ids)
+            if len(ids) < _PAGE_SIZE:
+                # Получили меньше страницы — это конец коллекции.
+                break
+            offset += _PAGE_SIZE
         if bm25_nodes:
             from llama_index.retrievers.bm25 import BM25Retriever
             retriever = BM25Retriever.from_defaults(
