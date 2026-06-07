@@ -20,8 +20,8 @@ from transformers import BitsAndBytesConfig
 # F-fix #15: Session для rerank-запросов (см. также ingestion.py _http_session).
 # Без Session каждый POST /v1/rerank открывает новый TCP-коннект.
 _rerank_session = requests.Session()
-_rerank_session.mount("http://", requests.adapters.HTTPAdapter(pool_connections=4, pool_maxsize=4))
-_rerank_session.mount("https://", requests.adapters.HTTPAdapter(pool_connections=4, pool_maxsize=4))
+_rerank_session.mount("http://", requests.adapters.HTTPAdapter(pool_connections=config.HTTP_POOL_SIZE_RERANK, pool_maxsize=config.HTTP_POOL_SIZE_RERANK))
+_rerank_session.mount("https://", requests.adapters.HTTPAdapter(pool_connections=config.HTTP_POOL_SIZE_RERANK, pool_maxsize=config.HTTP_POOL_SIZE_RERANK))
 
 logger = logging.getLogger(__name__)
 

@@ -68,8 +68,8 @@ app = FastAPI(title="NotebookLM Local Clone", lifespan=lifespan)
 # F-fix #15: общий HTTP session для chat/vision completion запросов и slot clear.
 # Каждый запрос — TCP handshake. Session переиспользует keep-alive соединения.
 _http_session = requests.Session()
-_http_session.mount("http://", requests.adapters.HTTPAdapter(pool_connections=10, pool_maxsize=10))
-_http_session.mount("https://", requests.adapters.HTTPAdapter(pool_connections=10, pool_maxsize=10))
+_http_session.mount("http://", requests.adapters.HTTPAdapter(pool_connections=config.HTTP_POOL_SIZE_MAIN, pool_maxsize=config.HTTP_POOL_SIZE_MAIN))
+_http_session.mount("https://", requests.adapters.HTTPAdapter(pool_connections=config.HTTP_POOL_SIZE_MAIN, pool_maxsize=config.HTTP_POOL_SIZE_MAIN))
 
 app.add_middleware(
     CORSMiddleware,

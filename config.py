@@ -32,6 +32,20 @@ RELOAD = os.getenv("RELOAD", "false").lower() in ("1", "true", "yes")
 # Дефолт — dev-окружение (Vite на 5173, uvicorn на 8000).
 CORS_ORIGINS = [o.strip() for o in os.getenv("CORS_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173,http://localhost:8000,http://127.0.0.1:8000").split(",") if o.strip()]
 
+# ── Таймауты и лимиты (F-fix #24: магические числа вынесены в config) ──
+# Таймаут ожидания готовности GGUF-сервера при старте (секунд)
+GGUF_SERVER_STARTUP_TIMEOUT = int(os.getenv("GGUF_SERVER_STARTUP_TIMEOUT", 30))
+# Таймаут одного health-check (секунд) — F-fix #21
+GGUF_HEALTH_CHECK_TIMEOUT = int(os.getenv("GGUF_HEALTH_CHECK_TIMEOUT", 2))
+# Таймаут terminate() перед kill() для GGUF-сервера (секунд)
+GGUF_SERVER_STOP_TIMEOUT = int(os.getenv("GGUF_SERVER_STOP_TIMEOUT", 5))
+# HTTP-таймаут по умолчанию для LM Studio запросов (секунд)
+LM_STUDIO_HTTP_TIMEOUT = int(os.getenv("LM_STUDIO_HTTP_TIMEOUT", 60))
+# Размер HTTP connection pool для сессий requests
+HTTP_POOL_SIZE_MAIN = int(os.getenv("HTTP_POOL_SIZE_MAIN", 10))
+HTTP_POOL_SIZE_INGEST = int(os.getenv("HTTP_POOL_SIZE_INGEST", 10))
+HTTP_POOL_SIZE_RERANK = int(os.getenv("HTTP_POOL_SIZE_RERANK", 4))
+
 # Настройки LM Studio
 LM_STUDIO_URL = os.getenv("LM_STUDIO_URL", "http://localhost:1234/v1")
 

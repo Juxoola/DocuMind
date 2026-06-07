@@ -39,8 +39,8 @@ _whisper_lock = threading.Lock()
 # запрос открывает новый TCP-коннект (50-100 мс handshake). С Session —
 # переиспользуется. Экономия: 1-3 секунды на 60-кадровое видео.
 _http_session = requests.Session()
-_http_session.mount("http://", requests.adapters.HTTPAdapter(pool_connections=10, pool_maxsize=10))
-_http_session.mount("https://", requests.adapters.HTTPAdapter(pool_connections=10, pool_maxsize=10))
+_http_session.mount("http://", requests.adapters.HTTPAdapter(pool_connections=config.HTTP_POOL_SIZE_INGEST, pool_maxsize=config.HTTP_POOL_SIZE_INGEST))
+_http_session.mount("https://", requests.adapters.HTTPAdapter(pool_connections=config.HTTP_POOL_SIZE_INGEST, pool_maxsize=config.HTTP_POOL_SIZE_INGEST))
 
 
 def get_or_load_whisper(model_name: str = "medium", device: str = "cuda", compute_type: str = "int8"):
