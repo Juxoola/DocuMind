@@ -1191,8 +1191,6 @@ class ChatRequest(BaseModel):
 
     # Расширенные параметры
     gguf_kv_quant: Optional[int] = 2 # 2=Q4_K, 8=Q8_0
-    presence_penalty: Optional[float] = 0.0
-    frequency_penalty: Optional[float] = 0.0
     repeat_penalty: Optional[float] = 1.1
     top_p: Optional[float] = 0.95
     min_p: Optional[float] = 0.05
