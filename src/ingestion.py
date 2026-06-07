@@ -651,11 +651,12 @@ def process_pdf(file_path, images_dir, llm_settings=None, shared_llm_url=None, o
 def process_pptx(file_path, images_dir, llm_settings=None, shared_llm_url=None, progress_cb=None, cancel_check=None, keep_vision_alive=False):
     nodes = []; file_name = os.path.basename(file_path); pdf_path = os.path.splitext(file_path)[0] + ".pdf"
     import win32com.client, pythoncom
+    app = None; deck = None
     try:
         pythoncom.CoInitialize()
         app = win32com.client.Dispatch("Powerpoint.Application")
         deck = app.Presentations.Open(os.path.abspath(file_path), WithWindow=False)
-        deck.SaveAs(os.path.abspath(pdf_path), 32); deck.Close(); app.Quit()
+        deck.SaveAs(os.path.abspath(pdf_path), 32)
         # После конвертации удаляем оригинал и работаем с PDF
         if os.path.exists(pdf_path):
             if os.path.exists(file_path): os.remove(file_path)
@@ -670,16 +671,28 @@ def process_pptx(file_path, images_dir, llm_settings=None, shared_llm_url=None, 
         prs = Presentation(file_path)
         for i, slide in enumerate(prs.slides):
             nodes.append(TextNode(text="\n".join([sh.text for sh in slide.shapes if hasattr(sh, "text")]), metadata={"file_name":file_name, "page":i+1}))
+    finally:
+        # F-fix #14: гарантированно закрыть COM-объекты, иначе процесс PowerPoint
+        # остаётся висеть с залоченным файлом. try/finally выполняется даже при exception.
+        if deck is not None:
+            try: deck.Close()
+            except Exception: pass
+        if app is not None:
+            try: app.Quit()
+            except Exception: pass
+        try: pythoncom.CoUninitialize()
+        except Exception: pass
     return nodes
 
 def process_docx(file_path, images_dir, llm_settings=None, shared_llm_url=None, progress_cb=None, cancel_check=None, keep_vision_alive=False):
     nodes = []; file_name = os.path.basename(file_path); pdf_path = os.path.splitext(file_path)[0] + ".pdf"
     import win32com.client, pythoncom
+    app = None; doc = None
     try:
         pythoncom.CoInitialize()
         app = win32com.client.Dispatch("Word.Application")
         doc = app.Documents.Open(os.path.abspath(file_path))
-        doc.SaveAs(os.path.abspath(pdf_path), 17); doc.Close(); app.Quit()
+        doc.SaveAs(os.path.abspath(pdf_path), 17)
         # После конвертации удаляем оригинал и работаем с PDF
         if os.path.exists(pdf_path):
             if os.path.exists(file_path): os.remove(file_path)
@@ -693,6 +706,16 @@ def process_docx(file_path, images_dir, llm_settings=None, shared_llm_url=None, 
         logger.warning(f"COM-конвертация DOCX не удалась, резерв через python-docx: {e}")
         import docx
         nodes.append(TextNode(text="\n".join([p.text for p in docx.Document(file_path).paragraphs]), metadata={"file_name":file_name}))
+    finally:
+        # F-fix #14: гарантированно закрыть COM-объекты Word (см. process_pptx).
+        if doc is not None:
+            try: doc.Close()
+            except Exception: pass
+        if app is not None:
+            try: app.Quit()
+            except Exception: pass
+        try: pythoncom.CoUninitialize()
+        except Exception: pass
     return nodes
 
 def _safe_print(msg):
