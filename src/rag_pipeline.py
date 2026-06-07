@@ -15,7 +15,18 @@ import threading
 import requests
 import requests.adapters
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from transformers import BitsAndBytesConfig
+# F-fix #optional-deps: transformers/bitsandbytes нужны ТОЛЬКО для non-GGUF
+# режима (PyTorch-эмбеддинги с квантованием). В дефолтной GGUF-конфигурации
+# они не используются, но в requirements.txt они были обязательными →
+# пользователь качал ~4 ГБ зависимостей, которые никогда не загружались.
+# Делаем import опциональным: если transformers нет и код пойдёт по
+# non-GGUF ветке — будем ругаться понятной ошибкой, а не ImportError при старте.
+try:
+    from transformers import BitsAndBytesConfig
+    _HAS_TRANSFORMERS = True
+except ImportError:
+    BitsAndBytesConfig = None
+    _HAS_TRANSFORMERS = False
 
 # F-fix #15: Session для rerank-запросов (см. также ingestion.py _http_session).
 # Без Session каждый POST /v1/rerank открывает новый TCP-коннект.
@@ -120,6 +131,15 @@ def init_settings(max_tokens=1024):
                     query_header="Instruct: Given a web search query, retrieve relevant passages that answer the query\nQuery: "
                 )
             else:
+                # F-fix #optional-deps: non-GGUF режим требует transformers + bitsandbytes.
+                # Проверяем заранее, чтобы дать понятную ошибку, а не ImportError
+                # при первом запросе к эмбеддингу.
+                if not _HAS_TRANSFORMERS:
+                    raise RuntimeError(
+                        "PyTorch-режим эмбеддингов требует 'transformers' и 'bitsandbytes'. "
+                        "Установите: pip install -r requirements-pt-extras.txt\n"
+                        "Или переключитесь на GGUF-эмбеддинг (config.EMBEDDING_MODEL_NAME=*.gguf)."
+                    )
                 print(f"Инициализация эмбеддингов (PyTorch): {device.upper()} (Quant: {config.QUANTIZATION})")
                 model_kwargs = {"trust_remote_code": True}
                 model_kwargs["attn_implementation"] = "sdpa"
@@ -750,12 +770,19 @@ def retrieve_nodes(query: str, notebook_id: str, allowed_files=None, max_tokens=
                 scores = [1.0 - (i * 0.01) for i in range(len(all_nodes))]
         else:
             if "reranker" not in _model_cache:
+                # F-fix #optional-deps: PyTorch-реранкер тоже требует transformers.
+                if not _HAS_TRANSFORMERS:
+                    raise RuntimeError(
+                        "PyTorch-режим реранкера требует 'transformers' и 'bitsandbytes'. "
+                        "Установите: pip install -r requirements-pt-extras.txt\n"
+                        "Или переключитесь на GGUF-реранкер (запустите llama-server с RERANKER_MODEL_NAME)."
+                    )
                 print(f"  [RAG] Загрузка реранкера: {reranker_name} ({config.QUANTIZATION})")
                 rerank_kwargs = {"trust_remote_code": True}
                 rerank_kwargs["attn_implementation"] = "sdpa"
                 if config.QUANTIZATION == "4bit":
                     rerank_kwargs["quantization_config"] = BitsAndBytesConfig(
-                        load_in_4bit=True, 
+                        load_in_4bit=True,
                         bnb_4bit_compute_dtype=torch.bfloat16,
                         bnb_4bit_quant_type="nf4"
                     )

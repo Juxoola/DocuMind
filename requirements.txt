@@ -9,13 +9,9 @@ rank_bm25
 chromadb
 sentence-transformers
 
-# --- Quantization ---
-transformers
-bitsandbytes
-
-# --- Speech & Audio ---
+# --- Speech & Audio (WhisperX) ---
+# torch обязателен для WhisperX и для PyTorch-эмбеддингов (см. requirements-pt-extras.txt)
 torch
-torchvision
 torchaudio
 whisperx
 
@@ -23,7 +19,6 @@ whisperx
 fastapi
 uvicorn
 requests
-httpx
 pydantic
 pydantic-settings
 python-dotenv
@@ -35,9 +30,13 @@ imageio-ffmpeg
 
 # --- Document Processing ---
 pymupdf
-python-pptx
 python-docx
-pywin32  # Windows only
 
 # --- Utils ---
 watchfiles
+
+# ── Опциональные зависимости (НЕ устанавливаются по умолчанию) ──
+# PyTorch-эмбеддинги и реранкер с квантованием (4bit/int8):
+#   pip install -r requirements-pt-extras.txt
+# Windows-only зависимости для нативного чтения .pptx через COM:
+#   pip install -r requirements-windows.txt

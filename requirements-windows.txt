@@ -1,0 +1,17 @@
+# ── Опциональные зависимости: Windows-only функции ──
+#
+# Этот файл нужен ТОЛЬКО на Windows И ТОЛЬКО если вы хотите читать
+# .pptx (PowerPoint) файлы через нативный COM-интерфейс MS Office
+# (более точное извлечение текста/таблиц, чем python-pptx).
+#
+# ⚠️  Требует установленный Microsoft Office на той же машине.
+# ⚠️  На Linux/macOS эти зависимости не установятся.
+#
+# Установка (только на Windows с Office):
+#   pip install -r requirements-windows.txt
+#
+# Размер на диске: ~30 МБ.
+
+# --- Чтение .pptx через COM-интерфейс MS Office ---
+python-pptx
+pywin32
