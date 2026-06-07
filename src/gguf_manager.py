@@ -200,7 +200,9 @@ def start_gguf_server(
     for _ in range(30):
         time.sleep(1)
         try:
-            if requests.get(f"http://127.0.0.1:{port}/health").status_code == 200:
+            # F-fix #21: requests.get без timeout = бесконечное ожидание.
+            # Если сервер упал, connection hung → опросник висит 30 сек.
+            if requests.get(f"http://127.0.0.1:{port}/health", timeout=2).status_code == 200:
                 print(f"[GGUF Manager] Сервер готов на порту {port}")
                 return {"status": "ok", "url": f"http://127.0.0.1:{port}/v1", "info": _server_info}
         except Exception: pass
