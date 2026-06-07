@@ -16,7 +16,9 @@ export default function SettingsModal({ isOpen, onClose, settings, onSave }) {
     const [llmLoadState, setLlmLoadState] = useState({ state: 'idle', phase: null, model: null, elapsed: 0, eta: null, error: null });
     const [ggufConfig, setGgufConfig] = useState({
         search_dirs: '',
-        gguf_kv_quant: 4,
+        // F-fix #34: default 4 → 8 (q8_0). q4_k/q5_k не поддерживаются
+        // llama-server для KV-cache, llama-server падает с retcode=1.
+        gguf_kv_quant: 8,
         presence_penalty: 0.0,
         frequency_penalty: 0.0,
         repeat_penalty: 1.1,

@@ -107,14 +107,18 @@ def _start_llm_server_sync(
 
     # Маппинг типов квантования для llama-server.
     # Ключ — значение gguf_kv_quant из UI/Settings; значение — флаг --cache-type-k/v.
-    # Раньше q4_k отсутствовал в map (UI отправлял 2, получал q4_0) — квантование было слабее ожидаемого.
+    #
+    # F-fix #34: q4_k и q5_k НЕ поддерживаются llama.cpp для KV-cache.
+    # Допустимы только: f32, f16, bf16, q8_0, q4_0, q4_1, iq4_nl, q5_0, q5_1.
+    # Коммит cd2dd6e ошибочно добавил q4_k/q5_k в map — llama-server падал
+    # при старте с "retcode=1" и пустым stderr.
     CACHE_TYPE_MAP = {
         0: "f16",
         1: "f32",
         2: "q4_0",
         3: "q4_1",
-        4: "q4_k",
-        6: "q5_k",
+        4: "q4_0",  # было "q4_k" — невалидно. Fallback на q4_0 (то же что было до регрессии).
+        6: "q5_0",  # было "q5_k" — невалидно. Fallback на q5_0.
         8: "q8_0",
     }
     type_k_str = CACHE_TYPE_MAP.get(current_config["type_k"], "f16")
@@ -531,6 +535,8 @@ def get_gguf_embedding_url(gguf_path: str, n_threads: int = None, is_reranker: b
             cmd.extend(["-t", str(n_threads)])
 
         print(f"[GGUF Server] Запуск {role}: {os.path.basename(gguf_path)} на порту {port} (parallel={n_parallel})...")
+        # F-fix #33: печатаем полную cmd для диагностики (как в LLM-пути)
+        print(f"[GGUF Server]   cmd: {' '.join(cmd)}")
         
         creationflags = 0x08000000 # CREATE_NO_WINDOW
         process = subprocess.Popen(
