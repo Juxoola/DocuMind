@@ -661,50 +661,32 @@ def retrieve_nodes(query: str, notebook_id: str, allowed_files=None, max_tokens=
                 import time as _time
                 _rerank_start = _time.time()
 
-                # Мини-батчевый реранкинг.
-                # llama.cpp /v1/rerank оценивает каждую пару (query + doc) НЕЗАВИСИМО —
-                # контекст нужен только для ОДНОЙ пары, не для суммы всех документов.
-                # Чанк до 2048 токенов + query ~50 = ~2100 токенов → вписывается в -c 4096.
-                #
-                # Мини-батчи (по 10 doc) нужны не из-за контекста, а чтобы:
-                # 1. Держать timeout в разумных пределах (10 doc × 0.3с = 3с на батч)
-                # 2. При ошибке терять только 10 score, а не все 35
-                RERANK_MINI_BATCH_SIZE = 10
+                # F-fix #12: один запрос вместо N мини-батчей.
+                # llama.cpp /v1/rerank обрабатывает ВСЕ документы в одном HTTP-вызове.
+                # Каждая пара (query+doc) независима и обрабатывается последовательно внутри
+                # сервера, но без HTTP-overhead между ними. При --parallel > 1 сервер сам
+                # параллелит обработку внутри одного запроса.
+                # Экономия: 3× HTTP roundtrip (~50-100 мс каждый) + упрощение кода.
+                # 30 doc × 0.3с = 9с — вписывается в timeout=120с.
                 scores = [0.0] * len(all_nodes)
                 success = True
-
-                for batch_start in range(0, len(documents), RERANK_MINI_BATCH_SIZE):
-                    batch_docs = documents[batch_start: batch_start + RERANK_MINI_BATCH_SIZE]
-                    mini_payload = {
-                        "model": "gguf-reranker",
-                        "query": query,
-                        "documents": batch_docs,
-                        "top_n": len(batch_docs)
-                    }
-                    try:
-                        resp = requests.post(f"{url}/v1/rerank", json=mini_payload, timeout=60)
-                        resp.raise_for_status()
-                        results = resp.json().get("results", [])
-                        if not results:
-                            logger.debug(f"[RAG] Реранкер вернул пустой results для батча {batch_start}: {resp.text[:200]}")
-                        for r in results:
-                            # index — позиция ВНУТРИ мини-батча, нужно сдвинуть на batch_start
-                            orig_idx = batch_start + r.get("index", 0)
-                            if orig_idx < len(scores):
-                                scores[orig_idx] = r.get("relevance_score", 0.0)
-                    except Exception as mini_err:
-                        err_body = ""
-                        if hasattr(mini_err, 'response') and mini_err.response is not None:
-                            err_body = f" body={mini_err.response.text[:200]}"
-                        logger.warning(f"[RAG] Мини-батч {batch_start} не прошёл: {mini_err}{err_body}")
-                        success = False
+                resp = requests.post(
+                    f"{url}/v1/rerank",
+                    json={"model": "gguf-reranker", "query": query, "documents": documents, "top_n": len(documents)},
+                    timeout=120,
+                )
+                resp.raise_for_status()
+                results = resp.json().get("results", [])
+                if not results:
+                    logger.debug(f"[RAG] Реранкер вернул пустой results: {resp.text[:200]}")
+                for r in results:
+                    orig_idx = r.get("index", 0)
+                    if orig_idx < len(scores):
+                        scores[orig_idx] = r.get("relevance_score", 0.0)
 
                 elapsed_r = _time.time() - _rerank_start
-                batches = (len(documents) + RERANK_MINI_BATCH_SIZE - 1) // RERANK_MINI_BATCH_SIZE
                 if success:
-                    print(f"  [RAG] ✅ Реранкинг: {len(documents)} doc / {batches} батчей за {elapsed_r:.2f}с")
-                else:
-                    print(f"  [RAG] ⚠️ Реранкинг частичный ({batches} батчей, {elapsed_r:.2f}с) — часть scores = 0.0")
+                    print(f"  [RAG] ✅ Реранкинг: {len(documents)} doc за {elapsed_r:.2f}с")
 
             except Exception as e:
                 err_body = ""
