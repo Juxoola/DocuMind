@@ -195,9 +195,20 @@ def _start_llm_server_sync(
 
         time.sleep(0.5)
 
-    process.terminate()
-    try: process.wait(timeout=3)
-    except Exception: process.kill()
+    # F-fix #8: при таймауте запуска используем taskkill /F /T (см. unload_all_models).
+    try:
+        if sys.platform == "win32":
+            subprocess.run(
+                ["taskkill", "/F", "/T", "/PID", str(process.pid)],
+                capture_output=True, timeout=5
+            )
+        else:
+            process.kill()
+    except Exception:
+        try: process.kill()
+        except Exception: pass
+    try: process.wait(timeout=5)
+    except Exception: pass
     raise TimeoutError("Сервер не ответил за 60 секунд")
 
 
@@ -656,18 +667,38 @@ def unload_all_models(role: str = None):
     for path, process in _server_processes.items():
         if role is not None and _server_roles.get(path) != role:
             continue
-            
+
         print(f"[GGUF Server] Выгрузка модели ({_server_roles.get(path, 'unknown')}): {os.path.basename(path)}")
         to_remove.append(path)
-        
+
         if process.poll() is None: # Если еще живой
+            # F-fix #8: на Windows terminate() оставляет orphan CUDA-контекст в драйвере
+            # NVIDIA (наблюдаемая утечка ~2-3GB на каждый kill). Решение:
+            # 1) сразу kill() вместо terminate()+wait — мягкое завершение не помогает
+            # 2) дать процессу явно закрыть свой CUDA-контекст через /slots endpoint ДО kill
+            # 3) на Windows дополнительно taskkill /F /T для надёжного убийства child-процессов
             try:
-                process.terminate()
-                try:
-                    process.wait(timeout=3)
-                except subprocess.TimeoutExpired:
+                port = _server_ports.get(path)
+                if port:
+                    try:
+                        import requests as _r
+                        _r.post(f"http://127.0.0.1:{port}/slots/0/clear", timeout=0.5)
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+            try:
+                if sys.platform == "win32":
+                    # /F — force, /T — вместе с дочерними процессами. Это единственный
+                    # надёжный способ освободить CUDA-контекст на Windows.
+                    subprocess.run(
+                        ["taskkill", "/F", "/T", "/PID", str(process.pid)],
+                        capture_output=True, timeout=5
+                    )
+                else:
                     process.kill()
-                    process.wait(timeout=2)
+                try: process.wait(timeout=5)
+                except Exception: pass
             except Exception as e:
                 print(f"[GGUF Server] Ошибка при остановке {os.path.basename(path)}: {e}")
     for path in to_remove:
@@ -675,13 +706,20 @@ def unload_all_models(role: str = None):
         _server_ports.pop(path, None)
         _server_configs.pop(path, None)
         _server_roles.pop(path, None)
-    
-    # На Windows иногда процессы зависают, пробуем почистить по имени порта если нужно, 
-    # но пока ограничимся gc.
+
+    # F-fix #8: gc + empty_cache мало помогают на Windows (driver держит контекст
+    # в ядре), но мы всё равно вызываем их + небольшой sleep даёт драйверу время
+    # на освобождение контекста. Основная защита — taskkill /F /T выше.
     import gc
+    import time as _time
     gc.collect()
     if torch.cuda.is_available():
-        torch.cuda.empty_cache()
+        try:
+            torch.cuda.empty_cache()
+            torch.cuda.ipc_collect()
+        except Exception:
+            pass
+    _time.sleep(0.1)
 
 def get_loaded_models():
     """Возвращает список путей к запущенным LLM моделям (без эмбеддингов)."""
