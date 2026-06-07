@@ -80,10 +80,28 @@ app.add_middleware(
 )
 
 def safe_filename(filename: str) -> str:
-    """Валидация имени файла для защиты от path traversal."""
-    clean = Path(filename).name
-    if clean != filename or not clean or clean.startswith('.'):
-        raise HTTPException(status_code=400, detail=f"Недопустимое имя файла: {filename}")
+    """Валидация имени файла для защиты от path traversal.
+
+    F-fix #16: предыдущая версия использовала Path(filename).name для
+    извлечения имени файла, что убирало '../' из пути, но НЕ проверяла
+    на NULL-байты, control-символы и Windows-reserved имена (CON, PRN, AUX).
+    Злоумышленник мог загрузить файл с именем '..\\..\\config.txt' (Windows
+    воспримет '\\' как разделитель пути) или '\x00.txt' (truncation-атака).
+    """
+    if not filename or not isinstance(filename, str):
+        raise HTTPException(status_code=400, detail="Пустое имя файла")
+    # Убираем все компоненты пути через os.path.basename (Windows-safe)
+    clean = os.path.basename(filename.replace('\\', '/'))
+    # Проверяем что ничего "вредного" не осталось
+    if (clean != filename
+        or not clean
+        or clean.startswith('.')
+        or '\x00' in clean
+        or any(ord(c) < 32 for c in clean)  # control chars
+        or clean.upper() in {'CON', 'PRN', 'AUX', 'NUL',
+                             'COM1', 'COM2', 'COM3', 'COM4',
+                             'LPT1', 'LPT2', 'LPT3'}):
+        raise HTTPException(status_code=400, detail=f"Недопустимое имя файла: {filename!r}")
     return clean
 
 # Монтируем статику
