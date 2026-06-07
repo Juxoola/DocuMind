@@ -192,7 +192,10 @@ def _start_llm_server_sync(
                 _, stderr = process.communicate(timeout=1)
             except Exception:
                 stderr = b""
-            raise RuntimeError(f"Сервер упал при запуске: {stderr.decode('utf-8', errors='ignore')[:500]}")
+            # F-fix #31: process.communicate() может вернуть None для stderr,
+            # если stream был DEVNULL и pipe уже закрыт. None.decode() → AttributeError.
+            stderr_text = (stderr or b"").decode('utf-8', errors='ignore')[:500]
+            raise RuntimeError(f"Сервер упал при запуске: {stderr_text}")
 
         time.sleep(0.5)
 

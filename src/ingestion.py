@@ -787,7 +787,9 @@ def ensure_720p_video(file_path, prog_cb=None, cancel_check=None, notebook_id=No
         try:
             cmd = [ffmpeg, "-hide_banner", "-i", path]
             res = subprocess.run(cmd, capture_output=True, timeout=30)
-            stderr = res.stderr.decode('utf-8', errors='ignore')
+            # F-fix #31: capture_output=True теоретически гарантирует bytes, но
+            # на Windows + специфические ffmpeg-ошибки могут дать res.stderr=None.
+            stderr = (res.stderr or b"").decode('utf-8', errors='ignore')
             for line in stderr.split("\n"):
                 if "Duration" in line:
                     time_str = line.split("Duration: ")[1].split(",")[0]
