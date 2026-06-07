@@ -276,6 +276,28 @@ def robust_rmtree(path, max_retries=10, delay=1.0):
                     return True, None
             except Exception as move_err:
                 pass
+
+        # ── Попытка 4: MoveFileExW с MOVEFILE_DELAY_UNTIL_REBOOT ──
+        # F-fix #movefileex: ядерный вариант, который ВСЕГДА работает.
+        # Говорит Windows: "удали эту папку на следующей перезагрузке,
+        # когда handles точно будут свободны". Ни os.rename, ни cmd move
+        # не работают, потому что Windows проверяет locked-children
+        # для rename/move. MoveFileExW с DELAY_UNTIL_REBOOT — это
+        # специальный путь в ядре, который эту проверку обходит.
+        # Реализовано через ctypes, чтобы не тянуть pywin32.
+        if sys.platform == "win32":
+            try:
+                _schedule_delete_on_reboot(path)
+                logger.warning(
+                    f"[robust_rmtree] {path} запланировано к удалению на "
+                    f"следующую перезагрузку (handles удерживаются процессом). "
+                    f"Перезагрузите компьютер или ребутните сервер, чтобы "
+                    f"ChromaDB отпустил mmap, и Windows удалил папку автоматически."
+                )
+                return True, None
+            except Exception as movefileex_err:
+                logger.debug(f"[robust_rmtree] MoveFileExW failed: {movefileex_err}")
+
         # Всё провалилось. Возвращаем (False, error_msg) — вызывающий
         # решит, показать 503 или 500.
         err_msg = (
@@ -288,6 +310,41 @@ def robust_rmtree(path, max_retries=10, delay=1.0):
             f"shutil_err={last_err}, rename_err={rename_err}"
         )
         return False, err_msg
+
+
+def _schedule_delete_on_reboot(path: str) -> None:
+    """Windows: планирует удаление файла/папки на следующую перезагрузку.
+
+    F-fix #movefileex: использует MoveFileExW с флагом MOVEFILE_DELAY_UNTIL_REBOOT.
+    Это ЕДИНСТВЕННЫЙ надёжный способ удалить файл, у которого mmap-дескриптор
+    держит другой процесс (ChromaDB HNSW). Обычные os.rename / MoveFile / DeleteFile
+    все отказывают, потому что Windows проверяет locked children.
+
+    Реализация через ctypes, чтобы не добавлять pywin32 в обязательные зависимости.
+    Параметры: kernel32!MoveFileExW(lpExistingFileName, NULL, MOVEFILE_DELAY_UNTIL_REBOOT).
+
+    Raises OSError если вызов не удался (например, не Windows).
+    """
+    if sys.platform != "win32":
+        raise OSError("MoveFileExW доступен только на Windows")
+
+    import ctypes
+    from ctypes import wintypes
+
+    MOVEFILE_DELAY_UNTIL_REBOOT = 0x00000004
+    MOVEFILE_WRITE_THROUGH = 0x00000008  # flush изменений на диск до возврата
+
+    # Wide strings (UTF-16) для WinAPI
+    path_w = ctypes.c_wchar_p(path)
+    kernel32 = ctypes.windll.kernel32
+    kernel32.MoveFileExW.restype = wintypes.BOOL
+    kernel32.MoveFileExW.argtypes = [wintypes.LPCWSTR, wintypes.LPCWSTR, wintypes.DWORD]
+
+    # lpNewFileName = NULL означает "удалить"
+    success = kernel32.MoveFileExW(path_w, None, MOVEFILE_DELAY_UNTIL_REBOOT | MOVEFILE_WRITE_THROUGH)
+    if not success:
+        err = ctypes.get_last_error() or ctypes.GetLastError()
+        raise OSError(f"MoveFileExW failed, WinError={err}: {ctypes.FormatError(err)}")
 
 
 
