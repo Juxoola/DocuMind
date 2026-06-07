@@ -730,6 +730,11 @@ export default function ChatArea({ notebook, selectedSources, onOpenSource, llmS
   const [abortController, setAbortController] = useState(null);
   const [selectedImage, setSelectedImage] = useState(null);
   const [imagePreview, setImagePreview] = useState(null);
+  // F-fix #30: ref для батчинга streaming updates. setMessages вызывается
+  // максимум раз в 16мс (rAF), даже если чанки приходят чаще.
+  // Без этого длинный LLM-ответ (2000 токенов × 4 чанка/токен = 8000 setMessages
+  // × O(n_messages) reconciliation = видимый jank).
+  const streamBatchRef = useRef({ pendingContent: '', pendingThinking: '', rafId: null, aiMsgIndex: -1 });
   const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = useRef(null);
   const tooltipTimeoutRef = useRef(null);
@@ -925,8 +930,35 @@ export default function ChatArea({ notebook, selectedSources, onOpenSource, llmS
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let fullContent = '';
-      let sources = [];
       let buffer = ''; // Буфер для склейки разорванных строк
+
+      // F-fix #30: helper для батчинга streaming updates через rAF.
+      // Накапливает pendingContent/pendingThinking в ref, setMessages
+      // триггерится не чаще 1 раза в 16мс. Полная очистка в finally.
+      const batch = streamBatchRef.current;
+      batch.pendingContent = '';
+      batch.pendingThinking = '';
+      batch.aiMsgIndex = aiMsgIndex;
+      if (batch.rafId != null) { cancelAnimationFrame(batch.rafId); batch.rafId = null; }
+      const flushBatch = () => {
+        batch.rafId = null;
+        const pc = batch.pendingContent;
+        const pt = batch.pendingThinking;
+        if (!pc && !pt) return;
+        batch.pendingContent = '';
+        batch.pendingThinking = '';
+        const idx = batch.aiMsgIndex;
+        setMessages(prev => {
+          if (idx < 0 || idx >= prev.length) return prev;
+          const next = prev.slice();
+          next[idx] = { ...next[idx], content: pc || next[idx].content, thinkingContent: pt || next[idx].thinkingContent, loading: false };
+          return next;
+        });
+      };
+      const scheduleFlush = () => {
+        if (batch.rafId != null) return;
+        batch.rafId = requestAnimationFrame(flushBatch);
+      };
 
       while (true) {
         const { done, value } = await reader.read();
@@ -948,38 +980,36 @@ export default function ChatArea({ notebook, selectedSources, onOpenSource, llmS
           try {
             const data = JSON.parse(payload);
             if (data.type === 'sources') {
-              sources = data.sources;
-            } else if (data.type === 'thinking_start') {
-              // Начало рассуждений — убираем loading-спиннер, инициируем thinking
+              // F-fix #30: sources обновляются сразу, не батчатся (важно для UI citation)
               setMessages(prev => {
-                const next = [...prev];
+                const next = prev.slice();
+                if (next[aiMsgIndex]) next[aiMsgIndex] = { ...next[aiMsgIndex], sources: data.sources };
+                return next;
+              });
+            } else if (data.type === 'thinking_start') {
+              setMessages(prev => {
+                const next = prev.slice();
                 if (next[aiMsgIndex]) next[aiMsgIndex] = { ...next[aiMsgIndex], loading: false, thinkingContent: '', thinkingDone: false };
                 return next;
               });
             } else if (data.type === 'thinking_chunk') {
-              // Стримим рассуждения
-              setMessages(prev => {
-                const next = [...prev];
-                if (next[aiMsgIndex]) next[aiMsgIndex] = {
-                  ...next[aiMsgIndex],
-                  thinkingContent: (next[aiMsgIndex].thinkingContent || '') + data.text
-                };
-                return next;
-              });
+              batch.pendingThinking += data.text;
+              scheduleFlush();
             } else if (data.type === 'thinking_done') {
-              // Рассуждения завершены
               setMessages(prev => {
-                const next = [...prev];
+                const next = prev.slice();
                 if (next[aiMsgIndex]) next[aiMsgIndex] = { ...next[aiMsgIndex], thinkingDone: true };
                 return next;
               });
             } else if (data.type === 'chunk') {
               fullContent += data.text;
-              updateAiMessage(aiMsgIndex, fullContent, sources);
+              batch.pendingContent = fullContent;  // заменяем, не аккумулируем
+              scheduleFlush();
             } else if (data.type === 'stats') {
               setStats(data);
             } else if (data.type === 'error') {
               fullContent = '⚠️ Ошибка: ' + data.text;
+              if (batch.rafId != null) { cancelAnimationFrame(batch.rafId); batch.rafId = null; }
               updateAiMessage(aiMsgIndex, fullContent, []);
             }
           } catch (e) {
@@ -987,13 +1017,24 @@ export default function ChatArea({ notebook, selectedSources, onOpenSource, llmS
           }
         }
       }
+      // F-fix #30: финальный flush чтобы не потерять последние символы
+      if (batch.rafId != null) { cancelAnimationFrame(batch.rafId); batch.rafId = null; }
+      flushBatch();
     } catch (err) {
       if (err.name === 'AbortError') {
+        const batch = streamBatchRef.current;
+        if (batch.rafId != null) { cancelAnimationFrame(batch.rafId); batch.rafId = null; }
         updateAiMessage(aiMsgIndex, '*(Генерация остановлена)*', []);
       } else {
+        const batch = streamBatchRef.current;
+        if (batch.rafId != null) { cancelAnimationFrame(batch.rafId); batch.rafId = null; }
         updateAiMessage(aiMsgIndex, '⚠️ Ошибка связи с сервером.', []);
       }
     } finally {
+      const batch = streamBatchRef.current;
+      if (batch.rafId != null) { cancelAnimationFrame(batch.rafId); batch.rafId = null; }
+      batch.pendingContent = '';
+      batch.pendingThinking = '';
       setIsLoading(false);
       setAbortController(null);
       abortControllerRef.current = null;
