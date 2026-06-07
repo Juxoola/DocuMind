@@ -567,22 +567,48 @@ def process_pdf(file_path, images_dir, llm_settings=None, shared_llm_url=None, o
                     logger.warning(f"Ошибка разбора страницы {pn+1}: {e}")
                     page_results[pn] = ("", False)
 
-    # Последовательная фаза: создание нод и pixmap-ов (Pixmap НЕ потокобезопасен в PyMuPDF < 1.24)
-    for page_num in range(total_pages):
-        if _is_cancelled():
-            print(f"[Ingestion] Отмена на странице {page_num+1}/{total_pages}")
-            raise IngestionCancelled(f"Cancelled at page {page_num+1}")
+    # Параллельная фаза: создание нод + Pixmap-ов.
+    # F-fix #22: PyMuPDF >= 1.24 (у нас 1.27.2.3) — get_pixmap() thread-safe.
+    # Раньше делалось последовательно с комментарием "Pixmap НЕ потокобезопасен в
+    # PyMuPDF < 1.24", но версия давно превысила 1.24, а комментарий остался.
+    # Для 100-страничного PDF экономим до 5-7 сек на вводе-выводе.
+    def _build_page_artifacts(page_num: int):
         text, has_real_graphics = page_results[page_num]
+        local_nodes = []
+        image_path = None
         if text and text.strip():
-            page_nodes = splitter.get_nodes_from_documents([
+            local_nodes = splitter.get_nodes_from_documents([
                 TextNode(text=text, metadata={"file_name":file_name, "page":page_num+1})
             ])
-            nodes.extend(page_nodes)
-
         if has_real_graphics:
             image_path = os.path.join(images_dir, f"p_{page_num+1}_{uuid.uuid4().hex[:6]}.png")
             doc.load_page(page_num).get_pixmap(dpi=150).save(image_path)
-            frame_list.append({"page": page_num+1, "path": image_path})
+        return page_num, local_nodes, image_path
+
+    if total_pages <= 1 or n_workers <= 1:
+        # Последовательный путь (1 страница — оверхед потоков не оправдан)
+        for page_num in range(total_pages):
+            if _is_cancelled():
+                print(f"[Ingestion] Отмена на странице {page_num+1}/{total_pages}")
+                raise IngestionCancelled(f"Cancelled at page {page_num+1}")
+            pn, local_nodes, image_path = _build_page_artifacts(page_num)
+            nodes.extend(local_nodes)
+            if image_path:
+                frame_list.append({"page": pn+1, "path": image_path})
+    else:
+        with ThreadPoolExecutor(max_workers=n_workers) as ex:
+            futures = [ex.submit(_build_page_artifacts, pn) for pn in range(total_pages)]
+            artifacts = [None] * total_pages  # сохраняем порядок
+            for fut in as_completed(futures):
+                if _is_cancelled():
+                    ex.shutdown(wait=False, cancel_futures=True)
+                    raise IngestionCancelled("Cancelled during artifacts build")
+                pn, local_nodes, image_path = fut.result()
+                artifacts[pn] = (local_nodes, image_path)
+            for pn, (local_nodes, image_path) in enumerate(artifacts):
+                nodes.extend(local_nodes)
+                if image_path:
+                    frame_list.append({"page": pn+1, "path": image_path})
 
     if frame_list:
         # Ленивый запуск сервера
