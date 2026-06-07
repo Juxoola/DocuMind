@@ -16,6 +16,11 @@ import { cn } from '../lib/utils';
 // 30+ параметров моделей, иконки настроек) не нужен пользователю.
 // React.lazy + Suspense даёт нативный split chunk в Vite.
 const SettingsModal = lazy(() => import('./SettingsModal'));
+// F-fix #virt-list: виртуализация длинного списка сообщений. На длинных диалогах
+// (100+ Q&A) React рендерит сотни MessageItem, что тормозит скролл и TTI.
+// useVirtualizer рендерит только видимые + немного overscan, остальные
+// заменяет на пустые div той же высоты. ~5 КБ gzip, нулевая конфигурация.
+import { useVirtualizer } from '@tanstack/react-virtual';
 import axios from 'axios';
 import { CitationButton, CitationTooltipPortal } from '../lib/CitationTooltip';
 import { extractCleanContent, copyAsRichText } from '../lib/copyToClipboard';
@@ -743,13 +748,45 @@ export default function ChatArea({ notebook, selectedSources, onOpenSource, llmS
   const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = useRef(null);
   const tooltipTimeoutRef = useRef(null);
-  const messagesEndRef = useRef(null);
+  const messagesScrollRef = useRef(null);
   const textareaRef = useRef(null);
+
+  // F-fix #virt-list: виртуализация списка сообщений.
+  // estimateSize — приблизительная высота одного сообщения (адаптивная
+  // оценка, реальная измеряется автоматически при ресайзе/стриме).
+  // overscan — сколько элементов рендерить за пределами viewport'а,
+  // чтобы скролл был плавным. 8 — комфортно для чата с длинными AI-ответами.
+  const rowVirtualizer = useVirtualizer({
+    count: messages.length,
+    getScrollElement: () => messagesScrollRef.current,
+    estimateSize: () => 240,
+    overscan: 8,
+  });
+
+  // F-fix #virt-scroll: при добавлении нового сообщения автоматически
+  // прокручиваем к последнему элементу. Без этого пользователь не увидит
+  // ответ AI, если стрим шёл во время скролла вверх.
+  const prevMessagesLength = React.useRef(messages.length);
+  React.useEffect(() => {
+    if (messages.length > prevMessagesLength.current) {
+      // Новое сообщение — скроллим вниз (используем виртуализатор
+      // scrollToIndex вместо scrollIntoView — он знает правильный offset).
+      rowVirtualizer.scrollToIndex(messages.length - 1, { align: 'end' });
+    }
+    prevMessagesLength.current = messages.length;
+  }, [messages.length, rowVirtualizer]);
 
   // Коллбэк: MessageItem сообщает, что Q&A сохранён — помечаем сообщение
   const markMessageSaved = React.useCallback((msgIndex, ts) => {
     setMessages(prev => prev.map((m, i) => i === msgIndex ? { ...m, _savedAt: ts } : m));
   }, []);
+
+  // F-fix #virt-list: оцениваем высоту сообщения динамически.
+  // Короткий user-вопрос ~60px, AI-ответ с markdown и кодом 200-1000px.
+  // useVirtualizer кеширует измерения и обновляет при изменении контента.
+  const measureElement = React.useCallback((el) => {
+    if (el) rowVirtualizer.measureElement(el);
+  }, [rowVirtualizer]);
 
   // Слушаем событие «заполни input» от закладки (Sidebar.askAgain)
   React.useEffect(() => {
@@ -778,10 +815,15 @@ export default function ChatArea({ notebook, selectedSources, onOpenSource, llmS
   }, [input]);
 
   const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    // F-fix #virt-list: используем rowVirtualizer.scrollToIndex вместо
+    // messagesEndRef.scrollIntoView, потому что в виртуализированном списке
+    // нет физического 'end' элемента — все сообщения позиционированы через transform.
+    if (messages.length > 0) {
+      rowVirtualizer.scrollToIndex(messages.length - 1, { align: 'end', behavior: 'smooth' });
+    }
   };
 
-  useEffect(scrollToBottom, [messages]);
+  useEffect(scrollToBottom, [messages, rowVirtualizer]);
 
   // F-fix #28: cleanup для активного streaming fetch при unmount ChatArea.
   // Без этого при смене блокнота / закрытии вкладки fetch() продолжает
@@ -1298,26 +1340,52 @@ export default function ChatArea({ notebook, selectedSources, onOpenSource, llmS
         )}
       </AnimatePresence>
 
-      {/* Область сообщений */}
-      <div className="flex-1 overflow-y-auto p-6 space-y-8">
-        <AnimatePresence initial={false}>
-          {messages.map((msg, i) => (
-            <MessageItem
-              key={i}
-              msg={msg}
-              index={i}
-              messagesLength={messages.length}
-              onOpenSource={onOpenSource}
-              setHoveredSource={setHoveredSource}
-              setTooltipCoords={setTooltipCoords}
-              tooltipTimeoutRef={tooltipTimeoutRef}
-              notebook={notebook}
-              question={msg.role === 'ai' && i > 0 ? messages[i - 1]?.content : ''}
-              onBookmarkSaved={markMessageSaved}
-            />
-          ))}
-        </AnimatePresence>
-        <div ref={messagesEndRef} />
+      {/* Область сообщений (F-fix #virt-list: виртуализирована) */}
+      <div
+        ref={messagesScrollRef}
+        className="flex-1 overflow-y-auto p-6"
+        style={{ contain: 'strict' }}
+      >
+        <div
+          style={{
+            height: `${rowVirtualizer.getTotalSize()}px`,
+            width: '100%',
+            position: 'relative',
+          }}
+        >
+          {rowVirtualizer.getVirtualItems().map((virtualRow) => {
+            const msg = messages[virtualRow.index];
+            const i = virtualRow.index;
+            return (
+              <div
+                key={virtualRow.key}
+                data-index={i}
+                ref={measureElement}
+                style={{
+                  position: 'absolute',
+                  top: 0,
+                  left: 0,
+                  width: '100%',
+                  transform: `translateY(${virtualRow.start}px)`,
+                  paddingBottom: '2rem', // заменяет space-y-8 между сообщениями
+                }}
+              >
+                <MessageItem
+                  msg={msg}
+                  index={i}
+                  messagesLength={messages.length}
+                  onOpenSource={onOpenSource}
+                  setHoveredSource={setHoveredSource}
+                  setTooltipCoords={setTooltipCoords}
+                  tooltipTimeoutRef={tooltipTimeoutRef}
+                  notebook={notebook}
+                  question={msg.role === 'ai' && i > 0 ? messages[i - 1]?.content : ''}
+                  onBookmarkSaved={markMessageSaved}
+                />
+              </div>
+            );
+          })}
+        </div>
       </div>
 
       {/* Область ввода */}
