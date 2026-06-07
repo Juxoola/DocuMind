@@ -1,8 +1,15 @@
 notebooks/
 models/
 scratch/
-*.json
 _gguf_scan_cache.json
+# Локальные кеши пользовательских настроек — утекает структура ФС в репо
+last_models.json
+rag_config.json
+# Сгенерированные JSON-кеши (можно пересоздать)
+!frontend/package.json
+!frontend/package-lock.json
+!frontend/eslint.config.js
+!frontend/vite.config.js
 *.mp4
 temp/
 __pycache__/
