@@ -165,7 +165,10 @@ def _start_llm_server_sync(
     if current_config["custom_args"]:
         cmd.extend(current_config["custom_args"])
 
+    # F-fix #33: печатаем полную команду при старте, чтобы при падении
+    # видеть какие параметры реально были переданы (а не гадать).
     print(f"[GGUF Server] Запуск: {os.path.basename(gguf_path)} на порту {port}...")
+    print(f"[GGUF Server]   cmd: {' '.join(cmd)}")
 
     creationflags = 0x08000000 # CREATE_NO_WINDOW
     process = subprocess.Popen(
