@@ -1,16 +1,14 @@
 # --- Core RAG & LLM ---
 llama-index-core
-llama-index-embeddings-huggingface
 llama-index-readers-file
 llama-index-llms-openai
 llama-index-vector-stores-chroma
 llama-index-retrievers-bm25
 rank_bm25
 chromadb
-sentence-transformers
 
 # --- Speech & Audio (WhisperX) ---
-# torch обязателен для WhisperX и для PyTorch-эмбеддингов (см. requirements-pt-extras.txt)
+# torch обязателен для WhisperX
 torch
 torchaudio
 whisperx
@@ -36,8 +34,6 @@ python-pptx
 # --- Utils ---
 watchfiles
 
-# ── Опциональные зависимости (НЕ устанавливаются по умолчанию) ──
-# PyTorch-эмбеддинги и реранкер с квантованием (4bit/int8):
-#   pip install -r requirements-pt-extras.txt
-# Windows-only зависимости для нативного чтения .pptx через COM:
+# ── Опциональные зависимости ──
+# Windows-only зависимости для чтения .pptx через COM (требует MS Office):
 #   pip install -r requirements-windows.txt

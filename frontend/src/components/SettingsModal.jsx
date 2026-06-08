@@ -28,7 +28,6 @@ export default function SettingsModal({ isOpen, onClose, settings, onSave }) {
     const [ragConfig, setRagConfig] = useState({
         embedding_model: '',
         reranker_model: '',
-        quantization: '4bit',
         top_k_per_file: 5,
         rerank_pool: 30,
         final_top_n: 10,
@@ -747,127 +746,50 @@ export default function SettingsModal({ isOpen, onClose, settings, onSave }) {
                                     </button>
                                 </div>
 
-                                {(() => {
-                                    const isEmbedGguf = ragConfig.embedding_model?.toLowerCase().endsWith('.gguf');
-                                    const allGgufFiles = ggufModels?.flatMap(g => g.gguf_files.map(f => ({ name: f, path: g.dir + '/' + f }))) || [];
-                                    
-                                    return (
-                                        <div className="space-y-2">
-                                            <div className="flex items-center justify-between">
-                                                <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest flex items-center gap-2">
-                                                    <Globe size={12} /> Embedding Model
-                                                </label>
-                                                <div className="flex bg-muted/30 rounded-lg p-0.5 border border-border/50">
-                                                    <button 
-                                                        onClick={() => setRagConfig({...ragConfig, embedding_model: 'Qwen/Qwen3-Embedding-0.6B'})}
-                                                        className={cn("px-2 py-1 text-[9px] font-bold rounded-md transition-all", !isEmbedGguf ? "bg-primary text-white shadow-sm" : "text-muted-foreground hover:text-foreground")}
-                                                    >
-                                                        HuggingFace
-                                                    </button>
-                                                    <button 
-                                                        onClick={() => setRagConfig({...ragConfig, embedding_model: allGgufFiles[0]?.path || ''})}
-                                                        className={cn("px-2 py-1 text-[9px] font-bold rounded-md transition-all", isEmbedGguf ? "bg-primary text-white shadow-sm" : "text-muted-foreground hover:text-foreground")}
-                                                    >
-                                                        Local GGUF
-                                                    </button>
-                                                </div>
-                                            </div>
-                                            
-                                            {!isEmbedGguf ? (
-                                                <>
-                                                    <input 
-                                                        type="text"
-                                                        value={ragConfig.embedding_model}
-                                                        onChange={(e) => setRagConfig({...ragConfig, embedding_model: e.target.value})}
-                                                        className="w-full bg-muted/30 border border-border/50 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all"
-                                                    />
-                                                    <p className="text-[10px] text-muted-foreground/60 italic">Например: Qwen/Qwen3-Embedding-0.6B</p>
-                                                </>
-                                            ) : (
-                                                <select
-                                                    value={ragConfig.embedding_model}
-                                                    onChange={(e) => setRagConfig({...ragConfig, embedding_model: e.target.value})}
-                                                    className="w-full bg-muted/30 border border-border/50 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all"
-                                                >
-                                                    <option value="" disabled>Выберите GGUF модель...</option>
-                                                    {allGgufFiles.map(f => (
-                                                        <option key={f.path} value={f.path}>
-                                                            {f.name}
-                                                        </option>
-                                                    ))}
-                                                </select>
-                                            )}
-                                        </div>
-                                    );
-                                })()}
-
-                                {(() => {
-                                    const isRerankGguf = ragConfig.reranker_model?.toLowerCase().endsWith('.gguf');
-                                    const allGgufFiles = ggufModels?.flatMap(g => g.gguf_files.map(f => ({ name: f, path: g.dir + '/' + f }))) || [];
-                                    
-                                    return (
-                                        <div className="space-y-2">
-                                            <div className="flex items-center justify-between">
-                                                <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest flex items-center gap-2">
-                                                    <RefreshCw size={12} /> Reranker Model
-                                                </label>
-                                                <div className="flex bg-muted/30 rounded-lg p-0.5 border border-border/50">
-                                                    <button 
-                                                        onClick={() => setRagConfig({...ragConfig, reranker_model: 'Qwen/Qwen3-Reranker-0.6B'})}
-                                                        className={cn("px-2 py-1 text-[9px] font-bold rounded-md transition-all", !isRerankGguf ? "bg-primary text-white shadow-sm" : "text-muted-foreground hover:text-foreground")}
-                                                    >
-                                                        HuggingFace
-                                                    </button>
-                                                    <button 
-                                                        onClick={() => setRagConfig({...ragConfig, reranker_model: allGgufFiles[0]?.path || ''})}
-                                                        className={cn("px-2 py-1 text-[9px] font-bold rounded-md transition-all", isRerankGguf ? "bg-primary text-white shadow-sm" : "text-muted-foreground hover:text-foreground")}
-                                                    >
-                                                        Local GGUF
-                                                    </button>
-                                                </div>
-                                            </div>
-                                            
-                                            {!isRerankGguf ? (
-                                                <>
-                                                    <input 
-                                                        type="text"
-                                                        value={ragConfig.reranker_model}
-                                                        onChange={(e) => setRagConfig({...ragConfig, reranker_model: e.target.value})}
-                                                        className="w-full bg-muted/30 border border-border/50 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all"
-                                                    />
-                                                    <p className="text-[10px] text-muted-foreground/60 italic">Например: Qwen/Qwen3-Reranker-0.6B</p>
-                                                </>
-                                            ) : (
-                                                <select
-                                                    value={ragConfig.reranker_model}
-                                                    onChange={(e) => setRagConfig({...ragConfig, reranker_model: e.target.value})}
-                                                    className="w-full bg-muted/30 border border-border/50 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all"
-                                                >
-                                                    <option value="" disabled>Выберите GGUF модель...</option>
-                                                    {allGgufFiles.map(f => (
-                                                        <option key={f.path} value={f.path}>
-                                                            {f.name}
-                                                        </option>
-                                                    ))}
-                                                </select>
-                                            )}
-                                        </div>
-                                    );
-                                })()}
+                                <div className="space-y-2">
+                                    <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest flex items-center gap-2">
+                                        <Globe size={12} /> Embedding Model (GGUF)
+                                    </label>
+                                    {(() => {
+                                        const allGgufFiles = ggufModels?.flatMap(g => g.gguf_files.map(f => ({ name: f, path: g.dir + '/' + f }))) || [];
+                                        return (
+                                            <select
+                                                value={ragConfig.embedding_model}
+                                                onChange={(e) => setRagConfig({...ragConfig, embedding_model: e.target.value})}
+                                                className="w-full bg-muted/30 border border-border/50 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all"
+                                            >
+                                                <option value="" disabled>Выберите GGUF модель...</option>
+                                                {allGgufFiles.map(f => (
+                                                    <option key={f.path} value={f.path}>
+                                                        {f.name}
+                                                    </option>
+                                                ))}
+                                            </select>
+                                        );
+                                    })()}
+                                </div>
 
                                 <div className="space-y-2">
                                     <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest flex items-center gap-2">
-                                        <Cpu size={12} /> Quantization (BitsAndBytes)
+                                        <RefreshCw size={12} /> Reranker Model (GGUF)
                                     </label>
-                                    <select 
-                                        value={ragConfig.quantization}
-                                        onChange={(e) => setRagConfig({...ragConfig, quantization: e.target.value})}
-                                        className="w-full bg-muted/30 border border-border/50 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all"
-                                    >
-                                        <option value="4bit">4-bit (NF4) - Рекомендуется</option>
-                                        <option value="int8">8-bit (INT8)</option>
-                                        <option value="fp16">Full (FP16/BF16)</option>
-                                    </select>
+                                    {(() => {
+                                        const allGgufFiles = ggufModels?.flatMap(g => g.gguf_files.map(f => ({ name: f, path: g.dir + '/' + f }))) || [];
+                                        return (
+                                            <select
+                                                value={ragConfig.reranker_model}
+                                                onChange={(e) => setRagConfig({...ragConfig, reranker_model: e.target.value})}
+                                                className="w-full bg-muted/30 border border-border/50 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all"
+                                            >
+                                                <option value="" disabled>Выберите GGUF модель...</option>
+                                                {allGgufFiles.map(f => (
+                                                    <option key={f.path} value={f.path}>
+                                                        {f.name}
+                                                    </option>
+                                                ))}
+                                            </select>
+                                        );
+                                    })()}
                                 </div>
 
                                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -916,7 +838,7 @@ export default function SettingsModal({ isOpen, onClose, settings, onSave }) {
 
                                 <div className="p-4 rounded-2xl bg-amber-500/10 border border-amber-500/20">
                                     <p className="text-[10px] text-amber-600 dark:text-amber-400 leading-relaxed">
-                                        <b>Примечание:</b> Смена моделей RAG потребует их загрузки из интернета при первом использовании. Тип квантования влияет на потребление VRAM и точность поиска.
+                                        <b>Примечание:</b> Смена GGUF-модели запускает новый сервер на отдельном порту. Убедитесь, что файл .gguf существует локально.
                                     </p>
                                 </div>
                             </div>

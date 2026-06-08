@@ -94,7 +94,7 @@ ALLOWED_UPLOAD_EXTENSIONS = frozenset({
 EMBEDDING_MODEL_NAME = os.getenv("EMBEDDING_MODEL_NAME", "Qwen3-Embedding-0.6B-v2.Q8_0.gguf")
 RERANKER_MODEL_NAME = os.getenv("RERANKER_MODEL_NAME", "Qwen3-Reranker-0.6B-v2.Q8_0.gguf")
 # Квантование: 'fp16', 'int8' или '4bit'
-QUANTIZATION = os.getenv("QUANTIZATION", "4bit")
+
 
 # Настройки воронки RAG
 RAG_TOP_K_PER_FILE = int(os.getenv("RAG_TOP_K_PER_FILE", 5))
@@ -288,7 +288,7 @@ def save_rag_config():
     config_data = {
         "embedding_model": EMBEDDING_MODEL_NAME,
         "reranker_model": RERANKER_MODEL_NAME,
-        "quantization": QUANTIZATION,
+
         "top_k_per_file": RAG_TOP_K_PER_FILE,
         "rerank_pool": RAG_RERANK_POOL,
         "final_top_n": RAG_FINAL_TOP_N,
@@ -304,14 +304,13 @@ def save_rag_config():
         logger.warning(f"Не удалось сохранить RAG config: {e}")
 
 def load_rag_config():
-    global EMBEDDING_MODEL_NAME, RERANKER_MODEL_NAME, QUANTIZATION, RAG_TOP_K_PER_FILE, RAG_RERANK_POOL, RAG_FINAL_TOP_N, USE_RERANKER, GGUF_SEARCH_DIRS, RAG_QUERY_EXPANSION, RERANK_SCORE_THRESHOLD
+    global EMBEDDING_MODEL_NAME, RERANKER_MODEL_NAME, RAG_TOP_K_PER_FILE, RAG_RERANK_POOL, RAG_FINAL_TOP_N, USE_RERANKER, GGUF_SEARCH_DIRS, RAG_QUERY_EXPANSION, RERANK_SCORE_THRESHOLD
     try:
         if os.path.exists(RAG_CONFIG_FILE):
             with open(RAG_CONFIG_FILE, "r", encoding="utf-8") as f:
                 data = json.load(f)
                 EMBEDDING_MODEL_NAME = data.get("embedding_model", EMBEDDING_MODEL_NAME)
                 RERANKER_MODEL_NAME = data.get("reranker_model", RERANKER_MODEL_NAME)
-                QUANTIZATION = data.get("quantization", QUANTIZATION)
                 RAG_TOP_K_PER_FILE = data.get("top_k_per_file", RAG_TOP_K_PER_FILE)
                 RAG_RERANK_POOL = data.get("rerank_pool", RAG_RERANK_POOL)
                 RAG_FINAL_TOP_N = data.get("final_top_n", RAG_FINAL_TOP_N)

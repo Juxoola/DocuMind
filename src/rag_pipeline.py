@@ -3,7 +3,7 @@ import logging
 import chromadb
 from llama_index.core import VectorStoreIndex, Settings
 from llama_index.vector_stores.chroma import ChromaVectorStore
-from llama_index.embeddings.huggingface import HuggingFaceEmbedding
+
 from llama_index.llms.openai import OpenAI
 from llama_index.core.storage.storage_context import StorageContext
 from llama_index.core.vector_stores.types import MetadataFilters, MetadataFilter, FilterOperator
@@ -14,18 +14,6 @@ import torch
 import threading
 import requests
 import requests.adapters
-# F-fix #optional-deps: transformers/bitsandbytes нужны ТОЛЬКО для non-GGUF
-# режима (PyTorch-эмбеддинги с квантованием). В дефолтной GGUF-конфигурации
-# они не используются, но в requirements.txt они были обязательными →
-# пользователь качал ~4 ГБ зависимостей, которые никогда не загружались.
-# Делаем import опциональным: если transformers нет и код пойдёт по
-# non-GGUF ветке — будем ругаться понятной ошибкой, а не ImportError при старте.
-try:
-    from transformers import BitsAndBytesConfig
-    _HAS_TRANSFORMERS = True
-except ImportError:
-    BitsAndBytesConfig = None
-    _HAS_TRANSFORMERS = False
 
 # F-fix #15: Session для rerank-запросов (см. также ingestion.py _http_session).
 # Без Session каждый POST /v1/rerank открывает новый TCP-коннект.
@@ -39,7 +27,7 @@ _client_cache = {}
 _model_cache = {}
 # F-fix #6: init_lock предотвращает гонку при конкурентной загрузке моделей.
 # Без лока два потока (build_index + retrieve_nodes) могут независимо увидеть
-# "embed_model" отсутствует, создать 2 экземпляра HuggingFaceEmbedding (~1.3GB каждый)
+# "embed_model" отсутствует, создать 2 экземпляра эмбеддинга (~1.3GB каждый)
 # → OOM. Lock удерживается только на init-фазу; повторные вызовы — no-op (cache hit).
 _init_lock = threading.Lock()
 
@@ -73,18 +61,16 @@ def preload_all_models():
     if config.RERANKER_MODEL_NAME:
         device = "cuda" if torch.cuda.is_available() else "cpu"
         
-        is_gguf = config.RERANKER_MODEL_NAME.lower().endswith('.gguf') or (os.path.isabs(config.RERANKER_MODEL_NAME) and os.path.exists(config.RERANKER_MODEL_NAME))
-        
-        if is_gguf:
-            print(f"  [RAG] Предзагрузка GGUF реранкера: {config.RERANKER_MODEL_NAME}")
-            from src.gguf_direct import get_gguf_embedding_url
-            model_path = config.resolve_model_path(config.RERANKER_MODEL_NAME)
-            get_gguf_embedding_url(model_path, is_reranker=True)
-        else:
-            if "reranker" not in _model_cache:
-                print(f"  [RAG] Предзагрузка реранкера: {config.RERANKER_MODEL_NAME}")
-                from sentence_transformers import CrossEncoder
-                _model_cache["reranker"] = CrossEncoder(config.RERANKER_MODEL_NAME, device=device)
+        if not (config.RERANKER_MODEL_NAME.lower().endswith('.gguf') or (os.path.isabs(config.RERANKER_MODEL_NAME) and os.path.exists(config.RERANKER_MODEL_NAME))):
+            raise RuntimeError(
+                "Поддерживаются только GGUF-модели реранкера. "
+                "Укажите путь к .gguf файлу в config.RERANKER_MODEL_NAME.\n"
+                f"Текущее значение: {config.RERANKER_MODEL_NAME}"
+            )
+        print(f"  [RAG] Предзагрузка GGUF реранкера: {config.RERANKER_MODEL_NAME}")
+        from src.gguf_direct import get_gguf_embedding_url
+        model_path = config.resolve_model_path(config.RERANKER_MODEL_NAME)
+        get_gguf_embedding_url(model_path, is_reranker=True)
     
     # Загружаем GGUF LLM для зрения больше не нужно, так как он грузится динамически в ingestion.py
     # и сразу очищается, экономя VRAM.
@@ -101,64 +87,33 @@ def init_settings(max_tokens=1024):
         if "embed_model" not in _model_cache:
             model_name = config.EMBEDDING_MODEL_NAME
 
-            if model_name.lower().endswith('.gguf') or os.path.isabs(model_name) and os.path.exists(model_name):
-                print(f"Инициализация GGUF эмбеддингов: {model_name}")
-                from src.gguf_direct import get_gguf_embedding_url
-                from llama_index.embeddings.openai import OpenAIEmbedding
-
-                model_path = config.resolve_model_path(model_name)
-                # n_parallel пробрасывается в init_settings через init_lock-guarded вызов,
-                # чтобы embed_batch_size == --parallel на embedding-сервере.
-                url = get_gguf_embedding_url(model_path)
-                try:
-                    from src.gguf_direct import get_active_embedding_parallel
-                    n_parallel = get_active_embedding_parallel(model_path)
-                except Exception:
-                    n_parallel = 1
-                print(f"[RAG] GGUF embedding server --parallel={n_parallel} → embed_batch_size={n_parallel}")
-
-                _model_cache["embed_model"] = OpenAIEmbedding(
-                    api_base=f"{url}/v1",
-                    api_key=config.EMBEDDING_DEFAULT_API_KEY,
-                    model=config.EMBEDDING_DEFAULT_MODEL,
-                    timeout=120.0,
-                    # Сервер запущен с -c 4096 (= максимальный размер 1 чанка).
-                    # Каждый документ обрабатывается независимо, батч не складывает токены.
-                    # embed_batch_size = n_parallel embedding-сервера: больше слотов — больше параллелизма.
-                    embed_batch_size=n_parallel,
-                    # Инструкция для Qwen3-Embedding, чтобы он понимал задачу поиска
-                    query_header="Instruct: Given a web search query, retrieve relevant passages that answer the query\nQuery: "
+            if not (model_name.lower().endswith('.gguf') or (os.path.isabs(model_name) and os.path.exists(model_name))):
+                raise RuntimeError(
+                    "Поддерживаются только GGUF-модели эмбеддингов. "
+                    "Укажите путь к .gguf файлу в config.EMBEDDING_MODEL_NAME.\n"
+                    f"Текущее значение: {model_name}"
                 )
-            else:
-                # F-fix #optional-deps: non-GGUF режим требует transformers + bitsandbytes.
-                # Проверяем заранее, чтобы дать понятную ошибку, а не ImportError
-                # при первом запросе к эмбеддингу.
-                if not _HAS_TRANSFORMERS:
-                    raise RuntimeError(
-                        "PyTorch-режим эмбеддингов требует 'transformers' и 'bitsandbytes'. "
-                        "Установите: pip install -r requirements-pt-extras.txt\n"
-                        "Или переключитесь на GGUF-эмбеддинг (config.EMBEDDING_MODEL_NAME=*.gguf)."
-                    )
-                print(f"Инициализация эмбеддингов (PyTorch): {device.upper()} (Quant: {config.QUANTIZATION})")
-                model_kwargs = {"trust_remote_code": True}
-                model_kwargs["attn_implementation"] = "sdpa"
+            print(f"Инициализация GGUF эмбеддингов: {model_name}")
+            from src.gguf_direct import get_gguf_embedding_url
+            from llama_index.embeddings.openai import OpenAIEmbedding
 
-                if config.QUANTIZATION == "4bit":
-                    model_kwargs["quantization_config"] = BitsAndBytesConfig(
-                        load_in_4bit=True,
-                        bnb_4bit_compute_dtype=torch.bfloat16,
-                        bnb_4bit_quant_type="nf4"
-                    )
-                elif config.QUANTIZATION == "int8":
-                    model_kwargs["quantization_config"] = BitsAndBytesConfig(load_in_8bit=True)
-                else:
-                    model_kwargs["torch_dtype"] = torch.bfloat16
+            model_path = config.resolve_model_path(model_name)
+            url = get_gguf_embedding_url(model_path)
+            try:
+                from src.gguf_direct import get_active_embedding_parallel
+                n_parallel = get_active_embedding_parallel(model_path)
+            except Exception:
+                n_parallel = 1
+            print(f"[RAG] GGUF embedding server --parallel={n_parallel} → embed_batch_size={n_parallel}")
 
-                _model_cache["embed_model"] = HuggingFaceEmbedding(
-                    model_name=model_name,
-                    device=device,
-                    model_kwargs=model_kwargs
-                )
+            _model_cache["embed_model"] = OpenAIEmbedding(
+                api_base=f"{url}/v1",
+                api_key=config.EMBEDDING_DEFAULT_API_KEY,
+                model=config.EMBEDDING_DEFAULT_MODEL,
+                timeout=120.0,
+                embed_batch_size=n_parallel,
+                query_header="Instruct: Given a web search query, retrieve relevant passages that answer the query\nQuery: "
+            )
 
     Settings.embed_model = _model_cache["embed_model"]
 
@@ -713,116 +668,66 @@ def retrieve_nodes(query: str, notebook_id: str, allowed_files=None, max_tokens=
         
         reranker_name = config.RERANKER_MODEL_NAME
         
-        if reranker_name.lower().endswith('.gguf') or os.path.isabs(reranker_name) and os.path.exists(reranker_name):
-            if "reranker" not in _model_cache:
-                print(f"  [RAG] Загрузка GGUF реранкера: {reranker_name}")
-                from src.gguf_direct import get_gguf_embedding_url
-                model_path = config.resolve_model_path(reranker_name)
-                url = get_gguf_embedding_url(model_path, is_reranker=True)
-                _model_cache["reranker"] = url
-            
-            url = _model_cache["reranker"]
-            # F5: reranker получает префикс с координатами чанка, чтобы cross-encoder
-            # мог учитывать координаты при оценке (для запросов "что на стр. 5 лекции 3").
-            # Префикс короткий (<50 токенов) — не раздувает input и не съедает полезный контекст.
-            def _rerank_doc(nws):
-                meta = nws.node.metadata or {}
-                coord_parts = []
-                if meta.get("file_name"): coord_parts.append(str(meta["file_name"]))
-                if meta.get("page") not in (None, ""): coord_parts.append(f"стр.{meta['page']}")
-                elif meta.get("time") not in (None, ""): coord_parts.append(f"@{meta['time']}")
-                elif meta.get("start") not in (None, ""): coord_parts.append(f"@{meta['start']}")
-                prefix = f"[{' '.join(coord_parts)}] " if coord_parts else ""
-                return prefix + nws.node.get_content()
-            documents = [_rerank_doc(n) for n in all_nodes]
-            payload = {"model": "gguf-reranker", "query": query, "documents": documents, "top_n": len(documents)}
-            
-            try:
-                import time as _time
-                _rerank_start = _time.time()
+        if not (reranker_name.lower().endswith('.gguf') or os.path.isabs(reranker_name) and os.path.exists(reranker_name)):
+            raise RuntimeError(
+                "Поддерживаются только GGUF-модели реранкера. "
+                "Укажите путь к .gguf файлу в config.RERANKER_MODEL_NAME.\n"
+                f"Текущее значение: {reranker_name}"
+            )
 
-                # F-fix #12: один запрос вместо N мини-батчей.
-                # llama.cpp /v1/rerank обрабатывает ВСЕ документы в одном HTTP-вызове.
-                # Каждая пара (query+doc) независима и обрабатывается последовательно внутри
-                # сервера, но без HTTP-overhead между ними. При --parallel > 1 сервер сам
-                # параллелит обработку внутри одного запроса.
-                # Экономия: 3× HTTP roundtrip (~50-100 мс каждый) + упрощение кода.
-                # 30 doc × 0.3с = 9с — вписывается в timeout=120с.
-                # F-fix #15: используем _rerank_session (HTTP connection pool) вместо requests.post напрямую.
-                scores = [0.0] * len(all_nodes)
-                success = True
-                resp = _rerank_session.post(
-                    f"{url}/v1/rerank",
-                    json={"model": "gguf-reranker", "query": query, "documents": documents, "top_n": len(documents)},
-                    timeout=120,
-                )
-                resp.raise_for_status()
-                results = resp.json().get("results", [])
-                if not results:
-                    logger.debug(f"[RAG] Реранкер вернул пустой results: {resp.text[:200]}")
-                for r in results:
-                    orig_idx = r.get("index", 0)
-                    if orig_idx < len(scores):
-                        scores[orig_idx] = r.get("relevance_score", 0.0)
+        if "reranker" not in _model_cache:
+            print(f"  [RAG] Загрузка GGUF реранкера: {reranker_name}")
+            from src.gguf_direct import get_gguf_embedding_url
+            model_path = config.resolve_model_path(reranker_name)
+            url = get_gguf_embedding_url(model_path, is_reranker=True)
+            _model_cache["reranker"] = url
+        
+        url = _model_cache["reranker"]
+        def _rerank_doc(nws):
+            meta = nws.node.metadata or {}
+            coord_parts = []
+            if meta.get("file_name"): coord_parts.append(str(meta["file_name"]))
+            if meta.get("page") not in (None, ""): coord_parts.append(f"стр.{meta['page']}")
+            elif meta.get("time") not in (None, ""): coord_parts.append(f"@{meta['time']}")
+            elif meta.get("start") not in (None, ""): coord_parts.append(f"@{meta['start']}")
+            prefix = f"[{' '.join(coord_parts)}] " if coord_parts else ""
+            return prefix + nws.node.get_content()
+        documents = [_rerank_doc(n) for n in all_nodes]
+        payload = {"model": "gguf-reranker", "query": query, "documents": documents, "top_n": len(documents)}
+        
+        try:
+            import time as _time
+            _rerank_start = _time.time()
+            scores = [0.0] * len(all_nodes)
+            success = True
+            resp = _rerank_session.post(
+                f"{url}/v1/rerank",
+                json={"model": "gguf-reranker", "query": query, "documents": documents, "top_n": len(documents)},
+                timeout=120,
+            )
+            resp.raise_for_status()
+            results = resp.json().get("results", [])
+            if not results:
+                logger.debug(f"[RAG] Реранкер вернул пустой results: {resp.text[:200]}")
+            for r in results:
+                orig_idx = r.get("index", 0)
+                if orig_idx < len(scores):
+                    scores[orig_idx] = r.get("relevance_score", 0.0)
 
-                elapsed_r = _time.time() - _rerank_start
-                if success:
-                    print(f"  [RAG] ✅ Реранкинг: {len(documents)} doc за {elapsed_r:.2f}с")
+            elapsed_r = _time.time() - _rerank_start
+            if success:
+                print(f"  [RAG] ✅ Реранкинг: {len(documents)} doc за {elapsed_r:.2f}с")
 
-            except Exception as e:
-                err_body = ""
-                if hasattr(e, 'response') and e.response is not None:
-                    err_body = f" body={e.response.text[:300]}"
-                print(f"[RAG] Ошибка GGUF реранкера: {e}{err_body}")
-                scores = [0] * len(all_nodes)
+        except Exception as e:
+            err_body = ""
+            if hasattr(e, 'response') and e.response is not None:
+                err_body = f" body={e.response.text[:300]}"
+            print(f"[RAG] Ошибка GGUF реранкера: {e}{err_body}")
+            scores = [0] * len(all_nodes)
 
-
-            # ПРОВЕРКА: Если все скоры слишком маленькие (например < 1e-6), 
-            # значит реранкер "ослеп" и выдает шум. В этом случае лучше сохранить 
-            # оригинальный порядок от BM25/Вектора.
-            if scores and max(scores) < 1e-6:
-                print(f"  [RAG] ⚠️ GGUF реранкер выдал слишком низкие оценки (max: {max(scores)}). Используется оригинальный порядок поиска.")
-                # Оставляем оригинальные скоры от ретривера (0.01 за каждый шаг, чтобы сохранить порядок)
-                scores = [1.0 - (i * 0.01) for i in range(len(all_nodes))]
-        else:
-            if "reranker" not in _model_cache:
-                # F-fix #optional-deps: PyTorch-реранкер тоже требует transformers.
-                if not _HAS_TRANSFORMERS:
-                    raise RuntimeError(
-                        "PyTorch-режим реранкера требует 'transformers' и 'bitsandbytes'. "
-                        "Установите: pip install -r requirements-pt-extras.txt\n"
-                        "Или переключитесь на GGUF-реранкер (запустите llama-server с RERANKER_MODEL_NAME)."
-                    )
-                print(f"  [RAG] Загрузка реранкера: {reranker_name} ({config.QUANTIZATION})")
-                rerank_kwargs = {"trust_remote_code": True}
-                rerank_kwargs["attn_implementation"] = "sdpa"
-                if config.QUANTIZATION == "4bit":
-                    rerank_kwargs["quantization_config"] = BitsAndBytesConfig(
-                        load_in_4bit=True,
-                        bnb_4bit_compute_dtype=torch.bfloat16,
-                        bnb_4bit_quant_type="nf4"
-                    )
-                elif config.QUANTIZATION == "int8":
-                    rerank_kwargs["quantization_config"] = BitsAndBytesConfig(load_in_8bit=True)
-                else:
-                    rerank_kwargs["torch_dtype"] = torch.bfloat16
-
-                from sentence_transformers import CrossEncoder
-                _model_cache["reranker"] = CrossEncoder(reranker_name, device=device, model_kwargs=rerank_kwargs)
-            
-            model = _model_cache["reranker"]
-            # F5: PyTorch reranker тоже видит координаты (аналогично GGUF-ветке выше)
-            def _rerank_doc(nws):
-                meta = nws.node.metadata or {}
-                coord_parts = []
-                if meta.get("file_name"): coord_parts.append(str(meta["file_name"]))
-                if meta.get("page") not in (None, ""): coord_parts.append(f"стр.{meta['page']}")
-                elif meta.get("time") not in (None, ""): coord_parts.append(f"@{meta['time']}")
-                elif meta.get("start") not in (None, ""): coord_parts.append(f"@{meta['start']}")
-                prefix = f"[{' '.join(coord_parts)}] " if coord_parts else ""
-                return prefix + nws.node.get_content()
-            pairs = [[query, _rerank_doc(n)] for n in all_nodes]
-            scores = model.predict(pairs)
+        if scores and max(scores) < 1e-6:
+            print(f"  [RAG] ⚠️ GGUF реранкер выдал слишком низкие оценки (max: {max(scores)}). Используется оригинальный порядок поиска.")
+            scores = [1.0 - (i * 0.01) for i in range(len(all_nodes))]
         
         # Присваиваем скоры и сортируем
         for node, score in zip(all_nodes, scores):

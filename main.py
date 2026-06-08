@@ -1141,7 +1141,6 @@ async def get_rag_config():
     return {
         "embedding_model": config.EMBEDDING_MODEL_NAME,
         "reranker_model": config.RERANKER_MODEL_NAME,
-        "quantization": config.QUANTIZATION,
         "top_k_per_file": config.RAG_TOP_K_PER_FILE,
         "rerank_pool": config.RAG_RERANK_POOL,
         "final_top_n": config.RAG_FINAL_TOP_N,
@@ -1151,7 +1150,6 @@ async def get_rag_config():
 class UpdateRagConfigRequest(BaseModel):
     embedding_model: str
     reranker_model: str
-    quantization: str
     top_k_per_file: int
     rerank_pool: int
     final_top_n: int
@@ -1162,7 +1160,6 @@ async def update_rag_config(req: UpdateRagConfigRequest):
     from src.rag_pipeline import unload_rag_models
     config.EMBEDDING_MODEL_NAME = req.embedding_model
     config.RERANKER_MODEL_NAME = req.reranker_model
-    config.QUANTIZATION = req.quantization
     config.RAG_TOP_K_PER_FILE = req.top_k_per_file
     config.RAG_RERANK_POOL = req.rerank_pool
     config.RAG_FINAL_TOP_N = req.final_top_n
