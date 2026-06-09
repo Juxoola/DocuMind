@@ -149,23 +149,5 @@ async def delete_notebook(nb_id: str):
             detail=err_msg or "Не удалось удалить блокнот. Попробуйте позже.",
         )
 
-    # 5. Очищаем GGUF-серверы, которые могли быть запущены для этого ноутбука
-    #    (грубая привязка — по имени файла, содержащему nb_id)
-    _cleanup_notebook_gguf(nb_id)
-
     logger.info(f"Блокнот {nb_id} удалён.")
     return {"status": "ok"}
-
-
-def _cleanup_notebook_gguf(nb_id: str):
-    """Пытается найти и выгрузить GGUF-сервер, связанный с этим блокнотом.
-
-    Сейчас привязка слабая (нет реестра notebook→model), но хотя бы
-    не оставляет orphan-серверы при явном вызове.
-    """
-    try:
-        from src.gguf_direct import unload_all_models
-
-        unload_all_models()
-    except Exception as e:
-        logger.debug(f"[delete_notebook] unload_all_models: {e}")
