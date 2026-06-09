@@ -7,14 +7,13 @@
 
 import os
 import sys
-import json
+from unittest.mock import MagicMock, patch
+
 import pytest
-from unittest.mock import patch, MagicMock
 from fastapi.testclient import TestClient
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-import config
 
 
 @pytest.fixture(scope="module")

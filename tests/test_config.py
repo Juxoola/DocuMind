@@ -11,6 +11,7 @@
 
 import os
 import sys
+
 import pytest
 
 # Добавляем корень проекта в PYTHONPATH

@@ -3,19 +3,20 @@ GGUF Model Manager — управление жизненным циклом на
 Используется для запуска основного сервера модели, выбранной пользователем.
 """
 
-import os
-import subprocess
-import time
-import requests
 import json
+import os
 import socket
+import subprocess
 import threading
-from typing import Optional, List, Dict
+import time
+
+import requests
+
 import config
 
 # Глобальное состояние сервера
-_server_process: Optional[subprocess.Popen] = None
-_server_info: Dict = {}
+_server_process: subprocess.Popen | None = None
+_server_info: dict = {}
 SERVER_EXE = os.path.join(config.BASE_DIR, "bin", "llama-server.exe")
 
 # ── Persistent scan cache (mtime-keyed) ─────────────────────────────────
@@ -35,7 +36,7 @@ def _dir_mtime(root: str) -> float:
         return 0.0
 
 
-def _scan_gguf_dirs_uncached() -> List[Dict]:
+def _scan_gguf_dirs_uncached() -> list[dict]:
     """Полный os.walk без кеша. Дорогая операция — вызывать редко."""
     results = []
     search_dirs = [d.strip() for d in config.GGUF_SEARCH_DIRS.split(";") if d.strip()]
@@ -57,7 +58,7 @@ def _scan_gguf_dirs_uncached() -> List[Dict]:
     return results
 
 
-def scan_gguf_dirs() -> List[Dict]:
+def scan_gguf_dirs() -> list[dict]:
     """Сканирует директории на наличие GGUF и mmproj файлов.
     Использует persistent mtime-keyed cache — повторные вызовы при неизменных
     директориях практически бесплатны."""
@@ -66,7 +67,7 @@ def scan_gguf_dirs() -> List[Dict]:
         cached = None
         try:
             if os.path.exists(_GGUF_CACHE_FILE):
-                with open(_GGUF_CACHE_FILE, "r", encoding="utf-8") as f:
+                with open(_GGUF_CACHE_FILE, encoding="utf-8") as f:
                     cached = json.load(f)
         except Exception:
             cached = None
@@ -114,7 +115,7 @@ def invalidate_scan_cache():
             pass
 
 
-def find_gguf_by_name(filename: str) -> Optional[str]:
+def find_gguf_by_name(filename: str) -> str | None:
     """Быстрый поиск файла по имени в GGUF_SEARCH_DIRS. Использует scan cache.
     Возвращает полный путь или None.
 
@@ -130,12 +131,12 @@ def find_gguf_by_name(filename: str) -> Optional[str]:
                 return os.path.join(entry["dir"], name)
     return None
 
-def get_server_status() -> Dict:
+def get_server_status() -> dict:
     """Проверяет статус запущенного сервера."""
     global _server_process, _server_info
     if _server_process is None or _server_process.poll() is not None:
         return {"running": False, "info": {}}
-    
+
     try:
         url = f"http://127.0.0.1:{_server_info['port']}/health"
         r = requests.get(url, timeout=1)
@@ -146,15 +147,15 @@ def get_server_status() -> Dict:
 
 def start_gguf_server(
     gguf_path: str,
-    mmproj_path: Optional[str] = None,
-    ctx_size: Optional[int] = None,
-    gpu_layers: Optional[int] = None,
-    threads: Optional[int] = None,
+    mmproj_path: str | None = None,
+    ctx_size: int | None = None,
+    gpu_layers: int | None = None,
+    threads: int | None = None,
     mtp_enabled: bool = False,
-) -> Dict:
+) -> dict:
     """Запускает нативный llama-server.exe."""
     global _server_process, _server_info
-    
+
     if _server_process: stop_gguf_server()
 
     # Поиск свободного порта
@@ -181,15 +182,15 @@ def start_gguf_server(
         cmd.extend(["--spec-type", "draft-mtp", "--spec-draft-n-max", "2"])
     if mmproj_path:
         cmd.extend(["--mmproj", os.path.normpath(mmproj_path)])
-    
+
     print(f"[GGUF Manager] Запуск сервера: {' '.join(cmd)}")
-    
+
     # CREATE_NO_WINDOW
     _server_process = subprocess.Popen(
         cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
         creationflags=0x08000000
     )
-    
+
     _server_info = {
         "port": port,
         "url": f"http://127.0.0.1:{port}",
@@ -208,10 +209,10 @@ def start_gguf_server(
         except Exception: pass
         if _server_process.poll() is not None:
             return {"status": "error", "msg": "Процесс сервера завершился ошибкой"}
-            
+
     return {"status": "error", "msg": "Таймаут запуска сервера"}
 
-def stop_gguf_server() -> Dict:
+def stop_gguf_server() -> dict:
     global _server_process, _server_info
     if _server_process:
         _server_process.terminate()
@@ -227,7 +228,7 @@ def stop_gguf_server() -> Dict:
     _server_info = {}
     return {"status": "ok"}
 
-def get_gguf_server_url() -> Optional[str]:
+def get_gguf_server_url() -> str | None:
     status = get_server_status()
     if status["running"]:
         return f"{status['info']['url']}/v1"

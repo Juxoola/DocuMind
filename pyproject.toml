@@ -1,0 +1,84 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.backends._legacy:_Backend"
+
+[project]
+name = "notebooklm-local-clone"
+version = "0.1.0"
+description = "Локальный клон NotebookLM с RAG, GGUF-моделями и мультимодальным ингестом"
+requires-python = ">=3.11"
+
+dependencies = [
+    # ── Core RAG & LLM ──
+    "llama-index-core==0.14.21",
+    "llama-index-readers-file",
+    "llama-index-llms-openai==0.7.5",
+    "llama-index-vector-stores-chroma==0.5.5",
+    "llama-index-retrievers-bm25==0.7.1",
+    "rank_bm25",
+    "chromadb==1.5.8",
+    # ── Speech & Audio ──
+    "torch==2.11.0",
+    "torchaudio==2.11.0",
+    "whisperx==3.8.5",
+    # ── Backend ──
+    "fastapi==0.136.1",
+    "uvicorn==0.46.0",
+    "requests",
+    "pydantic>=2.0",
+    "python-dotenv",
+    # ── Image & Video ──
+    "opencv-python==4.13.0.92",
+    "numpy",
+    "imageio-ffmpeg",
+    # ── Documents ──
+    "PyMuPDF==1.27.2.3",
+    "python-docx",
+    "python-pptx",
+    # ── Utils ──
+    "watchfiles",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=9.0",
+    "pytest-asyncio",
+    "pytest-cov",
+    "httpx",
+    "ruff>=0.11",
+]
+windows = [
+    "pywin32",
+]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "F",   # pyflakes
+    "I",   # isort
+    "W",   # pycodestyle warnings
+    "UP",  # pyupgrade
+    "RUF", # ruff-specific
+]
+ignore = [
+    "E501",  # line too long (line-length handles this)
+    "RUF001", # ambiguous char in string (русский текст)
+    "RUF002", # ambiguous char in docstring (русский текст)
+    "RUF003", # ambiguous char in comment (русский текст)
+]
+
+[tool.ruff.format]
+quote-style = "double"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+asyncio_default_fixture_loop_scope = "function"
+filterwarnings = [
+    "ignore::DeprecationWarning:llama_index.",
+    "ignore::UserWarning:whisperx",
+]

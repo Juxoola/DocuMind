@@ -1,26 +1,28 @@
-import os
-import sys
-import logging
-import warnings
-import subprocess
-import shutil
-import cv2
-import uuid
-import numpy as np
-import fitz
-from pptx import Presentation
-from concurrent.futures import ThreadPoolExecutor, as_completed
-import torch
-from llama_index.core.schema import TextNode
 import base64
-import requests
-import json
-import time
 import gc
+import json
+import logging
+import os
+import shutil
+import subprocess
+import sys
 import threading
+import time
+import uuid
+import warnings
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
+import cv2
+import fitz
+import numpy as np
+import requests
+import torch
 from llama_index.core.node_parser import SentenceSplitter
-from src.gguf_direct import get_gguf_llm, unload_all_models
+from llama_index.core.schema import TextNode
+from pptx import Presentation
+
 import config
+from src.gguf_direct import get_gguf_llm, unload_all_models
 
 logger = logging.getLogger(__name__)
 
@@ -48,7 +50,6 @@ def get_or_load_whisper(model_name: str = "medium", device: str = "cuda", comput
     Потокобезопасно (lock). При первом вызове — load_model (~30 сек, 1.5 GB VRAM).
     При последующих — возврат ссылки на тот же объект.
     """
-    import whisperx
     key = (model_name, device, compute_type)
     with _whisper_lock:
         if key in _whisper_model_cache:
@@ -81,12 +82,14 @@ warnings.filterwarnings("ignore", message=".*speechbrain.*deprecated", category=
 warnings.filterwarnings("ignore", message=".*Lightning automatically upgraded.*")
 
 import logging
+
 logging.getLogger("lightning.pytorch.utilities.migration").setLevel(logging.ERROR)
 logging.getLogger("lightning.pytorch").setLevel(logging.ERROR)
 logging.getLogger("whisperx").setLevel(logging.WARNING)
 
 # --- Фикс: inspect.stack() ---
 import inspect as _inspect_module
+
 _orig_getmodule = _inspect_module.getmodule
 def _safe_getmodule(obj, filename=None):
     try: return _orig_getmodule(obj, filename)
@@ -135,16 +138,17 @@ try:
 except Exception:
     pass
 
-import whisperx
 
 def cleanup_gpu():
     """Принудительная очистка всей видеопамяти перед тяжелыми задачами."""
     try:
         from src.rag_pipeline import unload_rag_models
         unload_rag_models(hard=False)
-        # Мы НЕ выгружаем GGUF модели здесь, так как get_gguf_llm сам решит, 
+        # Мы НЕ выгружаем GGUF модели здесь, так как get_gguf_llm сам решит,
         # нужно ли перезапускать сервер или использовать текущий.
-        import gc, torch
+        import gc
+
+        import torch
         gc.collect()
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
@@ -163,16 +167,16 @@ def get_vision_url(llm_settings, progress_cb=None):
     """Ленивая инициализация Vision-сервера только когда он реально нужен."""
     if not llm_settings or not llm_settings.get("use_gguf_direct"):
         return None
-        
+
     v_model = llm_settings.get("vision_model_path") or llm_settings.get("gguf_model_path")
     if not v_model:
         return None
-        
+
     try:
         if progress_cb: progress_cb(60, "Запуск Vision-сервера (ленивая загрузка)...")
         from src.ingestion import cleanup_gpu
         cleanup_gpu()
-        
+
         v_mmproj = llm_settings.get("vision_mmproj_path") or llm_settings.get("gguf_mmproj_path")
         g_path = config.resolve_model_path(v_model)
         m_path = config.resolve_model_path(v_mmproj)
@@ -235,10 +239,10 @@ def describe_image_with_lmstudio(image_path, llm_settings=None, existing_llm_url
                 v_min_p = float(llm_settings.get("vision_min_p") or config.VISION_MIN_P)
                 v_pres = float(llm_settings.get("vision_presence_penalty") or 0.0)
                 v_freq = float(llm_settings.get("vision_frequency_penalty") or 0.0)
-                
+
                 payload = {
                     "messages": [{"role":"user","content":[{"type":"text","text":prompt},{"type":"image_url","image_url":{"url":f"data:image/jpeg;base64,{get_image_base64(image_path)}"}}]}],
-                    "temperature": v_temp, 
+                    "temperature": v_temp,
                     "max_tokens": v_max,
                     "repeat_penalty": v_r_pen,
                     "top_p": v_top_p,
@@ -273,8 +277,8 @@ def describe_image_with_lmstudio(image_path, llm_settings=None, existing_llm_url
     try:
         v_temp = float(llm_settings.get("vision_temperature") or 0.2)
         payload = {
-            "model": model_name, 
-            "messages": [{"role":"user","content":[{"type":"text","text":prompt},{"type":"image_url","image_url":{"url":f"data:image/jpeg;base64,{get_image_base64(image_path)}"}}]}], 
+            "model": model_name,
+            "messages": [{"role":"user","content":[{"type":"text","text":prompt},{"type":"image_url","image_url":{"url":f"data:image/jpeg;base64,{get_image_base64(image_path)}"}}]}],
             "temperature": v_temp
         }
         r = _http_session.post(f"{api_url.rstrip('/')}/chat/completions", headers={"Authorization":f"Bearer {api_key}"}, json=payload, timeout=30)
@@ -349,14 +353,14 @@ def process_audio_video(file_path, images_dir, is_video=False, progress_cb=None,
 
         from imageio_ffmpeg import get_ffmpeg_exe
         ffmpeg = get_ffmpeg_exe()
-        
+
         PIXEL_THR = 15; UPDATE_PCT = 0.002; NEW_SLIDE_PCT = 0.04; MOTION_PCT = 0.002
         STABLE_WAIT_SEC = 3.0; CHECK_STEP_SEC = 1.0; COMPARE_SIZE = (320, 180)
-        
-        cmd = [ffmpeg, "-hide_banner", "-loglevel", "error", "-hwaccel", "cuda", "-hwaccel_output_format", "cuda", "-i", file_path, 
-               "-vf", f"fps=1/{CHECK_STEP_SEC},scale_cuda={COMPARE_SIZE[0]}:{COMPARE_SIZE[1]}:format=yuv420p,hwdownload,format=yuv420p,format=bgr24", 
+
+        cmd = [ffmpeg, "-hide_banner", "-loglevel", "error", "-hwaccel", "cuda", "-hwaccel_output_format", "cuda", "-i", file_path,
+               "-vf", f"fps=1/{CHECK_STEP_SEC},scale_cuda={COMPARE_SIZE[0]}:{COMPARE_SIZE[1]}:format=yuv420p,hwdownload,format=yuv420p,format=bgr24",
                "-f", "image2pipe", "-vcodec", "rawvideo", "-pix_fmt", "bgr24", "pipe:1"]
-        
+
         process = subprocess.Popen(cmd, stdout=subprocess.PIPE, bufsize=10**8)
         if notebook_id is not None:
             register_subprocess(notebook_id, process)
@@ -425,14 +429,14 @@ def process_audio_video(file_path, images_dir, is_video=False, progress_cb=None,
 
         prog(65, f"Описание {n} кадров ({'параллельно' if (int(llm_settings.get('vision_concurrency') or config.VISION_CONCURRENCY)) > 1 else 'последовательно'})...")
         v_conc = int(llm_settings.get("vision_concurrency") or config.VISION_CONCURRENCY)
-        
+
         from concurrent.futures import ThreadPoolExecutor
         with ThreadPoolExecutor(max_workers=v_conc) as executor:
             # Создаем список задач
             futures = []
             for idx, (path, t) in enumerate(frame_list):
                 futures.append(executor.submit(describe_image_with_lmstudio, path, llm_settings, shared_llm_url))
-            
+
             # Собираем результаты по мере готовности для обновления прогресса
             # Используем большой chunk_size, чтобы описания не разрывались
             splitter = SentenceSplitter(chunk_size=2048, chunk_overlap=128)
@@ -637,12 +641,12 @@ def process_pdf(file_path, images_dir, llm_settings=None, shared_llm_url=None, o
         # Ленивый запуск сервера
         if shared_llm_url is None:
             shared_llm_url = get_vision_url(llm_settings)
-        
+
         if shared_llm_url:
             v_conc = int(llm_settings.get("vision_concurrency") or config.VISION_CONCURRENCY)
             n = len(frame_list)
             if progress_cb: progress_cb(65, f"Анализ {n} страниц PDF ({'параллельно' if v_conc > 1 else 'последовательно'})...")
-            
+
             with ThreadPoolExecutor(max_workers=v_conc) as executor:
                 futures = {executor.submit(describe_image_with_lmstudio, f["path"], llm_settings, shared_llm_url): f for f in frame_list}
 
@@ -703,12 +707,13 @@ def process_pdf(file_path, images_dir, llm_settings=None, shared_llm_url=None, o
         metadata_json = {"file_name": file_name, "is_video": False, "transcript": [], "frames": frame_data}
         with open(os.path.join(os.path.dirname(file_path), f"{file_name}.json"), "w", encoding="utf-8") as f:
             json.dump(metadata_json, f, ensure_ascii=False, indent=2)
-            
+
     return nodes
 
 def process_pptx(file_path, images_dir, llm_settings=None, shared_llm_url=None, progress_cb=None, cancel_check=None, keep_vision_alive=False):
     nodes = []; file_name = os.path.basename(file_path); pdf_path = os.path.splitext(file_path)[0] + ".pdf"
-    import win32com.client, pythoncom
+    import pythoncom
+    import win32com.client
     app = None; deck = None
     try:
         pythoncom.CoInitialize()
@@ -744,7 +749,8 @@ def process_pptx(file_path, images_dir, llm_settings=None, shared_llm_url=None, 
 
 def process_docx(file_path, images_dir, llm_settings=None, shared_llm_url=None, progress_cb=None, cancel_check=None, keep_vision_alive=False):
     nodes = []; file_name = os.path.basename(file_path); pdf_path = os.path.splitext(file_path)[0] + ".pdf"
-    import win32com.client, pythoncom
+    import pythoncom
+    import win32com.client
     app = None; doc = None
     try:
         pythoncom.CoInitialize()
@@ -828,7 +834,7 @@ def ensure_720p_video(file_path, prog_cb=None, cancel_check=None, notebook_id=No
     # а не в single-encode (который медленнее для 1+ч видео). Раньше duration=0
     # попадал в ветку duration<120 → single encode → 30-60 мин вместо 5-10 мин.
     if duration == 0:
-        _safe_print(f"[ensure_720p_video] WARNING Длительность неизвестна -> турбо-режим по умолчанию")
+        _safe_print("[ensure_720p_video] WARNING Длительность неизвестна -> турбо-режим по умолчанию")
         use_turbo = True
     else:
         use_turbo = duration >= 120
@@ -952,10 +958,10 @@ def ingest_file(file_path, notebook_id, progress_cb=None, llm_settings=None, can
         elif ext == '.docx': nodes = process_docx(file_path, images_dir, llm_settings, shared_llm_url, progress_cb=progress_cb, cancel_check=cancel_check, keep_vision_alive=keep_vision_alive)
         else:
             try:
-                with open(file_path, 'r', encoding='utf-8') as f: text = f.read()
+                with open(file_path, encoding='utf-8') as f: text = f.read()
             except UnicodeDecodeError:
-                with open(file_path, 'r', encoding='cp1251') as f: text = f.read()
-                
+                with open(file_path, encoding='cp1251') as f: text = f.read()
+
             doc = TextNode(text=text, metadata={"file_name":os.path.basename(file_path)})
             nodes = SentenceSplitter(chunk_size=1024, chunk_overlap=256).get_nodes_from_documents([doc])
     finally:

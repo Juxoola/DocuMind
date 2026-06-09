@@ -879,7 +879,7 @@ class CreateBookmarkRequest(BaseModel):
 @app.post("/api/bookmarks")
 async def api_create_bookmark(req: CreateBookmarkRequest):
     try:
-        bm = create_bookmark(req.notebook_id, req.dict())
+        bm = create_bookmark(req.notebook_id, req.model_dump())
         return bm
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))

@@ -8,12 +8,12 @@
 - test_gguf_direct.py — detect_model_family, CACHE_TYPE_MAP (чистые функции).
 - test_main.py — FastAPI TestClient (монтируем только нужные эндпоинты).
 """
-import pytest
 import os
+import shutil
 import sys
 import tempfile
-import shutil
-from pathlib import Path
+
+import pytest
 
 # Добавляем корень проекта в PYTHONPATH
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))

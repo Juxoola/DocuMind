@@ -26,13 +26,12 @@ API:
     delete_bookmark(notebook_id, bookmark_id) -> bool
     mark_stale_for_file(notebook_id, file_name) -> int  # кол-во помеченных
 """
-import os
 import json
+import logging
+import os
+import threading
 import time
 import uuid
-import logging
-import threading
-from typing import Optional
 
 import config
 
@@ -62,7 +61,7 @@ def _read_bookmarks(notebook_id: str) -> list:
     if not os.path.exists(path):
         return []
     try:
-        with open(path, "r", encoding="utf-8") as f:
+        with open(path, encoding="utf-8") as f:
             data = json.load(f)
         if not isinstance(data, list):
             logger.warning(f"[BOOKMARKS] Неверный формат в {path}, ожидался list — обнуляю")
@@ -89,7 +88,7 @@ def list_bookmarks(notebook_id: str) -> list:
     return sorted(items, key=lambda b: b.get("created_at", 0), reverse=True)
 
 
-def get_bookmark(notebook_id: str, bookmark_id: str) -> Optional[dict]:
+def get_bookmark(notebook_id: str, bookmark_id: str) -> dict | None:
     with _lock_for(notebook_id):
         for b in _read_bookmarks(notebook_id):
             if b.get("id") == bookmark_id:
@@ -124,7 +123,7 @@ def create_bookmark(notebook_id: str, payload: dict) -> dict:
     return bm
 
 
-def update_bookmark(notebook_id: str, bookmark_id: str, patch: dict) -> Optional[dict]:
+def update_bookmark(notebook_id: str, bookmark_id: str, patch: dict) -> dict | None:
     """Частичное обновление (title, tags). Не позволяет перезаписать question/answer."""
     with _lock_for(notebook_id):
         items = _read_bookmarks(notebook_id)

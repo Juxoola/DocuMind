@@ -1,6 +1,6 @@
-import os
 import json
 import logging
+import os
 from functools import lru_cache
 
 # Отключаем онлайн-проверки Hugging Face (используем только локальный кэш)
@@ -307,7 +307,7 @@ def load_rag_config():
     global EMBEDDING_MODEL_NAME, RERANKER_MODEL_NAME, RAG_TOP_K_PER_FILE, RAG_RERANK_POOL, RAG_FINAL_TOP_N, USE_RERANKER, GGUF_SEARCH_DIRS, RAG_QUERY_EXPANSION, RERANK_SCORE_THRESHOLD
     try:
         if os.path.exists(RAG_CONFIG_FILE):
-            with open(RAG_CONFIG_FILE, "r", encoding="utf-8") as f:
+            with open(RAG_CONFIG_FILE, encoding="utf-8") as f:
                 data = json.load(f)
                 EMBEDDING_MODEL_NAME = data.get("embedding_model", EMBEDDING_MODEL_NAME)
                 RERANKER_MODEL_NAME = data.get("reranker_model", RERANKER_MODEL_NAME)

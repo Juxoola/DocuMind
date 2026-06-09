@@ -1,12 +1,13 @@
-import os
-import sys
-import subprocess
-import time
-import requests
 import json
-import threading
 import logging
-from typing import Dict, Optional, List
+import os
+import subprocess
+import sys
+import threading
+import time
+
+import requests
+
 import config
 
 logger = logging.getLogger(__name__)
@@ -14,15 +15,15 @@ import torch
 
 # Глобальный кэш запущенных серверов
 # Глобальный кэш запущенных серверов
-_server_processes: Dict[str, subprocess.Popen] = {}
-_server_ports: Dict[str, int] = {}
-_server_configs: Dict[str, Dict] = {}
-_server_roles: Dict[str, str] = {} # gguf_path -> role
+_server_processes: dict[str, subprocess.Popen] = {}
+_server_ports: dict[str, int] = {}
+_server_configs: dict[str, dict] = {}
+_server_roles: dict[str, str] = {} # gguf_path -> role
 _lock = threading.Lock()
 
 # Состояние последней загрузки LLM (для UI: idle/loading/ready/error)
 # Используется при hot-swap модели через /api/preload-llm.
-_llm_load_state: Dict = {
+_llm_load_state: dict = {
     "state": "idle",       # idle | loading | ready | error
     "model": None,         # path текущей/загружаемой модели
     "port": None,          # порт (когда ready)
@@ -44,7 +45,7 @@ if os.name == 'nt':
         # ExtendedLimitInformation = 9, LimitFlags offset is 16
         # JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x2000
         limit_info = (wintypes.DWORD * 36)() # 144 bytes for x64
-        limit_info[4] = 0x2000 
+        limit_info[4] = 0x2000
         ctypes.windll.kernel32.SetInformationJobObject(_win32_job, 9, ctypes.byref(limit_info), ctypes.sizeof(limit_info))
     except Exception as e:
         print(f"[GGUF Server] Ошибка инициализации Windows Job Object: {e}")
@@ -109,7 +110,7 @@ def is_server_ready(port: int) -> bool:
 def _start_llm_server_sync(
     gguf_path: str,
     mmproj_path: str,
-    current_config: Dict,
+    current_config: dict,
 ) -> str:
     """
     Внутренняя функция: реально запускает llama-server и ждёт готовности.
@@ -190,7 +191,7 @@ def _start_llm_server_sync(
     start_wait = time.time()
     while time.time() - start_wait < 60:
         if is_server_ready(port):
-            print(f"[GGUF Server] Готов!")
+            print("[GGUF Server] Готов!")
             with _lock:
                 _server_processes[gguf_path] = process
                 _server_ports[gguf_path] = port
@@ -256,7 +257,7 @@ def get_gguf_llm(
     enable_thinking: bool = True,
     thinking_budget: int = 1024,
     n_parallel: int = 1,
-    custom_args: Optional[List[str]] = None,
+    custom_args: list[str] | None = None,
     mtp_enabled: bool = False,
     n_ubatch: int = 256,
 ) -> str:
@@ -350,10 +351,10 @@ def preload_gguf_llm(
     enable_thinking: bool = True,
     thinking_budget: int = 1024,
     n_parallel: int = 1,
-    custom_args: Optional[List[str]] = None,
+    custom_args: list[str] | None = None,
     mtp_enabled: bool = False,
     n_ubatch: int = 256,
-) -> Dict:
+) -> dict:
     """
     Асинхронно запускает llama-server в фоне. Возвращает сразу.
     UI следит за прогрессом через get_llm_status() / stream_llm_status().
@@ -432,7 +433,7 @@ def preload_gguf_llm(
     return {"status": "loading", "task_id": task_id, "model": os.path.basename(gguf_path)}
 
 
-def get_llm_status() -> Dict:
+def get_llm_status() -> dict:
     """Возвращает текущее состояние LLM для UI."""
     with _lock:
         state = _llm_load_state.copy()
@@ -482,7 +483,7 @@ def get_gguf_embedding_url(gguf_path: str, n_threads: int = None, is_reranker: b
                 return f"http://127.0.0.1:{_server_ports[gguf_path]}"
             else:
                 print(f"[GGUF Server] Перезапуск {role} {os.path.basename(gguf_path)}...")
-                
+
         # Выгружаем другие модели ТОЙ ЖЕ РОЛИ ПЕРЕД запуском новой
         from src.rag_pipeline import unload_rag_models
         unload_rag_models(hard=False)
@@ -506,7 +507,7 @@ def get_gguf_embedding_url(gguf_path: str, n_threads: int = None, is_reranker: b
                 cmd.extend(["--override-kv", "tokenizer.ggml.suffix_token_id=int:151643"])
         else:
             cmd.extend(["--reranking"])
-            
+
         # Embedding/Reranker не генерируют текст авторегрессивно.
         # Параметры зависят от роли:
         #
@@ -534,24 +535,24 @@ def get_gguf_embedding_url(gguf_path: str, n_threads: int = None, is_reranker: b
         else:
             ctx, b_size, ub_size = "4096", "512", "512"
         cmd.extend(["-c", ctx, "-b", b_size, "-ub", ub_size])
-        
+
         # Квантование KV-cache: q8_0 = 50% экономии памяти против f16.
         # Безопасно для embedding/reranker: они не генерируют текст авторегрессивно,
         # поэтому ошибки квантования не накапливаются от токена к токену.
         cmd.extend(["--cache-type-k", "q8_0", "--cache-type-v", "q8_0"])
-        
+
         # Добавляем флаги оптимизации, как у LLM
         if config.GGUF_GPU_LAYERS != 0:
             cmd.extend(["-ngl", str(config.GGUF_GPU_LAYERS)])
         cmd.extend(["--flash-attn", "on"])
-        
+
         if n_threads and n_threads > 0:
             cmd.extend(["-t", str(n_threads)])
 
         print(f"[GGUF Server] Запуск {role}: {os.path.basename(gguf_path)} на порту {port} (parallel={n_parallel})...")
         # F-fix #33: печатаем полную cmd для диагностики (как в LLM-пути)
         print(f"[GGUF Server]   cmd: {' '.join(cmd)}")
-        
+
         creationflags = 0x08000000 # CREATE_NO_WINDOW
         process = subprocess.Popen(
             cmd,
@@ -560,7 +561,7 @@ def get_gguf_embedding_url(gguf_path: str, n_threads: int = None, is_reranker: b
             creationflags=creationflags
         )
         _assign_to_job(process)
-        
+
         start_wait = time.time()
         while time.time() - start_wait < 60:
             if is_server_ready(port):
@@ -570,12 +571,12 @@ def get_gguf_embedding_url(gguf_path: str, n_threads: int = None, is_reranker: b
                 _server_configs[gguf_path] = current_config
                 _server_roles[gguf_path] = role
                 return f"http://127.0.0.1:{port}"
-            
+
             if process.poll() is not None:
                 raise RuntimeError(f"{role.capitalize()} сервер упал при запуске")
-                
+
             time.sleep(0.5)
-        
+
         process.terminate()
         raise TimeoutError(f"{role.capitalize()} сервер не ответил за 60 секунд")
 
@@ -612,7 +613,7 @@ async def stream_gguf_chat(
 ):
     """Асинхронный стриминг через OpenAI-совместимый API сервера llama.cpp."""
     import httpx
-    
+
     payload = {
         "messages": messages,
         "stream": True,
@@ -622,16 +623,16 @@ async def stream_gguf_chat(
         "top_p": top_p,
         "min_p": min_p,
     }
-    
+
     # Определяем теги на основе семейства
     OPEN_TAG, CLOSE_TAG = ("<|channel|>", "<channel|>") if model_family == "gemma4" else ("<think>", "</think>")
-    
+
     try:
         async with httpx.AsyncClient(timeout=60.0) as client:
             async with client.stream("POST", f"{llm_url}/v1/chat/completions", json=payload) as r:
                 r.raise_for_status()
                 is_thinking = False
-                
+
                 async for line in r.aiter_lines():
                     if line:
                         line_str = line
@@ -641,7 +642,7 @@ async def stream_gguf_chat(
                             try:
                                 data = json.loads(line_str[6:])
                                 delta = data["choices"][0]["delta"]
-                                
+
                                 # 1. Проверяем наличие reasoning_content (новый формат llama.cpp / OpenAI)
                                 reasoning = delta.get("reasoning_content", "")
                                 if reasoning:
@@ -650,7 +651,7 @@ async def stream_gguf_chat(
                                         is_thinking = True
                                     yield reasoning
                                     continue
-                                    
+
                                 # 2. Проверяем наличие обычного контента
                                 content = delta.get("content", "")
                                 if content:
@@ -662,7 +663,7 @@ async def stream_gguf_chat(
                             except Exception as e:
                                 logger.debug(f"Ошибка парсинга SSE: {e}")
                                 continue
-                
+
                 # На всякий случай закрываем тег в конце
                 if is_thinking:
                     yield CLOSE_TAG

@@ -1,19 +1,19 @@
-import os
 import logging
-import chromadb
-from llama_index.core import VectorStoreIndex, Settings
-from llama_index.vector_stores.chroma import ChromaVectorStore
-
-from llama_index.llms.openai import OpenAI
-from llama_index.core.storage.storage_context import StorageContext
-from llama_index.core.vector_stores.types import MetadataFilters, MetadataFilter, FilterOperator
-from llama_index.core.schema import TextNode
-
-import config
-import torch
+import os
 import threading
+
+import chromadb
 import requests
 import requests.adapters
+import torch
+from llama_index.core import Settings, VectorStoreIndex
+from llama_index.core.schema import TextNode
+from llama_index.core.storage.storage_context import StorageContext
+from llama_index.core.vector_stores.types import FilterOperator, MetadataFilter, MetadataFilters
+from llama_index.llms.openai import OpenAI
+from llama_index.vector_stores.chroma import ChromaVectorStore
+
+import config
 
 # F-fix #15: Session для rerank-запросов (см. также ingestion.py _http_session).
 # Без Session каждый POST /v1/rerank открывает новый TCP-коннект.
@@ -60,7 +60,7 @@ def preload_all_models():
     init_settings()
     if config.RERANKER_MODEL_NAME:
         device = "cuda" if torch.cuda.is_available() else "cpu"
-        
+
         if not (config.RERANKER_MODEL_NAME.lower().endswith('.gguf') or (os.path.isabs(config.RERANKER_MODEL_NAME) and os.path.exists(config.RERANKER_MODEL_NAME))):
             raise RuntimeError(
                 "Поддерживаются только GGUF-модели реранкера. "
@@ -71,10 +71,10 @@ def preload_all_models():
         from src.gguf_direct import get_gguf_embedding_url
         model_path = config.resolve_model_path(config.RERANKER_MODEL_NAME)
         get_gguf_embedding_url(model_path, is_reranker=True)
-    
+
     # Загружаем GGUF LLM для зрения больше не нужно, так как он грузится динамически в ingestion.py
     # и сразу очищается, экономя VRAM.
-    
+
     print("[RAG] Все модели загружены.")
 
 def init_settings(max_tokens=1024):
@@ -94,8 +94,9 @@ def init_settings(max_tokens=1024):
                     f"Текущее значение: {model_name}"
                 )
             print(f"Инициализация GGUF эмбеддингов: {model_name}")
-            from src.gguf_direct import get_gguf_embedding_url
             from llama_index.embeddings.openai import OpenAIEmbedding
+
+            from src.gguf_direct import get_gguf_embedding_url
 
             model_path = config.resolve_model_path(model_name)
             url = get_gguf_embedding_url(model_path)
@@ -140,10 +141,10 @@ def get_vector_store(notebook_id: str):
     paths = config.get_notebook_paths(notebook_id)
     db_path = paths["chroma_db"]
     os.makedirs(db_path, exist_ok=True)
-    
+
     if db_path not in _client_cache:
         _client_cache[db_path] = chromadb.PersistentClient(path=db_path)
-    
+
     db = _client_cache[db_path]
     chroma_collection = db.get_or_create_collection("multimodal_rag")
     return ChromaVectorStore(chroma_collection=chroma_collection)
@@ -445,7 +446,6 @@ def retrieve_nodes(query: str, notebook_id: str, allowed_files=None, max_tokens=
     """
     Для каждого выбранного файла выполняем отдельный гибридный поиск топ-K чанков.
     """
-    device = "cuda" if torch.cuda.is_available() else "cpu"
     init_settings(max_tokens=max_tokens)
     vector_store = get_vector_store(notebook_id)
     index = VectorStoreIndex.from_vector_store(vector_store)
@@ -456,9 +456,9 @@ def retrieve_nodes(query: str, notebook_id: str, allowed_files=None, max_tokens=
     # Загрузка BM25 ретривера
     paths = config.get_notebook_paths(notebook_id)
     bm25_dir = os.path.join(paths["base"], "bm25")
-    from llama_index.retrievers.bm25 import BM25Retriever
     from llama_index.core.retrievers import QueryFusionRetriever
-    
+    from llama_index.retrievers.bm25 import BM25Retriever
+
     bm25_retriever = None
     if os.path.exists(os.path.join(bm25_dir, "bm25_retriever_params.json")):
         try:
@@ -471,7 +471,7 @@ def retrieve_nodes(query: str, notebook_id: str, allowed_files=None, max_tokens=
         # не имеет гибридного преимущества. batch-upload сам вызывает flush_bm25_rebuild
         # в конце — там дублирующая сборка будет отменена.
         if not is_bm25_ready(notebook_id):
-            print(f"  [RAG] BM25 отсутствует — форсирую синхронную пересборку для первого запроса")
+            print("  [RAG] BM25 отсутствует — форсирую синхронную пересборку для первого запроса")
             flush_bm25_rebuild(notebook_id, db_path=paths["chroma_db"], wait=True, timeout=180)
             if os.path.exists(os.path.join(bm25_dir, "bm25_retriever_params.json")):
                 try:
@@ -485,9 +485,9 @@ def retrieve_nodes(query: str, notebook_id: str, allowed_files=None, max_tokens=
     qe_llm = _get_qe_llm() if config.RAG_QUERY_EXPANSION else None
     if config.RAG_QUERY_EXPANSION:
         if qe_llm:
-            print(f"  [RAG] Query Expansion включён (num_queries=3)")
+            print("  [RAG] Query Expansion включён (num_queries=3)")
         else:
-            print(f"  [RAG] Query Expansion отключён (нет доступного LLM-сервера)")
+            print("  [RAG] Query Expansion отключён (нет доступного LLM-сервера)")
 
     # F2: Per-file RRF — каждый файл получает равный голос, независимо от размера.
     # Внутри файла — RRF (vector+BM25), между файлами — RRF поверх.
@@ -587,7 +587,7 @@ def retrieve_nodes(query: str, notebook_id: str, allowed_files=None, max_tokens=
             if num_q > 1 and qe_llm:
                 try:
                     generated_bundles = fusion_retriever._get_queries(query)
-                    print(f"  [RAG] 🧠 Сгенерированные поисковые запросы (Query Expansion):")
+                    print("  [RAG] 🧠 Сгенерированные поисковые запросы (Query Expansion):")
                     for i, gq in enumerate(generated_bundles, 1):
                         print(f"    {i}. {gq.query_str}")
                 except Exception as qe_err:
@@ -663,12 +663,12 @@ def retrieve_nodes(query: str, notebook_id: str, allowed_files=None, max_tokens=
         if len(all_nodes) > config.RAG_RERANK_POOL:
             all_nodes.sort(key=lambda x: x.score if hasattr(x, 'score') and x.score else 0, reverse=True)
             all_nodes = all_nodes[:config.RAG_RERANK_POOL]
-            
+
         print(f"  [RAG] Чанков для реранкинга: {len(all_nodes)}")
-        
+
         reranker_name = config.RERANKER_MODEL_NAME
-        
-        if not (reranker_name.lower().endswith('.gguf') or os.path.isabs(reranker_name) and os.path.exists(reranker_name)):
+
+        if not (reranker_name.lower().endswith('.gguf') or (os.path.isabs(reranker_name) and os.path.exists(reranker_name))):
             raise RuntimeError(
                 "Поддерживаются только GGUF-модели реранкера. "
                 "Укажите путь к .gguf файлу в config.RERANKER_MODEL_NAME.\n"
@@ -681,7 +681,7 @@ def retrieve_nodes(query: str, notebook_id: str, allowed_files=None, max_tokens=
             model_path = config.resolve_model_path(reranker_name)
             url = get_gguf_embedding_url(model_path, is_reranker=True)
             _model_cache["reranker"] = url
-        
+
         url = _model_cache["reranker"]
         def _rerank_doc(nws):
             meta = nws.node.metadata or {}
@@ -693,8 +693,7 @@ def retrieve_nodes(query: str, notebook_id: str, allowed_files=None, max_tokens=
             prefix = f"[{' '.join(coord_parts)}] " if coord_parts else ""
             return prefix + nws.node.get_content()
         documents = [_rerank_doc(n) for n in all_nodes]
-        payload = {"model": "gguf-reranker", "query": query, "documents": documents, "top_n": len(documents)}
-        
+
         try:
             import time as _time
             _rerank_start = _time.time()
@@ -728,11 +727,11 @@ def retrieve_nodes(query: str, notebook_id: str, allowed_files=None, max_tokens=
         if scores and max(scores) < 1e-6:
             print(f"  [RAG] ⚠️ GGUF реранкер выдал слишком низкие оценки (max: {max(scores)}). Используется оригинальный порядок поиска.")
             scores = [1.0 - (i * 0.01) for i in range(len(all_nodes))]
-        
+
         # Присваиваем скоры и сортируем
         for node, score in zip(all_nodes, scores):
             node.score = float(score)
-            
+
         all_nodes.sort(key=lambda x: x.score, reverse=True)
         all_nodes = all_nodes[:config.RAG_FINAL_TOP_N]
 
@@ -787,8 +786,7 @@ def build_file_context(nodes, notebook_id: str):
     Каждый чанк получает свой порядковый номер [N].
     """
     paths = config.get_notebook_paths(notebook_id)
-    images_dir = paths["images"]
-    
+
     sources = []
     context_parts = []
 

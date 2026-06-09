@@ -6,8 +6,9 @@
 
 import os
 import sys
+from unittest.mock import MagicMock, patch
+
 import pytest
-from unittest.mock import patch, MagicMock
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
@@ -76,9 +77,9 @@ class TestRrfFuse:
         assert f([], []) == []
 
     def test_empty_vector(self, mock_llama_index):
-        f = self._get_funcs()
+        from llama_index.core.schema import NodeWithScore, TextNode
+
         from src.rag_pipeline import _rrf_fuse
-        from llama_index.core.schema import TextNode, NodeWithScore
 
         bm25 = [
             NodeWithScore(node=TextNode(text="A", id_="a"), score=0.9),
@@ -90,8 +91,9 @@ class TestRrfFuse:
         assert result[0].node.node_id == "a"
 
     def test_empty_bm25(self, mock_llama_index):
+        from llama_index.core.schema import NodeWithScore, TextNode
+
         from src.rag_pipeline import _rrf_fuse
-        from llama_index.core.schema import TextNode, NodeWithScore
 
         vec = [NodeWithScore(node=TextNode(text="X", id_="x"), score=0.5)]
         result = _rrf_fuse(vec, [])
@@ -99,8 +101,9 @@ class TestRrfFuse:
         assert result[0].node.node_id == "x"
 
     def test_deduplicates(self, mock_llama_index):
+        from llama_index.core.schema import NodeWithScore, TextNode
+
         from src.rag_pipeline import _rrf_fuse
-        from llama_index.core.schema import TextNode, NodeWithScore
 
         common = TextNode(text="Common", id_="same_id")
         vec = [NodeWithScore(node=common, score=0.9)]
@@ -119,8 +122,9 @@ class TestRrfFuseAcrossFiles:
         assert _rrf_fuse_across_files([]) == []
 
     def test_single_file(self, mock_llama_index):
+        from llama_index.core.schema import NodeWithScore, TextNode
+
         from src.rag_pipeline import _rrf_fuse_across_files
-        from llama_index.core.schema import TextNode, NodeWithScore
 
         nodes = [
             NodeWithScore(node=TextNode(text="A", id_="a1"), score=0.9),
@@ -130,8 +134,9 @@ class TestRrfFuseAcrossFiles:
         assert len(result) == 2
 
     def test_two_files_equal_weight(self, mock_llama_index):
+        from llama_index.core.schema import NodeWithScore, TextNode
+
         from src.rag_pipeline import _rrf_fuse_across_files
-        from llama_index.core.schema import TextNode, NodeWithScore
 
         big = [NodeWithScore(
             node=TextNode(text=f"Big-{i}", id_=f"big_{i}"),
