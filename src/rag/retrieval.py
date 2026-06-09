@@ -23,8 +23,6 @@ from src.rag.state import _model_cache, _rerank_session
 
 logger = logging.getLogger(__name__)
 
-# ── Query Expansion ──────────────────────────────────────────────────
-
 _QUERY_GEN_PROMPT = (
     "Ты — эксперт по поиску информации. Сформулируй ровно {num_queries} разных коротких поисковых запроса "
     "на том же языке для поиска справочной теории, правил и формул в учебных материалах на основе следующего задания/вопроса.\n"
@@ -71,9 +69,6 @@ def _get_qe_llm():
     )
 
 
-# ── RRF (Reciprocal Rank Fusion) ─────────────────────────────────────
-
-
 def _rrf_fuse(vector_results, bm25_results, k: int = 60):
     scores: dict = {}
     nodes_by_id: dict = {}
@@ -104,9 +99,6 @@ def _rrf_fuse_across_files(file_results, k: int = 60):
 
     sorted_ids = sorted(scores.keys(), key=lambda i: scores[i], reverse=True)
     return [NodeWithScore(node=nodes_by_id[i].node, score=scores[i]) for i in sorted_ids]
-
-
-# ── Retrieval ────────────────────────────────────────────────────────
 
 
 def retrieve_nodes(query: str, notebook_id: str, allowed_files=None, max_tokens=1024):

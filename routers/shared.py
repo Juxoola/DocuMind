@@ -19,7 +19,6 @@ import config
 
 logger = logging.getLogger(__name__)
 
-# ── HTTP session (keep-alive) ──
 _http_session = requests.Session()
 _http_session.mount(
     "http://",
@@ -35,8 +34,6 @@ _http_session.mount(
         pool_maxsize=config.HTTP_POOL_SIZE_MAIN,
     ),
 )
-
-# ── Статус ингеста (ключ — task_id, не notebook_id) ──
 
 ingestion_status: dict = {}
 upload_cancel_flags: dict = {}

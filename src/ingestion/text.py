@@ -73,7 +73,6 @@ def process_pdf(file_path, images_dir, llm_settings=None, shared_llm_url=None,
     n_workers = min(8, (os.cpu_count() or 4), total_pages)
     page_results = [None] * total_pages
 
-    # Фаза 1: параллельный разбор страниц
     if n_workers <= 1:
         for page_num in range(total_pages):
             if _is_cancelled():
@@ -102,7 +101,6 @@ def process_pdf(file_path, images_dir, llm_settings=None, shared_llm_url=None,
                     logger.warning(f"Ошибка разбора страницы {pn + 1}: {e}")
                     page_results[pn] = ("", False, None)
 
-    # Фаза 2: создание нод + Pixmap
     def _build_page_artifacts(page_num: int):
         result = page_results[page_num]
         text, has_real_graphics = result[0], result[1]
@@ -141,7 +139,6 @@ def process_pdf(file_path, images_dir, llm_settings=None, shared_llm_url=None,
                 if image_path:
                     frame_list.append({"page": pn + 1, "path": image_path})
 
-    # Фаза 3: Vision для страниц с графикой
     if frame_list:
         if shared_llm_url is None:
             shared_llm_url = get_vision_url(llm_settings)

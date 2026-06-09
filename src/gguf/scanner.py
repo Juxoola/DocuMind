@@ -86,7 +86,6 @@ def scan_gguf_dirs() -> list[dict]:
             except Exception:
                 pass
 
-        # Cold path: полный os.walk + persist
         results = _scan_gguf_dirs_uncached()
         try:
             roots = [d.strip() for d in config.GGUF_SEARCH_DIRS.split(";") if d.strip()]

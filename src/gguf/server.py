@@ -32,7 +32,6 @@ from src.gguf.state import (
 logger = logging.getLogger(__name__)
 
 
-# Проверка готовности сервера
 
 
 def is_server_ready(port: int) -> bool:
@@ -44,7 +43,6 @@ def is_server_ready(port: int) -> bool:
         return False
 
 
-# Внутренний запуск llama-server
 
 
 def _start_llm_server_sync(gguf_path: str, mmproj_path: str, current_config: dict) -> str:
@@ -130,7 +128,6 @@ def _start_llm_server_sync(gguf_path: str, mmproj_path: str, current_config: dic
             )
         time.sleep(0.5)
 
-    # Таймаут — убиваем процесс
     try:
         if sys.platform == "win32":
             subprocess.run(["taskkill", "/F", "/T", "/PID", str(process.pid)], capture_output=True, timeout=5)
@@ -157,7 +154,6 @@ def unload_rag_models_safe():
         pass
 
 
-# Публичный запуск LLM
 
 
 def get_gguf_llm(
@@ -208,7 +204,6 @@ def get_gguf_llm(
                 _server_processes[gguf_path].poll() is None
                 and _server_configs.get(gguf_path) == current_config
             ):
-                # Уже готов с тем же конфигом
                 _llm_load_state.update({
                     "state": "ready", "model": gguf_path,
                     "port": _server_ports[gguf_path], "error": None,
@@ -245,7 +240,6 @@ def get_gguf_llm(
         raise
 
 
-# Фоновая предзагрузка LLM
 
 
 def preload_gguf_llm(
@@ -338,7 +332,6 @@ def preload_gguf_llm(
     return {"status": "loading", "task_id": task_id, "model": os.path.basename(gguf_path)}
 
 
-# Статус
 
 
 def get_llm_status() -> dict:
@@ -365,7 +358,6 @@ def get_llm_status() -> dict:
     return state
 
 
-# Embedding / Reranker сервер
 
 
 def get_gguf_embedding_url(
@@ -468,7 +460,6 @@ def get_active_embedding_parallel(gguf_path: str = None) -> int:
         return 1
 
 
-# Остановка и очистка
 
 
 def kill_stray_servers():

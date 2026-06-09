@@ -20,7 +20,6 @@ from .shared import robust_rmtree
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["notebooks"])
 
-# Паттерн для валидации nb_id: только hex (UUID первых 8 символов)
 _NB_ID_PATTERN = re.compile(r"^[a-f0-9]{8}$")
 
 
@@ -30,9 +29,6 @@ def validate_nb_id(nb_id: str) -> str:
         logger.warning(f"Некорректный notebook_id: {nb_id!r}")
         raise HTTPException(status_code=400, detail="Некорректный ID блокнота")
     return nb_id
-
-
-# ── Миграция ──
 
 
 def migrate_old_data():
@@ -57,9 +53,6 @@ def migrate_old_data():
             json.dump({"id": "default", "name": "Мой первый блокнот", "created_at": time.time()}, f)
     except Exception as e:
         logger.warning(f"Ошибка миграции (продолжаем без неё): {e}")
-
-
-# ── Эндпоинты ──
 
 
 @router.get("/api/notebooks")

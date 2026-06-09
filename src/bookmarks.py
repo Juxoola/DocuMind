@@ -38,8 +38,6 @@ import config
 
 logger = logging.getLogger(__name__)
 
-# Один лок на запись на процесс — файл маленький, race маловероятен,
-# но мы пишем в него из FastAPI (async) и из atexit-обработчиков.
 _write_locks: dict = {}
 _locks_guard = threading.Lock()
 

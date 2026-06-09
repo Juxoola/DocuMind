@@ -27,7 +27,6 @@ from src.ingestion.vision import describe_image_with_lmstudio, get_vision_url
 
 logger = logging.getLogger(__name__)
 
-# WhisperX кеш
 _whisper_model_cache: dict = {}
 _whisper_lock = threading.Lock()
 
@@ -90,7 +89,6 @@ def process_audio_video(file_path, images_dir, is_video=False, progress_cb=None,
     transcript_data = []
     frame_data = []
 
-    # 1. ТРАНСКРИБАЦИЯ
     prog(15, "Транскрибация речи (WhisperX)...")
     device = "cuda" if torch.cuda.is_available() else "cpu"
     try:
@@ -121,7 +119,6 @@ def process_audio_video(file_path, images_dir, is_video=False, progress_cb=None,
                 chunk_text = ""
     prog(60, "Транскрибация завершена")
 
-    # 2. АНАЛИЗ ВИДЕО
     if is_video:
         prog(62, "Анализ изменений в видео...")
         cap = cv2.VideoCapture(file_path)
@@ -212,7 +209,6 @@ def process_audio_video(file_path, images_dir, is_video=False, progress_cb=None,
             if notebook_id is not None:
                 unregister_subprocess(notebook_id, process)
 
-        # 3. ОПИСАНИЕ КАДРОВ
         n = len(frame_list)
         shared_llm_url = None
         if n > 0:

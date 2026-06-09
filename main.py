@@ -19,7 +19,6 @@ from fastapi.staticfiles import StaticFiles
 
 import config
 
-# ── Настройка логирования ──
 _LOG_DIR = os.path.join(config.BASE_DIR, "logs")
 os.makedirs(_LOG_DIR, exist_ok=True)
 
@@ -32,14 +31,12 @@ logging.basicConfig(
         logging.StreamHandler(sys.stdout),
     ],
 )
-# Убираем шум от библиотек
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("chromadb").setLevel(logging.WARNING)
 logging.getLogger("llama_index").setLevel(logging.WARNING)
 
 logger = logging.getLogger(__name__)
 
-# ── Контроль повторного cleanup при --reload ──
 _lifespan_cleanup_done = False
 
 
@@ -88,7 +85,6 @@ def preload_all_models():
         logger.warning(f"Предзагрузка моделей не удалась: {e}")
 
 
-# ── Graceful shutdown (Windows) ──
 def _graceful_shutdown(signum=None, frame=None):
     logger.info(f"Получен сигнал {signum}, завершение работы...")
     _shutdown_models()
@@ -106,10 +102,7 @@ def _shutdown_models():
         logger.error(f"Ошибка при выгрузке моделей: {e}")
 
 
-# ── Windows Console Control Handler ──
-# При закрытии окна консоли (X button) или Ctrl+Break Windows посылает
-# CTRL_CLOSE_EVENT/CTRL_BREAK_EVENT. signal.signal() их не ловит.
-# SetConsoleCtrlHandler — единственный способ перехватить их.
+# Windows Console Control Handler — перехватывает CTRL_CLOSE/CTRL_BREAK
 if os.name == "nt":
     try:
         import ctypes
@@ -128,24 +121,20 @@ if os.name == "nt":
     except Exception as e:
         logger.debug(f"SetConsoleCtrlHandler не удался (не критично): {e}")
 
-# Регистрируем обработчики сигналов (SIGTERM, SIGINT)
 try:
     signal.signal(signal.SIGTERM, _graceful_shutdown)
     signal.signal(signal.SIGINT, _graceful_shutdown)
 except Exception as e:
     logger.debug(f"Не удалось зарегистрировать signal handlers (не Windows?): {e}")
 
-# atexit — гарантированная очистка на Windows
 from src.gguf_direct import kill_stray_servers, unload_all_models
 
 atexit.register(unload_all_models)
 atexit.register(kill_stray_servers)
 
-# ── Создаём приложение ──
 app = FastAPI(title="NotebookLM Local Clone", lifespan=lifespan)
 
 
-# ── Middleware: лимит загрузки ──
 @app.middleware("http")
 async def enforce_upload_size(request, call_next):
     if request.url.path.startswith("/api/upload"):
@@ -163,7 +152,6 @@ async def enforce_upload_size(request, call_next):
     return await call_next(request)
 
 
-# ── CORS ──
 app.add_middleware(
     CORSMiddleware,
     allow_origins=config.CORS_ORIGINS,
@@ -172,12 +160,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ── Статика ──
 os.makedirs(os.path.join(config.BASE_DIR, "static"), exist_ok=True)
 app.mount("/static", StaticFiles(directory=os.path.join(config.BASE_DIR, "static")), name="static")
 app.mount("/files", StaticFiles(directory=config.NOTEBOOKS_DIR), name="notebooks")
 
-# ── Роутеры ──
 from routers.bookmarks import router as bookmarks_router
 from routers.chat import router as chat_router
 from routers.files import router as files_router
@@ -192,7 +178,6 @@ app.include_router(gguf_router)
 app.include_router(bookmarks_router)
 app.include_router(settings_router)
 
-# ── Точка входа ──
 if __name__ == "__main__":
     import uvicorn
 

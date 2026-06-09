@@ -13,9 +13,6 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["settings"])
 
 
-# ── GGUF config ──
-
-
 @router.get("/api/gguf-config")
 async def api_get_gguf_config():
     return {
@@ -41,9 +38,6 @@ async def update_model_dirs(req: UpdateModelDirsRequest):
     except Exception:
         logger.debug("settings: не удалось инвалидировать кэш сканирования")
     return {"status": "ok", "new_dirs": config.GGUF_SEARCH_DIRS}
-
-
-# ── RAG config ──
 
 
 @router.get("/api/rag-config")

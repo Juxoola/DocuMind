@@ -26,9 +26,6 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["gguf"])
 
 
-# ── Список моделей ──
-
-
 @router.get("/api/gguf-models")
 async def api_scan_gguf_models():
     try:
@@ -71,9 +68,6 @@ def _get_gguf_servers_info() -> list:
     return servers
 
 
-# ── Управление ──
-
-
 @router.post("/api/gguf-unload")
 async def api_gguf_unload_all():
     unload_all_models()
@@ -85,9 +79,6 @@ async def api_gguf_kill_all():
     kill_stray_servers()
     unload_all_models()
     return {"status": "ok", "msg": "Все процессы llama-server завершены"}
-
-
-# ── VRAM ──
 
 
 @router.get("/api/vram")
@@ -171,9 +162,6 @@ async def api_vram():
         "per_process": per_process,
         "gguf_servers": _get_gguf_servers_info(),
     }
-
-
-# ── Preload LLM ──
 
 
 class PreloadLlmRequest(BaseModel):

@@ -16,7 +16,6 @@ import config
 
 logger = logging.getLogger(__name__)
 
-# Подавляем шумные предупреждения
 warnings.filterwarnings("ignore", message="Module 'speechbrain")
 warnings.filterwarnings("ignore", message="torchcodec is not installed")
 warnings.filterwarnings("ignore", message="TensorFloat-32")
@@ -27,7 +26,6 @@ logging.getLogger("lightning.pytorch.utilities.migration").setLevel(logging.ERRO
 logging.getLogger("lightning.pytorch").setLevel(logging.ERROR)
 logging.getLogger("whisperx").setLevel(logging.WARNING)
 
-# Фикс: inspect.stack()
 _orig_getmodule = _inspect_module.getmodule
 
 
@@ -40,15 +38,13 @@ def _safe_getmodule(obj, filename=None):
 
 _inspect_module.getmodule = _safe_getmodule
 
-# Фикс для Windows DLL
 try:
     lib_dir = os.path.join(os.path.dirname(torch.__file__), "lib")
     if os.path.exists(lib_dir):
         os.add_dll_directory(lib_dir)
 except Exception:
-    pass  # best-effort
+    pass
 
-# HTTP session (keep-alive)
 _http_session = requests.Session()
 _http_session.mount(
     "http://",
@@ -65,7 +61,6 @@ _http_session.mount(
     ),
 )
 
-# Subprocess registry
 _active_subprocesses: dict = {}
 
 
@@ -96,15 +91,10 @@ def kill_subprocesses(notebook_id):
     return len(procs)
 
 
-# Исключение
-
-
 class IngestionCancelled(Exception):
 
     pass
 
-
-# Утилиты
 
 
 def _safe_print(msg):

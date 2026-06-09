@@ -27,7 +27,6 @@ from src.gguf.state import (
 
 logger = logging.getLogger(__name__)
 
-# Одиночный сервер (устаревшее, сохранено для обратной совместимости)
 _server_process = None
 _server_info = {}
 
