@@ -779,7 +779,9 @@ def retrieve_nodes(query: str, notebook_id: str, allowed_files=None, max_tokens=
             from src.gguf_direct import get_gguf_embedding_url
 
             model_path = config.resolve_model_path(reranker_name)
-            url = get_gguf_embedding_url(model_path, is_reranker=True)
+            url = get_gguf_embedding_url(
+                model_path, is_reranker=True, n_parallel=config.EMBEDDING_N_PARALLEL
+            )
             _model_cache["reranker"] = url
 
         url = _model_cache["reranker"]
@@ -923,6 +925,13 @@ def build_file_context(nodes, notebook_id: str):
         )
         text = node.node.get_content()
 
+        # Собираем координаты чанка: файл, страница, время
+        page_str = ""
+        if meta.get("page") not in (None, ""):
+            page_str = f", стр. {meta['page']}"
+        elif meta.get("start") not in (None, ""):
+            page_str = f", @{meta['start']}"
+
         sources.append(
             {
                 "id": i,
@@ -933,7 +942,7 @@ def build_file_context(nodes, notebook_id: str):
                 "time": meta.get("start") or meta.get("time"),
             }
         )
-        context_parts.append(f"[{i}] Файл «{fname}»:\n{text}")
+        context_parts.append(f"[{i}] Файл «{fname}»{page_str}:\n{text}")
 
     context_str = "\n\n" + ("=" * 40 + "\n\n").join(context_parts)
     return sources, context_str
@@ -946,10 +955,13 @@ def make_prompt(
     max_tokens: int = 1024,
     answer_mode: str = None,
 ) -> str:
+    """Формирует промпт для LLM: системный промпт + контекст + вопрос.
+    Правила цитирования заданы в config.get_system_prompt() — не дублировать их здесь.
+    """
     return (
-        config.get_system_prompt(answer_mode) + "\n"
-        "ОТВЕЧАЙ СТРОГО С ИСПОЛЬЗОВАНИЕМ [N] ДЛЯ ССЫЛОК.\n\n"
-        f"Доступные источники:\n{context_str}\n\n"
-        f"Вопрос пользователя: {query}\n\n"
-        "Твой ответ (используй СТРОГО формат [N] для ссылок):"
+        config.get_system_prompt(answer_mode)
+        + "\n"
+        + f"Доступные источники:\n{context_str}\n\n"
+        + f"Вопрос пользователя: {query}\n\n"
+        + "Ответ:"
     )

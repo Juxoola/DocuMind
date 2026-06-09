@@ -772,9 +772,7 @@ def process_pdf(
     doc = fitz.open(file_path)
     frame_data = []
     frame_list = []
-    splitter = SentenceSplitter(chunk_size=1024, chunk_overlap=256)
-    # Сплиттер для описаний (более крупный)
-    v_splitter = SentenceSplitter(chunk_size=2048, chunk_overlap=128)
+    splitter = SentenceSplitter(chunk_size=2048, chunk_overlap=256)
 
     # Параллельный разбор страниц: page.get_text() + get_drawings() GIL-free (PyMuPDF native).
     # Один ThreadPoolExecutor на весь PDF; cancel-check между батчами.
@@ -1500,7 +1498,7 @@ def ingest_file(
                     text = f.read()
 
             doc = TextNode(text=text, metadata={"file_name": os.path.basename(file_path)})
-            nodes = SentenceSplitter(chunk_size=1024, chunk_overlap=256).get_nodes_from_documents(
+            nodes = SentenceSplitter(chunk_size=2048, chunk_overlap=256).get_nodes_from_documents(
                 [doc]
             )
     finally:
