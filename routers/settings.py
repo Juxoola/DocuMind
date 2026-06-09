@@ -1,8 +1,9 @@
 """
 Роутер: настройки RAG и GGUF.
 """
+
 import logging
-from typing import Optional
+
 from fastapi import APIRouter
 from pydantic import BaseModel
 
@@ -13,6 +14,7 @@ router = APIRouter(tags=["settings"])
 
 
 # ── GGUF config ──
+
 
 @router.get("/api/gguf-config")
 async def api_get_gguf_config():
@@ -34,6 +36,7 @@ async def update_model_dirs(req: UpdateModelDirsRequest):
     config.save_rag_config()
     try:
         from src.gguf_manager import invalidate_scan_cache
+
         invalidate_scan_cache()
     except Exception:
         pass
@@ -41,6 +44,7 @@ async def update_model_dirs(req: UpdateModelDirsRequest):
 
 
 # ── RAG config ──
+
 
 @router.get("/api/rag-config")
 async def get_rag_config():
@@ -66,6 +70,7 @@ class UpdateRagConfigRequest(BaseModel):
 @router.post("/api/update-rag-config")
 async def update_rag_config(req: UpdateRagConfigRequest):
     from src.rag_pipeline import unload_rag_models
+
     config.EMBEDDING_MODEL_NAME = req.embedding_model
     config.RERANKER_MODEL_NAME = req.reranker_model
     config.RAG_TOP_K_PER_FILE = req.top_k_per_file

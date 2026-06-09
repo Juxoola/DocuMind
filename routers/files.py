@@ -1,24 +1,28 @@
 """
 Роутер: загрузка, удаление файлов, метаданные.
 """
-import os
-import json
-import time
-import gc
-import logging
-from fastapi import APIRouter, UploadFile, File, HTTPException, Query
-from fastapi.responses import StreamingResponse, JSONResponse
-from pydantic import BaseModel
-from typing import Optional
+
 import asyncio
-import threading
-import uuid as _uuid
+import gc
+import json
+import logging
+import os
 import queue
+import threading
+import time
+import uuid as _uuid
+
+from fastapi import APIRouter, File, HTTPException, Query, UploadFile
+from fastapi.responses import JSONResponse, StreamingResponse
 
 import config
+
 from .shared import (
-    safe_filename, robust_rmtree, _http_session,
-    ingestion_status, upload_cancel_flags, _background_tasks,
+    _background_tasks,
+    ingestion_status,
+    robust_rmtree,
+    safe_filename,
+    upload_cancel_flags,
 )
 
 logger = logging.getLogger(__name__)
@@ -42,36 +46,38 @@ async def upload_file(
     current_idx: int = Query(1),
     total_count: int = Query(1),
     llm_url: str = Query(None),
-    llm_api_key: Optional[str] = None,
-    llm_model: Optional[str] = None,
-    use_gguf: Optional[str] = None,
-    gguf_model_path: Optional[str] = None,
-    gguf_mmproj_path: Optional[str] = None,
-    vision_model_path: Optional[str] = None,
-    vision_mmproj_path: Optional[str] = None,
-    vision_temperature: Optional[float] = 0.1,
-    vision_ctx_size: Optional[int] = 4096,
-    vision_gpu_layers: Optional[int] = -1,
-    vision_threads: Optional[int] = 8,
-    vision_batch_size: Optional[int] = 512,
-    vision_ubatch_size: Optional[int] = 256,
-    vision_flash_attn: Optional[str] = "true",
-    vision_max_tokens: Optional[int] = 4096,
-    vision_repeat_penalty: Optional[float] = 1.2,
-    vision_top_p: Optional[float] = 0.9,
-    vision_min_p: Optional[float] = 0.05,
-    vision_presence_penalty: Optional[float] = 0.0,
-    vision_frequency_penalty: Optional[float] = 0.0,
-    vision_concurrency: Optional[int] = 1,
-    vision_kv_quant: Optional[int] = 2,
-    vision_mtp_enabled: Optional[bool] = False,
+    llm_api_key: str | None = None,
+    llm_model: str | None = None,
+    use_gguf: str | None = None,
+    gguf_model_path: str | None = None,
+    gguf_mmproj_path: str | None = None,
+    vision_model_path: str | None = None,
+    vision_mmproj_path: str | None = None,
+    vision_temperature: float | None = 0.1,
+    vision_ctx_size: int | None = 4096,
+    vision_gpu_layers: int | None = -1,
+    vision_threads: int | None = 8,
+    vision_batch_size: int | None = 512,
+    vision_ubatch_size: int | None = 256,
+    vision_flash_attn: str | None = "true",
+    vision_max_tokens: int | None = 4096,
+    vision_repeat_penalty: float | None = 1.2,
+    vision_top_p: float | None = 0.9,
+    vision_min_p: float | None = 0.05,
+    vision_presence_penalty: float | None = 0.0,
+    vision_frequency_penalty: float | None = 0.0,
+    vision_concurrency: int | None = 1,
+    vision_kv_quant: int | None = 2,
+    vision_mtp_enabled: bool | None = False,
 ):
-    print(f"[API] Новый запрос загрузки для блокнота {notebook_id}. Файл: {file.filename} ({current_idx}/{total_count})")
+    logger.info(
+        f"[API] Новый запрос загрузки для блокнота {notebook_id}. Файл: {file.filename} ({current_idx}/{total_count})"
+    )
     _ext = os.path.splitext(file.filename or "")[1].lower()
     if _ext not in config.ALLOWED_UPLOAD_EXTENSIONS:
         raise HTTPException(
             status_code=415,
-            detail=f"Тип файла '{_ext}' не поддерживается. Разрешено: {', '.join(sorted(config.ALLOWED_UPLOAD_EXTENSIONS))}."
+            detail=f"Тип файла '{_ext}' не поддерживается. Разрешено: {', '.join(sorted(config.ALLOWED_UPLOAD_EXTENSIONS))}.",
         )
     paths = config.get_notebook_paths(notebook_id)
     os.makedirs(paths["data"], exist_ok=True)
@@ -91,7 +97,10 @@ async def upload_file(
                         os.remove(file_path)
                     except Exception:
                         pass
-                    raise HTTPException(status_code=413, detail=f"Файл превысил {config.UPLOAD_MAX_SIZE_MB} МБ во время записи.")
+                    raise HTTPException(
+                        status_code=413,
+                        detail=f"Файл превысил {config.UPLOAD_MAX_SIZE_MB} МБ во время записи.",
+                    )
                 f.write(chunk)
 
     await asyncio.to_thread(save_upload)
@@ -138,20 +147,25 @@ async def upload_file(
 
     def process_task():
         import torch
+
         start_time = time.time()
         cancel_event = upload_cancel_flags.setdefault(task_id, threading.Event())
         cancel_event.clear()
         ingestion_status[notebook_id] = {
-            "is_uploading": True, "progress": 0,
+            "is_uploading": True,
+            "progress": 0,
             "batch_progress": (current_idx - 1) / total_count * 100,
-            "current_file": current_idx, "total_files": total_count,
-            "status": "Подготовка...", "task_id": task_id,
+            "current_file": current_idx,
+            "total_files": total_count,
+            "status": "Подготовка...",
+            "task_id": task_id,
         }
         try:
             from src.ingestion import IngestionCancelled
         except ImportError:
             IngestionCancelled = RuntimeError
         try:
+
             def prog(pct, msg):
                 q.put({"type": "progress", "pct": pct, "msg": msg})
                 if notebook_id in ingestion_status:
@@ -161,9 +175,12 @@ async def upload_file(
             is_last_in_batch = current_idx >= total_count
             from src.ingestion import ingest_file
             from src.rag_pipeline import build_index
+
             nodes = ingest_file(
-                file_path, notebook_id,
-                progress_cb=prog, llm_settings=llm_settings,
+                file_path,
+                notebook_id,
+                progress_cb=prog,
+                llm_settings=llm_settings,
                 cancel_check=cancel_event.is_set,
                 keep_vision_alive=not is_last_in_batch,
                 keep_whisper_alive=not is_last_in_batch,
@@ -177,30 +194,45 @@ async def upload_file(
             time_str = f"{mins}м {secs}с" if mins > 0 else f"{secs}с"
 
             if is_last_in_batch:
-                print(f"[INGESTION] Пачка завершена. {total_count} файлов обработано.")
+                logger.info(f"[INGESTION] Пачка завершена. {total_count} файлов обработано.")
                 try:
                     from src.gguf_direct import unload_all_models
+
                     unload_all_models(role="llm")
                 except Exception as llm_err:
-                    print(f"[INGESTION] Ошибка выгрузки vision-сервера: {llm_err}")
+                    logger.error(f"[INGESTION] Ошибка выгрузки vision-сервера: {llm_err}")
                 try:
                     from src.ingestion import unload_whisper_model
+
                     unload_whisper_model()
                 except Exception as whisper_err:
-                    print(f"[INGESTION] Ошибка выгрузки WhisperX: {whisper_err}")
+                    logger.error(f"[INGESTION] Ошибка выгрузки WhisperX: {whisper_err}")
                 try:
                     from src.rag_pipeline import flush_bm25_rebuild
+
                     flush_bm25_rebuild(notebook_id)
                 except Exception as bm25_err:
-                    print(f"[INGESTION] Не удалось форсировать BM25 rebuild: {bm25_err}")
+                    logger.info(f"[INGESTION] Не удалось форсировать BM25 rebuild: {bm25_err}")
                 ingestion_status[notebook_id] = {"is_uploading": False}
             else:
-                ingestion_status[notebook_id].update({"batch_progress": current_idx / total_count * 100, "status": f"Готово: {file.filename}"})
+                ingestion_status[notebook_id].update(
+                    {
+                        "batch_progress": current_idx / total_count * 100,
+                        "status": f"Готово: {file.filename}",
+                    }
+                )
 
-            q.put({"type": "done", "filename": file.filename, "elapsed": time_str, "elapsed_sec": elapsed})
-            print(f"[INGESTION] Готово: {file.filename} ({time_str})")
+            q.put(
+                {
+                    "type": "done",
+                    "filename": file.filename,
+                    "elapsed": time_str,
+                    "elapsed_sec": elapsed,
+                }
+            )
+            logger.info(f"[INGESTION] Готово: {file.filename} ({time_str})")
         except IngestionCancelled:
-            print(f"[INGESTION] Загрузка отменена пользователем: {file.filename}")
+            logger.info(f"[INGESTION] Загрузка отменена пользователем: {file.filename}")
             try:
                 if os.path.exists(file_path):
                     os.remove(file_path)
@@ -226,6 +258,7 @@ async def upload_file(
                 pass
             try:
                 from src.rag_pipeline import get_vector_store
+
                 vector_store = get_vector_store(notebook_id)
                 collection = vector_store._collection
                 collection.delete(where={"file_name": file.filename})
@@ -235,6 +268,7 @@ async def upload_file(
             q.put({"type": "cancelled", "filename": file.filename})
         except Exception as e:
             import traceback
+
             traceback.print_exc()
             ingestion_status[notebook_id] = {"is_uploading": False, "error": str(e)}
             q.put({"type": "error", "msg": str(e)})
@@ -264,11 +298,12 @@ async def upload_file(
 async def cancel_upload(notebook_id: str = Query(...), task_id: str = Query(None)):
     try:
         from src.ingestion import kill_subprocesses
+
         killed = kill_subprocesses(notebook_id)
         if killed:
-            print(f"[CANCEL] Убито {killed} активных subprocess-ов для {notebook_id}")
+            logger.info(f"[CANCEL] Убито {killed} активных subprocess-ов для {notebook_id}")
     except Exception as e:
-        print(f"[CANCEL] Ошибка при kill_subprocesses: {e}")
+        logger.error(f"[CANCEL] Ошибка при kill_subprocesses: {e}")
     if task_id:
         evt = upload_cancel_flags.get(task_id)
         if evt is None:
@@ -285,6 +320,7 @@ async def cancel_upload(notebook_id: str = Query(...), task_id: str = Query(None
 @router.delete("/api/files/{filename}")
 async def delete_file(filename: str, notebook_id: str):
     import cv2
+
     filename = safe_filename(filename)
     paths = config.get_notebook_paths(notebook_id)
     file_path = os.path.join(paths["data"], filename)
@@ -305,16 +341,20 @@ async def delete_file(filename: str, notebook_id: str):
                     raise
                 time.sleep(0.5)
     from src.rag_pipeline import get_vector_store
+
     vector_store = get_vector_store(notebook_id)
     collection = vector_store._collection
     collection.delete(where={"file_name": filename})
     try:
         from src.bookmarks import mark_stale_for_file
+
         stale_count = mark_stale_for_file(notebook_id, filename)
         if stale_count:
-            print(f"[BOOKMARKS] {stale_count} закладок помечены как stale после удаления {filename}")
+            logger.info(
+                f"[BOOKMARKS] {stale_count} закладок помечены как stale после удаления {filename}"
+            )
     except Exception as e:
-        print(f"[BOOKMARKS] Не удалось пометить stale: {e}")
+        logger.info(f"[BOOKMARKS] Не удалось пометить stale: {e}")
     return {"status": "ok"}
 
 
@@ -323,6 +363,7 @@ async def get_source_content(filename: str, notebook_id: str):
     filename = safe_filename(filename)
     try:
         from src.rag_pipeline import get_vector_store
+
         vector_store = await asyncio.to_thread(get_vector_store, notebook_id)
         collection = vector_store._collection
         result = await asyncio.to_thread(collection.get, where={"file_name": filename})
@@ -342,7 +383,7 @@ async def get_video_metadata(filename: str, notebook_id: str):
 
     def read_json():
         if os.path.exists(json_path):
-            with open(json_path, "r", encoding="utf-8") as f:
+            with open(json_path, encoding="utf-8") as f:
                 return json.load(f)
         return None
 
@@ -355,6 +396,7 @@ async def get_video_metadata(filename: str, notebook_id: str):
 @router.delete("/api/clear")
 async def clear_notebook(notebook_id: str):
     from src.rag_pipeline import close_all_clients
+
     close_all_clients()
     paths = config.get_notebook_paths(notebook_id)
     for d in ("data", "chroma_db", "images"):

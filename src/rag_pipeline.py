@@ -18,8 +18,18 @@ import config
 # F-fix #15: Session для rerank-запросов (см. также ingestion.py _http_session).
 # Без Session каждый POST /v1/rerank открывает новый TCP-коннект.
 _rerank_session = requests.Session()
-_rerank_session.mount("http://", requests.adapters.HTTPAdapter(pool_connections=config.HTTP_POOL_SIZE_RERANK, pool_maxsize=config.HTTP_POOL_SIZE_RERANK))
-_rerank_session.mount("https://", requests.adapters.HTTPAdapter(pool_connections=config.HTTP_POOL_SIZE_RERANK, pool_maxsize=config.HTTP_POOL_SIZE_RERANK))
+_rerank_session.mount(
+    "http://",
+    requests.adapters.HTTPAdapter(
+        pool_connections=config.HTTP_POOL_SIZE_RERANK, pool_maxsize=config.HTTP_POOL_SIZE_RERANK
+    ),
+)
+_rerank_session.mount(
+    "https://",
+    requests.adapters.HTTPAdapter(
+        pool_connections=config.HTTP_POOL_SIZE_RERANK, pool_maxsize=config.HTTP_POOL_SIZE_RERANK
+    ),
+)
 
 logger = logging.getLogger(__name__)
 
@@ -42,40 +52,49 @@ def unload_rag_models(hard=True):
     # (который между cache-miss и _model_cache[k] = ... мог бы увидеть clear() и получить полу-инициализированный кеш).
     with _init_lock:
         if hard:
-            print("[RAG] Выгрузка всех моделей (Embedding, Reranker)...")
+            logger.info("[RAG] Выгрузка всех моделей (Embedding, Reranker)...")
             _model_cache.clear()
         else:
-            print("[RAG] Мягкая очистка (Эмбеддинги и Реранкер остаются в памяти)...")
+            logger.info("[RAG] Мягкая очистка (Эмбеддинги и Реранкер остаются в памяти)...")
 
     import gc
+
     gc.collect()
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
-    print("[RAG] Память очищена.")
+    logger.info("[RAG] Память очищена.")
 
 
 def preload_all_models():
     """Предзагрузка всех тяжелых моделей для ускорения работы."""
-    print("[RAG] Предзагрузка моделей...")
+    logger.info("[RAG] Предзагрузка моделей...")
     try:
         init_settings()
     except Exception as e:
-        print(f"  [RAG] ⚠ Эмбеддинги не загружены (будут загружены lazily): {e}")
+        logger.warning(f"  [RAG] ⚠ Эмбеддинги не загружены (будут загружены lazily): {e}")
     if config.RERANKER_MODEL_NAME:
         try:
-            device = "cuda" if torch.cuda.is_available() else "cpu"
-
-            if not (config.RERANKER_MODEL_NAME.lower().endswith('.gguf') or (os.path.isabs(config.RERANKER_MODEL_NAME) and os.path.exists(config.RERANKER_MODEL_NAME))):
-                print(f"  [RAG] ⚠ Реранкер пропущен: неверный формат ({config.RERANKER_MODEL_NAME})")
+            if not (
+                config.RERANKER_MODEL_NAME.lower().endswith(".gguf")
+                or (
+                    os.path.isabs(config.RERANKER_MODEL_NAME)
+                    and os.path.exists(config.RERANKER_MODEL_NAME)
+                )
+            ):
+                logger.warning(
+                    f"  [RAG] ⚠ Реранкер пропущен: неверный формат ({config.RERANKER_MODEL_NAME})"
+                )
             else:
-                print(f"  [RAG] Предзагрузка GGUF реранкера: {config.RERANKER_MODEL_NAME}")
+                logger.info(f"  [RAG] Предзагрузка GGUF реранкера: {config.RERANKER_MODEL_NAME}")
                 from src.gguf_direct import get_gguf_embedding_url
+
                 model_path = config.resolve_model_path(config.RERANKER_MODEL_NAME)
                 get_gguf_embedding_url(model_path, is_reranker=True)
         except Exception as e:
-            print(f"  [RAG] ⚠ Реранкер не загружен (будет загружен lazily): {e}")
+            logger.warning(f"  [RAG] ⚠ Реранкер не загружен (будет загружен lazily): {e}")
 
-    print("[RAG] Предзагрузка завершена.")
+    logger.info("[RAG] Предзагрузка завершена.")
+
 
 def init_settings(max_tokens=1024):
     global _model_cache
@@ -87,13 +106,16 @@ def init_settings(max_tokens=1024):
         if "embed_model" not in _model_cache:
             model_name = config.EMBEDDING_MODEL_NAME
 
-            if not (model_name.lower().endswith('.gguf') or (os.path.isabs(model_name) and os.path.exists(model_name))):
+            if not (
+                model_name.lower().endswith(".gguf")
+                or (os.path.isabs(model_name) and os.path.exists(model_name))
+            ):
                 raise RuntimeError(
                     "Поддерживаются только GGUF-модели эмбеддингов. "
                     "Укажите путь к .gguf файлу в config.EMBEDDING_MODEL_NAME.\n"
                     f"Текущее значение: {model_name}"
                 )
-            print(f"Инициализация GGUF эмбеддингов: {model_name}")
+            logger.info(f"Инициализация GGUF эмбеддингов: {model_name}")
             from llama_index.embeddings.openai import OpenAIEmbedding
 
             from src.gguf_direct import get_gguf_embedding_url
@@ -102,10 +124,13 @@ def init_settings(max_tokens=1024):
             url = get_gguf_embedding_url(model_path)
             try:
                 from src.gguf_direct import get_active_embedding_parallel
+
                 n_parallel = get_active_embedding_parallel(model_path)
             except Exception:
                 n_parallel = 1
-            print(f"[RAG] GGUF embedding server --parallel={n_parallel} → embed_batch_size={n_parallel}")
+            logger.info(
+                f"[RAG] GGUF embedding server --parallel={n_parallel} → embed_batch_size={n_parallel}"
+            )
 
             _model_cache["embed_model"] = OpenAIEmbedding(
                 api_base=f"{url}/v1",
@@ -113,7 +138,7 @@ def init_settings(max_tokens=1024):
                 model=config.EMBEDDING_DEFAULT_MODEL,
                 timeout=120.0,
                 embed_batch_size=n_parallel,
-                query_header="Instruct: Given a web search query, retrieve relevant passages that answer the query\nQuery: "
+                query_header="Instruct: Given a web search query, retrieve relevant passages that answer the query\nQuery: ",
             )
 
     Settings.embed_model = _model_cache["embed_model"]
@@ -123,8 +148,9 @@ def init_settings(max_tokens=1024):
         api_key=config.LLM_DEFAULT_API_KEY,
         model=config.LLM_DEFAULT_MODEL,
         temperature=config.CHAT_TEMPERATURE,
-        max_tokens=max_tokens
+        max_tokens=max_tokens,
     )
+
 
 def close_all_clients():
     """Явно закрывает все открытые клиенты ChromaDB для снятия блокировок файлов."""
@@ -135,6 +161,28 @@ def close_all_clients():
         except Exception as e:
             logger.debug(f"Ошибка закрытия ChromaDB клиента {path}: {e}")
     _client_cache.clear()
+
+
+def close_notebook_client(notebook_id: str):
+    """Закрывает ChromaDB клиент только для указанного ноутбука.
+
+    В отличие от close_all_clients(), не трогает другие блокноты.
+    """
+    global _client_cache
+    from config import get_notebook_paths
+
+    db_path = get_notebook_paths(notebook_id)["chroma_db"]
+    client = _client_cache.pop(db_path, None)
+    if client is not None:
+        try:
+            client.close()
+            logger.debug(f"ChromaDB клиент закрыт для {notebook_id} ({db_path})")
+        except Exception as e:
+            logger.debug(f"Ошибка закрытия ChromaDB клиента {db_path}: {e}")
+            _client_cache[db_path] = client  # возвращаем, если не удалось закрыть
+    else:
+        logger.debug(f"Нет открытого ChromaDB клиента для {notebook_id}")
+
 
 def get_vector_store(notebook_id: str):
     global _client_cache
@@ -149,6 +197,7 @@ def get_vector_store(notebook_id: str):
     chroma_collection = db.get_or_create_collection("multimodal_rag")
     return ChromaVectorStore(chroma_collection=chroma_collection)
 
+
 _QUERY_GEN_PROMPT = (
     "Ты — эксперт по поиску информации. Сформулируй ровно {num_queries} разных коротких поисковых запроса "
     "на том же языке для поиска справочной теории, правил и формул в учебных материалах на основе следующего задания/вопроса.\n"
@@ -159,15 +208,17 @@ _QUERY_GEN_PROMPT = (
     "Поисковые запросы:"
 )
 
+
 def _get_qe_llm():
     """Returns an LLM instance for Query Expansion.
-    
+
     Priority:
     1. Running GGUF LLM server (get_active_llm_url)
     2. LM Studio (config.LM_STUDIO_URL)
     3. None — QE will be skipped silently
     """
     from src.gguf_direct import get_active_llm_url
+
     url = get_active_llm_url()
     if url:
         logger.debug(f"[QE] Используем GGUF LLM для Query Expansion: {url}")
@@ -176,28 +227,31 @@ def _get_qe_llm():
         logger.debug(f"[QE] GGUF LLM не найден, пробуем LM Studio: {url}")
     try:
         import requests as _req
+
         # Быстрая проверка доступности сервера (без ретраев)
         _req.get(url.replace("/v1", "").rstrip("/") + "/health", timeout=1)
     except Exception:
         logger.debug("[QE] LLM-сервер недоступен, Query Expansion пропускается")
         return None
     from llama_index.llms.openai import OpenAI as _OpenAI
+
     return _OpenAI(
         api_base=url if url.endswith("/v1") else f"{url}/v1",
         api_key=config.LLM_DEFAULT_API_KEY,
         model=config.LLM_DEFAULT_MODEL,
         temperature=0.3,
-        max_tokens=512,       # Достаточно для генерации 3 простых фраз
-        timeout=20.0,          # Запас таймаута
-        max_retries=0,         # Без ретраев — если нет ответа, сразу фоллбэк
+        max_tokens=512,  # Достаточно для генерации 3 простых фраз
+        timeout=20.0,  # Запас таймаута
+        max_retries=0,  # Без ретраев — если нет ответа, сразу фоллбэк
         additional_kwargs={
             "extra_body": {
                 "thinking_budget": 0,
                 "thinking_budget_tokens": 0,
-                "chat_template_kwargs": {"enable_thinking": False}
+                "chat_template_kwargs": {"enable_thinking": False},
             }
-        }
+        },
     )
+
 
 def _rebuild_bm25_bg(notebook_id: str, db_path: str):
     """Перестройка BM25-индекса в фоновом потоке. Не блокирует основной поток.
@@ -213,6 +267,7 @@ def _rebuild_bm25_bg(notebook_id: str, db_path: str):
         os.makedirs(bm25_dir, exist_ok=True)
         # Отдельный клиент для фонового потока (нельзя использовать общий _client_cache)
         import chromadb as _chromadb
+
         tmp_client = _chromadb.PersistentClient(path=db_path)
         collection = tmp_client.get_or_create_collection("multimodal_rag")
         bm25_nodes = []
@@ -222,11 +277,11 @@ def _rebuild_bm25_bg(notebook_id: str, db_path: str):
         total_seen = 0
         while True:
             result = collection.get(limit=_PAGE_SIZE, offset=offset)
-            ids = result.get('ids', [])
+            ids = result.get("ids", [])
             if not ids:
                 break
-            documents = result.get('documents', []) or []
-            metadatas = result.get('metadatas', []) or []
+            documents = result.get("documents", []) or []
+            metadatas = result.get("metadatas", []) or []
             for i, doc_id in enumerate(ids):
                 text = documents[i] if i < len(documents) else ""
                 meta = metadatas[i] if i < len(metadatas) else {}
@@ -234,13 +289,16 @@ def _rebuild_bm25_bg(notebook_id: str, db_path: str):
                     meta = {}
                 # F1: BM25 видит координаты чанка. Только для BM25-токенизации;
                 # embedding-вектора в ChromaDB не меняются, переиндексация не нужна.
-                fname = meta.get('file_name', '')
-                page = meta.get('page', '')
-                t = meta.get('start', meta.get('time', ''))
+                fname = meta.get("file_name", "")
+                page = meta.get("page", "")
+                t = meta.get("start", meta.get("time", ""))
                 coord_parts = []
-                if fname: coord_parts.append(str(fname))
-                if page not in ('', None): coord_parts.append(f"стр.{page}")
-                elif t not in ('', None): coord_parts.append(f"@{t}")
+                if fname:
+                    coord_parts.append(str(fname))
+                if page not in ("", None):
+                    coord_parts.append(f"стр.{page}")
+                elif t not in ("", None):
+                    coord_parts.append(f"@{t}")
                 if coord_parts:
                     text = f"[{' '.join(coord_parts)}]: {text}"
                 bm25_nodes.append(TextNode(text=text, id_=doc_id, metadata=meta))
@@ -251,13 +309,12 @@ def _rebuild_bm25_bg(notebook_id: str, db_path: str):
             offset += _PAGE_SIZE
         if bm25_nodes:
             from llama_index.retrievers.bm25 import BM25Retriever
+
             retriever = BM25Retriever.from_defaults(
-                nodes=bm25_nodes,
-                similarity_top_k=config.RAG_TOP_K_PER_FILE,
-                language="russian"
+                nodes=bm25_nodes, similarity_top_k=config.RAG_TOP_K_PER_FILE, language="russian"
             )
             retriever.persist(bm25_dir)
-            print(f"[RAG] ✅ BM25 обновлён в фоне: {len(bm25_nodes)} узлов.")
+            logger.info(f"[RAG] ✅ BM25 обновлён в фоне: {len(bm25_nodes)} узлов.")
     except Exception as e:
         logger.warning(f"[RAG] Ошибка фоновой сборки BM25: {e}")
 
@@ -268,10 +325,10 @@ def _rebuild_bm25_bg(notebook_id: str, db_path: str):
 # _BM25_DEBOUNCE_SEC и сбрасывает таймер на каждом новом файле; main.py
 # вызывает flush_bm25_rebuild() в конце batch для немедленной пересборки.
 _BM25_DEBOUNCE_SEC = 30.0
-_bm25_pending_timers: dict = {}      # notebook_id -> threading.Timer
-_bm25_pending_dbpath: dict = {}      # notebook_id -> str (db_path для callback)
+_bm25_pending_timers: dict = {}  # notebook_id -> threading.Timer
+_bm25_pending_dbpath: dict = {}  # notebook_id -> str (db_path для callback)
 _bm25_pending_lock = threading.Lock()
-_bm25_rebuilding: set = set()        # notebook_id которые сейчас строят BM25
+_bm25_rebuilding: set = set()  # notebook_id которые сейчас строят BM25
 
 
 def _schedule_bm25_rebuild(notebook_id: str, db_path: str):
@@ -279,9 +336,12 @@ def _schedule_bm25_rebuild(notebook_id: str, db_path: str):
     with _bm25_pending_lock:
         old = _bm25_pending_timers.get(notebook_id)
         if old is not None:
-            try: old.cancel()
-            except Exception: pass
+            try:
+                old.cancel()
+            except Exception:
+                pass
         _bm25_pending_dbpath[notebook_id] = db_path
+
         def _fire():
             with _bm25_pending_lock:
                 _bm25_pending_timers.pop(notebook_id, None)
@@ -293,11 +353,14 @@ def _schedule_bm25_rebuild(notebook_id: str, db_path: str):
                 _rebuild_bm25_bg(notebook_id, path)
             finally:
                 _bm25_rebuilding.discard(notebook_id)
+
         t = threading.Timer(_BM25_DEBOUNCE_SEC, _fire)
         t.daemon = True
         _bm25_pending_timers[notebook_id] = t
         t.start()
-        print(f"[RAG] ⏱ BM25 rebuild запланирован через {_BM25_DEBOUNCE_SEC:.0f}с (можно сбросить через flush_bm25_rebuild)")
+        logger.info(
+            f"[RAG] ⏱ BM25 rebuild запланирован через {_BM25_DEBOUNCE_SEC:.0f}с (можно сбросить через flush_bm25_rebuild)"
+        )
 
 
 def cancel_bm25_rebuild(notebook_id: str):
@@ -312,12 +375,15 @@ def cancel_bm25_rebuild(notebook_id: str):
         timer = _bm25_pending_timers.pop(notebook_id, None)
         _bm25_pending_dbpath.pop(notebook_id, None)
         if timer is not None:
-            try: timer.cancel()
+            try:
+                timer.cancel()
             except Exception as e:
                 logger.debug(f"[cancel_bm25_rebuild] timer.cancel: {e}")
 
 
-def flush_bm25_rebuild(notebook_id: str, db_path: str = None, wait: bool = False, timeout: float = 120.0):
+def flush_bm25_rebuild(
+    notebook_id: str, db_path: str = None, wait: bool = False, timeout: float = 120.0
+):
     """Форсировать немедленную пересборку BM25. Используется в конце batch-upload.
 
     Args:
@@ -330,8 +396,10 @@ def flush_bm25_rebuild(notebook_id: str, db_path: str = None, wait: bool = False
     with _bm25_pending_lock:
         timer = _bm25_pending_timers.pop(notebook_id, None)
         if timer is not None:
-            try: timer.cancel()
-            except Exception: pass
+            try:
+                timer.cancel()
+            except Exception:
+                pass
         path = _bm25_pending_dbpath.pop(notebook_id, None)
         if path is None and db_path is not None:
             path = db_path
@@ -342,11 +410,13 @@ def flush_bm25_rebuild(notebook_id: str, db_path: str = None, wait: bool = False
         return
     if not wait:
         _bm25_rebuilding.add(notebook_id)
+
         def _bg():
             try:
                 _rebuild_bm25_bg(notebook_id, path)
             finally:
                 _bm25_rebuilding.discard(notebook_id)
+
         threading.Thread(target=_bg, daemon=True, name=f"bm25-flush-{notebook_id}").start()
         return
     # wait=True: синхронный rebuild в текущем потоке
@@ -366,6 +436,7 @@ def is_bm25_ready(notebook_id: str) -> bool:
         has_pending = notebook_id in _bm25_pending_timers
     is_rebuilding = notebook_id in _bm25_rebuilding
     return exists and not has_pending and not is_rebuilding
+
 
 def _rrf_fuse_across_files(file_results, k: int = 60):
     """F2: Merge RRF scores across files so big files don't dominate.
@@ -442,6 +513,7 @@ def build_index(nodes, notebook_id: str):
     _schedule_bm25_rebuild(notebook_id, db_path)
     return index
 
+
 def retrieve_nodes(query: str, notebook_id: str, allowed_files=None, max_tokens=1024):
     """
     Для каждого выбранного файла выполняем отдельный гибридный поиск топ-K чанков.
@@ -471,7 +543,9 @@ def retrieve_nodes(query: str, notebook_id: str, allowed_files=None, max_tokens=
         # не имеет гибридного преимущества. batch-upload сам вызывает flush_bm25_rebuild
         # в конце — там дублирующая сборка будет отменена.
         if not is_bm25_ready(notebook_id):
-            print("  [RAG] BM25 отсутствует — форсирую синхронную пересборку для первого запроса")
+            logger.info(
+                "  [RAG] BM25 отсутствует — форсирую синхронную пересборку для первого запроса"
+            )
             flush_bm25_rebuild(notebook_id, db_path=paths["chroma_db"], wait=True, timeout=180)
             if os.path.exists(os.path.join(bm25_dir, "bm25_retriever_params.json")):
                 try:
@@ -485,35 +559,36 @@ def retrieve_nodes(query: str, notebook_id: str, allowed_files=None, max_tokens=
     qe_llm = _get_qe_llm() if config.RAG_QUERY_EXPANSION else None
     if config.RAG_QUERY_EXPANSION:
         if qe_llm:
-            print("  [RAG] Query Expansion включён (num_queries=3)")
+            logger.info("  [RAG] Query Expansion включён (num_queries=3)")
         else:
-            print("  [RAG] Query Expansion отключён (нет доступного LLM-сервера)")
+            logger.info("  [RAG] Query Expansion отключён (нет доступного LLM-сервера)")
 
     # F2: Per-file RRF — каждый файл получает равный голос, независимо от размера.
     # Внутри файла — RRF (vector+BM25), между файлами — RRF поверх.
     # Один файл → используем один MetadataFilter (быстрее).
     if len(allowed_files) == 1:
         file_filter = MetadataFilters(
-            filters=[MetadataFilter(key="file_name", value=allowed_files[0], operator=FilterOperator.EQ)]
+            filters=[
+                MetadataFilter(key="file_name", value=allowed_files[0], operator=FilterOperator.EQ)
+            ]
         )
     else:
         file_filter = MetadataFilters(
-            filters=[MetadataFilter(key="file_name", value=allowed_files, operator=FilterOperator.IN)]
+            filters=[
+                MetadataFilter(key="file_name", value=allowed_files, operator=FilterOperator.IN)
+            ]
         )
 
     # Сколько кандидатов брать с каждого файла (используется и per-file, и как top_k для одиночного файла)
     top_k_per_file = config.RAG_TOP_K_PER_FILE
 
     # Один файл — старый быстрый путь (без per-file overhead)
-    vector_retriever = index.as_retriever(
-        similarity_top_k=top_k_per_file,
-        filters=file_filter
-    )
+    vector_retriever = index.as_retriever(similarity_top_k=top_k_per_file, filters=file_filter)
 
     num_q = 3 if qe_llm else 1
     qprompt = _QUERY_GEN_PROMPT if qe_llm else None
 
-    use_qe = (num_q > 1)  # Query Expansion активен (нужен LLM-сервер)
+    use_qe = num_q > 1  # Query Expansion активен (нужен LLM-сервер)
 
     try:
         if use_qe:
@@ -524,7 +599,9 @@ def retrieve_nodes(query: str, notebook_id: str, allowed_files=None, max_tokens=
             per_file_retrievers = []
             for fname in allowed_files:
                 ff = MetadataFilters(
-                    filters=[MetadataFilter(key="file_name", value=fname, operator=FilterOperator.EQ)]
+                    filters=[
+                        MetadataFilter(key="file_name", value=fname, operator=FilterOperator.EQ)
+                    ]
                 )
                 per_file_retrievers.append(
                     index.as_retriever(similarity_top_k=top_k_per_file, filters=ff)
@@ -545,6 +622,7 @@ def retrieve_nodes(query: str, notebook_id: str, allowed_files=None, max_tokens=
 
             # Внедряем custom_get_queries для надежной обработки thinking-моделей и очистки от разметки/нумерации
             if num_q > 1 and qe_llm:
+
                 def custom_get_queries(original_query: str):
                     try:
                         prompt_str = fusion_retriever.query_gen_prompt.format(
@@ -564,19 +642,21 @@ def retrieve_nodes(query: str, notebook_id: str, allowed_files=None, max_tokens=
                         lines = text.strip("`").split("\n")
                         queries = []
                         import re
+
                         for line in lines:
                             line = line.strip()
                             if not line:
                                 continue
-                            line = re.sub(r'^\d+[\.\)]\s*', '', line) # Убирает "1. ", "2) "
-                            line = re.sub(r'^[-\*\+]\s*', '', line)   # Убирает списка "- ", "* "
+                            line = re.sub(r"^\d+[\.\)]\s*", "", line)  # Убирает "1. ", "2) "
+                            line = re.sub(r"^[-\*\+]\s*", "", line)  # Убирает списка "- ", "* "
                             line = line.strip()
                             if line:
                                 queries.append(line)
 
                         # Возвращаем QueryBundle для сгенерированных запросов
                         from llama_index.core import QueryBundle
-                        return [QueryBundle(q) for q in queries[:fusion_retriever.num_queries - 1]]
+
+                        return [QueryBundle(q) for q in queries[: fusion_retriever.num_queries - 1]]
                     except Exception as qe_err:
                         logger.warning(f"Ошибка генерации запросов в custom_get_queries: {qe_err}")
                         return []
@@ -587,11 +667,13 @@ def retrieve_nodes(query: str, notebook_id: str, allowed_files=None, max_tokens=
             if num_q > 1 and qe_llm:
                 try:
                     generated_bundles = fusion_retriever._get_queries(query)
-                    print("  [RAG] 🧠 Сгенерированные поисковые запросы (Query Expansion):")
+                    logger.info("  [RAG] 🧠 Сгенерированные поисковые запросы (Query Expansion):")
                     for i, gq in enumerate(generated_bundles, 1):
-                        print(f"    {i}. {gq.query_str}")
+                        logger.info(f"    {i}. {gq.query_str}")
                 except Exception as qe_err:
-                    logger.warning(f"Не удалось получить сгенерированные запросы для лога: {qe_err}")
+                    logger.warning(
+                        f"Не удалось получить сгенерированные запросы для лога: {qe_err}"
+                    )
 
             all_nodes = fusion_retriever.retrieve(query)
             # Пост-фильтр: убеждаемся, что только разрешённые файлы (BM25 может вернуть чужие)
@@ -601,7 +683,9 @@ def retrieve_nodes(query: str, notebook_id: str, allowed_files=None, max_tokens=
                 label = f"Per-file Гибрид+QE({num_q})"
             else:
                 label = f"Per-file Вектор+QE({num_q})"
-            print(f"  [RAG] 🔍 {label} по {len(allowed_files)} файлам: {len(all_nodes)} фрагм.")
+            logger.info(
+                f"  [RAG] 🔍 {label} по {len(allowed_files)} файлам: {len(all_nodes)} фрагм."
+            )
         else:
             # F2: QE выключен → per-file RRF.
             # Для каждого файла: vector (top_k_per_file) + BM25 (top_k_per_file, post-filter) → RRF
@@ -610,12 +694,16 @@ def retrieve_nodes(query: str, notebook_id: str, allowed_files=None, max_tokens=
                 # 1 файл — простой путь, без per-file overhead
                 vec_results = vector_retriever.retrieve(query)
                 bm25_results = bm25_retriever.retrieve(query) if bm25_retriever else []
-                bm25_results = [n for n in bm25_results if n.node.metadata.get("file_name") == allowed_files[0]][:top_k_per_file]
+                bm25_results = [
+                    n for n in bm25_results if n.node.metadata.get("file_name") == allowed_files[0]
+                ][:top_k_per_file]
                 all_nodes = _rrf_fuse(vec_results, bm25_results)
                 if bm25_retriever:
-                    print(f"  [RAG] 🔍 Гибрид (RRF, vector+BM25) по 1 файлу: {len(all_nodes)} фрагм.")
+                    logger.info(
+                        f"  [RAG] 🔍 Гибрид (RRF, vector+BM25) по 1 файлу: {len(all_nodes)} фрагм."
+                    )
                 else:
-                    print(f"  [RAG] 🔍 Вектор по 1 файлу: {len(all_nodes)} фрагм.")
+                    logger.info(f"  [RAG] 🔍 Вектор по 1 файлу: {len(all_nodes)} фрагм.")
             else:
                 # F-fix #13: 1 IN-filter vector query вместо N per-file queries.
                 # N=5 файлов × 1 запрос = 5 ChromaDB round-trips. С IN-filter — 1 round-trip.
@@ -640,7 +728,9 @@ def retrieve_nodes(query: str, notebook_id: str, allowed_files=None, max_tokens=
                 file_results = []
                 for fname in allowed_files:
                     # BM25: берём общий результат, фильтруем по файлу, top_k_per_file
-                    bm = [n for n in bm25_all if n.node.metadata.get("file_name") == fname][:top_k_per_file]
+                    bm = [n for n in bm25_all if n.node.metadata.get("file_name") == fname][
+                        :top_k_per_file
+                    ]
                     # Vector: уже отфильтровано и capped выше
                     vec = [n for n in vec_results if n.node.metadata.get("file_name") == fname]
                     fused = _rrf_fuse(vec, bm)
@@ -648,27 +738,36 @@ def retrieve_nodes(query: str, notebook_id: str, allowed_files=None, max_tokens=
                 all_nodes = _rrf_fuse_across_files(file_results)
                 # Cap на RAG_RERANK_POOL, чтобы не раздувать reranker budget
                 if len(all_nodes) > config.RAG_RERANK_POOL:
-                    all_nodes = all_nodes[:config.RAG_RERANK_POOL]
+                    all_nodes = all_nodes[: config.RAG_RERANK_POOL]
                 if bm25_retriever:
-                    print(f"  [RAG] 🔍 Per-file Гибрид (RRF, vector+BM25) по {len(allowed_files)} файлам: {len(all_nodes)} фрагм.")
+                    logger.info(
+                        f"  [RAG] 🔍 Per-file Гибрид (RRF, vector+BM25) по {len(allowed_files)} файлам: {len(all_nodes)} фрагм."
+                    )
                 else:
-                    print(f"  [RAG] 🔍 Per-file Вектор по {len(allowed_files)} файлам: {len(all_nodes)} фрагм.")
+                    logger.info(
+                        f"  [RAG] 🔍 Per-file Вектор по {len(allowed_files)} файлам: {len(all_nodes)} фрагм."
+                    )
     except Exception as e:
-        print(f"Ошибка унифицированного поиска: {e}")
+        logger.info(f"Ошибка унифицированного поиска: {e}")
         all_nodes = []
 
     # Переранжирование (Reranking)
     if all_nodes and config.USE_RERANKER:
         # Ограничиваем общее число чанков для реранкера, чтобы избежать OOM
         if len(all_nodes) > config.RAG_RERANK_POOL:
-            all_nodes.sort(key=lambda x: x.score if hasattr(x, 'score') and x.score else 0, reverse=True)
-            all_nodes = all_nodes[:config.RAG_RERANK_POOL]
+            all_nodes.sort(
+                key=lambda x: x.score if hasattr(x, "score") and x.score else 0, reverse=True
+            )
+            all_nodes = all_nodes[: config.RAG_RERANK_POOL]
 
-        print(f"  [RAG] Чанков для реранкинга: {len(all_nodes)}")
+        logger.info(f"  [RAG] Чанков для реранкинга: {len(all_nodes)}")
 
         reranker_name = config.RERANKER_MODEL_NAME
 
-        if not (reranker_name.lower().endswith('.gguf') or (os.path.isabs(reranker_name) and os.path.exists(reranker_name))):
+        if not (
+            reranker_name.lower().endswith(".gguf")
+            or (os.path.isabs(reranker_name) and os.path.exists(reranker_name))
+        ):
             raise RuntimeError(
                 "Поддерживаются только GGUF-модели реранкера. "
                 "Укажите путь к .gguf файлу в config.RERANKER_MODEL_NAME.\n"
@@ -676,32 +775,45 @@ def retrieve_nodes(query: str, notebook_id: str, allowed_files=None, max_tokens=
             )
 
         if "reranker" not in _model_cache:
-            print(f"  [RAG] Загрузка GGUF реранкера: {reranker_name}")
+            logger.info(f"  [RAG] Загрузка GGUF реранкера: {reranker_name}")
             from src.gguf_direct import get_gguf_embedding_url
+
             model_path = config.resolve_model_path(reranker_name)
             url = get_gguf_embedding_url(model_path, is_reranker=True)
             _model_cache["reranker"] = url
 
         url = _model_cache["reranker"]
+
         def _rerank_doc(nws):
             meta = nws.node.metadata or {}
             coord_parts = []
-            if meta.get("file_name"): coord_parts.append(str(meta["file_name"]))
-            if meta.get("page") not in (None, ""): coord_parts.append(f"стр.{meta['page']}")
-            elif meta.get("time") not in (None, ""): coord_parts.append(f"@{meta['time']}")
-            elif meta.get("start") not in (None, ""): coord_parts.append(f"@{meta['start']}")
+            if meta.get("file_name"):
+                coord_parts.append(str(meta["file_name"]))
+            if meta.get("page") not in (None, ""):
+                coord_parts.append(f"стр.{meta['page']}")
+            elif meta.get("time") not in (None, ""):
+                coord_parts.append(f"@{meta['time']}")
+            elif meta.get("start") not in (None, ""):
+                coord_parts.append(f"@{meta['start']}")
             prefix = f"[{' '.join(coord_parts)}] " if coord_parts else ""
             return prefix + nws.node.get_content()
+
         documents = [_rerank_doc(n) for n in all_nodes]
 
         try:
             import time as _time
+
             _rerank_start = _time.time()
             scores = [0.0] * len(all_nodes)
             success = True
             resp = _rerank_session.post(
                 f"{url}/v1/rerank",
-                json={"model": "gguf-reranker", "query": query, "documents": documents, "top_n": len(documents)},
+                json={
+                    "model": "gguf-reranker",
+                    "query": query,
+                    "documents": documents,
+                    "top_n": len(documents),
+                },
                 timeout=120,
             )
             resp.raise_for_status()
@@ -715,17 +827,19 @@ def retrieve_nodes(query: str, notebook_id: str, allowed_files=None, max_tokens=
 
             elapsed_r = _time.time() - _rerank_start
             if success:
-                print(f"  [RAG] ✅ Реранкинг: {len(documents)} doc за {elapsed_r:.2f}с")
+                logger.info(f"  [RAG] ✅ Реранкинг: {len(documents)} doc за {elapsed_r:.2f}с")
 
         except Exception as e:
             err_body = ""
-            if hasattr(e, 'response') and e.response is not None:
+            if hasattr(e, "response") and e.response is not None:
                 err_body = f" body={e.response.text[:300]}"
-            print(f"[RAG] Ошибка GGUF реранкера: {e}{err_body}")
+            logger.info(f"[RAG] Ошибка GGUF реранкера: {e}{err_body}")
             scores = [0] * len(all_nodes)
 
         if scores and max(scores) < 1e-6:
-            print(f"  [RAG] ⚠️ GGUF реранкер выдал слишком низкие оценки (max: {max(scores)}). Используется оригинальный порядок поиска.")
+            logger.warning(
+                f"  [RAG] ⚠️ GGUF реранкер выдал слишком низкие оценки (max: {max(scores)}). Используется оригинальный порядок поиска."
+            )
             scores = [1.0 - (i * 0.01) for i in range(len(all_nodes))]
 
         # Присваиваем скоры и сортируем
@@ -733,7 +847,7 @@ def retrieve_nodes(query: str, notebook_id: str, allowed_files=None, max_tokens=
             node.score = float(score)
 
         all_nodes.sort(key=lambda x: x.score, reverse=True)
-        all_nodes = all_nodes[:config.RAG_FINAL_TOP_N]
+        all_nodes = all_nodes[: config.RAG_FINAL_TOP_N]
 
         # F6: Adaptive threshold через MAD (median absolute deviation).
         # Qwen3-Reranker выдаёт логиты в широком диапазоне, абсолютный порог 0.05
@@ -741,6 +855,7 @@ def retrieve_nodes(query: str, notebook_id: str, allowed_files=None, max_tokens=
         # для точных "формула 4.12" средний ~0.2. MAD-based порог адаптируется к
         # распределению скоров в конкретном query.
         import statistics as _stats
+
         if len(all_nodes) >= 4:
             score_vals = [n.score for n in all_nodes]
             median = _stats.median(score_vals)
@@ -756,12 +871,16 @@ def retrieve_nodes(query: str, notebook_id: str, allowed_files=None, max_tokens=
 
         if len(above_threshold) >= min_chunks:
             if len(above_threshold) < len(all_nodes):
-                print(f"  [RAG] 🎯 Адаптивный порог {adaptive_thr:.3f} (median-MAD): убрано {len(all_nodes) - len(above_threshold)} чанков")
+                logger.info(
+                    f"  [RAG] 🎯 Адаптивный порог {adaptive_thr:.3f} (median-MAD): убрано {len(all_nodes) - len(above_threshold)} чанков"
+                )
             all_nodes = above_threshold
         else:
             # Оказалось слишком мало хороших чанков — добираем до минимума из лучших ниже порога
             all_nodes = all_nodes[:min_chunks]
-            print(f"  [RAG] ⚠️ Адаптивный порог {adaptive_thr:.3f} оставил <{min_chunks} чанков. Добавлено до {min_chunks} лучших (мин. score: {all_nodes[-1].score:.3f})")
+            logger.warning(
+                f"  [RAG] ⚠️ Адаптивный порог {adaptive_thr:.3f} оставил <{min_chunks} чанков. Добавлено до {min_chunks} лучших (мин. score: {all_nodes[-1].score:.3f})"
+            )
 
         # F6+: Top-K relevance ratio. F6 median-MAD отлично работает на бимодальных
         # распределениях (cluster высоких + cluster низких), но плохо — когда median
@@ -774,12 +893,15 @@ def retrieve_nodes(query: str, notebook_id: str, allowed_files=None, max_tokens=
             ratio_thr = top_score * config.RAG_TOP_K_RATIO
             above_ratio = [n for n in all_nodes if n.score >= ratio_thr]
             if len(above_ratio) >= min_chunks and len(above_ratio) < len(all_nodes):
-                print(f"  [RAG] 🎯 Top-K ratio {config.RAG_TOP_K_RATIO:.2f} (порог {ratio_thr:.3f} = {top_score:.3f}*{config.RAG_TOP_K_RATIO:.2f}): убрано {len(all_nodes) - len(above_ratio)} чанков")
+                logger.info(
+                    f"  [RAG] 🎯 Top-K ratio {config.RAG_TOP_K_RATIO:.2f} (порог {ratio_thr:.3f} = {top_score:.3f}*{config.RAG_TOP_K_RATIO:.2f}): убрано {len(all_nodes) - len(above_ratio)} чанков"
+                )
                 all_nodes = above_ratio
 
-        print(f"  [RAG] Итого после реранкинга: {len(all_nodes)} чанков")
+        logger.info(f"  [RAG] Итого после реранкинга: {len(all_nodes)} чанков")
 
     return all_nodes
+
 
 def build_file_context(nodes, notebook_id: str):
     """
@@ -796,24 +918,34 @@ def build_file_context(nodes, notebook_id: str):
         img_path = meta.get("image_path", None)
         img_url = (
             f"/files/{notebook_id}/images/" + os.path.basename(img_path)
-            if img_path and os.path.exists(img_path) else None
+            if img_path and os.path.exists(img_path)
+            else None
         )
         text = node.node.get_content()
 
-        sources.append({
-            "id": i,
-            "file_name": fname,
-            "text": text,
-            "image_url": img_url,
-            "page": meta.get("page"),
-            "time": meta.get("start") or meta.get("time")
-        })
+        sources.append(
+            {
+                "id": i,
+                "file_name": fname,
+                "text": text,
+                "image_url": img_url,
+                "page": meta.get("page"),
+                "time": meta.get("start") or meta.get("time"),
+            }
+        )
         context_parts.append(f"[{i}] Файл «{fname}»:\n{text}")
 
     context_str = "\n\n" + ("=" * 40 + "\n\n").join(context_parts)
     return sources, context_str
 
-def make_prompt(query: str, context_str: str, thinking_mode: bool = False, max_tokens: int = 1024, answer_mode: str = None) -> str:
+
+def make_prompt(
+    query: str,
+    context_str: str,
+    thinking_mode: bool = False,
+    max_tokens: int = 1024,
+    answer_mode: str = None,
+) -> str:
     return (
         config.get_system_prompt(answer_mode) + "\n"
         "ОТВЕЧАЙ СТРОГО С ИСПОЛЬЗОВАНИЕМ [N] ДЛЯ ССЫЛОК.\n\n"

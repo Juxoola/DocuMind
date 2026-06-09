@@ -1,23 +1,24 @@
 """
 Роутер: управление GGUF-моделями, VRAM, предзагрузка LLM.
 """
-import os
+
+import asyncio
 import json
-import subprocess
 import logging
-from typing import Optional
+import os
+import subprocess
+
 from fastapi import APIRouter
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-import asyncio
-
-import config
-from .shared import _http_session
 
 from src.gguf_direct import (
-    get_gguf_llm, preload_gguf_llm, get_llm_status,
-    unload_all_models, kill_stray_servers, count_running_servers,
+    count_running_servers,
+    get_llm_status,
     get_loaded_models,
+    kill_stray_servers,
+    preload_gguf_llm,
+    unload_all_models,
 )
 from src.gguf_manager import scan_gguf_dirs
 
@@ -27,6 +28,7 @@ router = APIRouter(tags=["gguf"])
 
 # ── Список моделей ──
 
+
 @router.get("/api/gguf-models")
 async def api_scan_gguf_models():
     try:
@@ -34,6 +36,7 @@ async def api_scan_gguf_models():
         return {"models": models}
     except Exception as e:
         from fastapi import HTTPException
+
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -49,7 +52,28 @@ async def api_gguf_status():
     return {"running_count": count}
 
 
+def _get_gguf_servers_info() -> list:
+    """Возвращает информацию о запущенных GGUF-серверах из внутреннего реестра."""
+    servers = []
+    try:
+        from src.gguf_direct import _server_ports, _server_processes, _server_roles
+
+        for path, proc in _server_processes.items():
+            servers.append(
+                {
+                    "model": os.path.basename(path),
+                    "role": _server_roles.get(path, "?"),
+                    "port": _server_ports.get(path),
+                    "alive": proc.poll() is None,
+                }
+            )
+    except Exception:
+        pass
+    return servers
+
+
 # ── Управление ──
+
 
 @router.post("/api/gguf-unload")
 async def api_gguf_unload_all():
@@ -66,17 +90,41 @@ async def api_gguf_kill_all():
 
 # ── VRAM ──
 
+
 @router.get("/api/vram")
 async def api_vram():
+    import shutil
+
+    # Проверка наличия nvidia-smi (может отсутствовать на Windows без CUDA)
+    if not shutil.which("nvidia-smi"):
+        return {
+            "gpu": {
+                "name": "n/a",
+                "used_mib": 0,
+                "free_mib": 0,
+                "total_mib": 0,
+                "used_gb": 0,
+                "free_gb": 0,
+                "total_gb": 0,
+                "utilization_pct": 0,
+            },
+            "per_process": [],
+            "gguf_servers": _get_gguf_servers_info(),
+        }
     used_mib = 0
     total_mib = 0
     free_mib = 0
     gpu_name = "unknown"
     try:
         out = subprocess.run(
-            ["nvidia-smi", "--query-gpu=name,memory.used,memory.free,memory.total",
-             "--format=csv,noheader,nounits"],
-            capture_output=True, text=True, timeout=3,
+            [
+                "nvidia-smi",
+                "--query-gpu=name,memory.used,memory.free,memory.total",
+                "--format=csv,noheader,nounits",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=3,
         )
         if out.returncode == 0 and out.stdout.strip():
             parts = [p.strip() for p in out.stdout.strip().split(",")]
@@ -90,60 +138,60 @@ async def api_vram():
     per_process = []
     try:
         out = subprocess.run(
-            ["nvidia-smi", "--query-compute-apps=pid,process_name,used_memory",
-             "--format=csv,noheader,nounits"],
-            capture_output=True, text=True, timeout=3,
+            [
+                "nvidia-smi",
+                "--query-compute-apps=pid,process_name,used_memory",
+                "--format=csv,noheader,nounits",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=3,
         )
         if out.returncode == 0:
             for line in out.stdout.strip().splitlines():
                 parts = [p.strip() for p in line.split(",")]
                 if len(parts) >= 3:
                     try:
-                        per_process.append({"pid": int(parts[0]), "name": parts[1], "vram_mib": int(parts[2])})
+                        per_process.append(
+                            {"pid": int(parts[0]), "name": parts[1], "vram_mib": int(parts[2])}
+                        )
                     except (ValueError, IndexError):
                         continue
     except Exception:
         pass
-    known_servers = []
-    try:
-        from src.gguf_direct import _server_processes, _server_ports, _server_roles
-        for path, proc in _server_processes.items():
-            known_servers.append({
-                "model": os.path.basename(path),
-                "role": _server_roles.get(path, "?"),
-                "port": _server_ports.get(path),
-                "alive": proc.poll() is None,
-            })
-    except Exception:
-        pass
     return {
         "gpu": {
-            "name": gpu_name, "used_mib": used_mib, "free_mib": free_mib, "total_mib": total_mib,
-            "used_gb": round(used_mib / 1024, 2), "free_gb": round(free_mib / 1024, 2),
+            "name": gpu_name,
+            "used_mib": used_mib,
+            "free_mib": free_mib,
+            "total_mib": total_mib,
+            "used_gb": round(used_mib / 1024, 2),
+            "free_gb": round(free_mib / 1024, 2),
             "total_gb": round(total_mib / 1024, 2),
             "utilization_pct": round(used_mib / max(total_mib, 1) * 100, 1),
         },
         "per_process": per_process,
-        "gguf_servers": known_servers,
+        "gguf_servers": _get_gguf_servers_info(),
     }
 
 
 # ── Preload LLM ──
 
+
 class PreloadLlmRequest(BaseModel):
     gguf_model_path: str
-    gguf_mmproj_path: Optional[str] = None
-    gguf_ctx_size: Optional[int] = None
-    gguf_gpu_layers: Optional[int] = None
-    gguf_threads: Optional[int] = None
-    gguf_batch_size: Optional[int] = None
-    gguf_ubatch_size: Optional[int] = None
-    gguf_flash_attn: Optional[str] = "true"
-    max_tokens: Optional[int] = None
-    gguf_kv_quant: Optional[int] = 2
-    thinking_mode: Optional[bool] = True
-    thinking_budget: Optional[int] = 1024
-    mtp_enabled: Optional[bool] = False
+    gguf_mmproj_path: str | None = None
+    gguf_ctx_size: int | None = None
+    gguf_gpu_layers: int | None = None
+    gguf_threads: int | None = None
+    gguf_batch_size: int | None = None
+    gguf_ubatch_size: int | None = None
+    gguf_flash_attn: str | None = "true"
+    max_tokens: int | None = None
+    gguf_kv_quant: int | None = 2
+    thinking_mode: bool | None = True
+    thinking_budget: int | None = 1024
+    mtp_enabled: bool | None = False
 
 
 @router.post("/api/preload-llm")
@@ -193,4 +241,5 @@ async def api_llm_status_stream():
                 await asyncio.sleep(0.5)
         except asyncio.CancelledError:
             pass
+
     return StreamingResponse(event_gen(), media_type="text/event-stream")

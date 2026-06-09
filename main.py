@@ -2,23 +2,40 @@
 NotebookLM Local Clone — основной модуль.
 
 Запуск: python main.py
-
-После рефакторинга (v2) — только создание приложения,
-lifespan, middleware и подключение роутеров.
 """
-import os
-import sys
-import logging
+
 import atexit
+import logging
+import os
+import signal
+import sys
 import threading
 from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
-from fastapi.middleware.cors import CORSMiddleware
 
 import config
-from routers.shared import _background_tasks
+
+# ── Настройка логирования ──
+_LOG_DIR = os.path.join(config.BASE_DIR, "logs")
+os.makedirs(_LOG_DIR, exist_ok=True)
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    datefmt="%H:%M:%S",
+    handlers=[
+        logging.FileHandler(os.path.join(_LOG_DIR, "server.log"), encoding="utf-8"),
+        logging.StreamHandler(sys.stdout),
+    ],
+)
+# Убираем шум от библиотек
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("chromadb").setLevel(logging.WARNING)
+logging.getLogger("llama_index").setLevel(logging.WARNING)
 
 logger = logging.getLogger(__name__)
 
@@ -30,20 +47,25 @@ _lifespan_cleanup_done = False
 async def lifespan(app: FastAPI):
     global _lifespan_cleanup_done
 
+    logger.info("Запуск сервера...")
+
     # Cleanup остатков .pending_delete_* от прошлой сессии
     try:
         import glob
+
         for pending in glob.glob(os.path.join(config.NOTEBOOKS_DIR, "*.pending_delete_*")):
-            print(f"[STARTUP] Удаляю отложенную папку: {pending}")
+            logger.info(f"Удаляю отложенную папку: {pending}")
             from routers.shared import robust_rmtree
+
             success, err = robust_rmtree(pending)
             if not success:
-                print(f"[STARTUP] Не удалось удалить {pending}: {err}")
+                logger.warning(f"Не удалось удалить {pending}: {err}")
     except Exception as e:
-        print(f"[STARTUP] Ошибка cleanup pending_delete: {e}")
+        logger.warning(f"Ошибка cleanup pending_delete: {e}")
 
     # Миграция старых данных
     from routers.notebooks import migrate_old_data
+
     migrate_old_data()
 
     # Фоновая предзагрузка моделей
@@ -53,8 +75,9 @@ async def lifespan(app: FastAPI):
 
     if not _lifespan_cleanup_done:
         _lifespan_cleanup_done = True
-        print("[SERVER] Остановка системы...")
-        from src.gguf_direct import unload_all_models, kill_stray_servers
+        logger.info("Остановка системы...")
+        from src.gguf_direct import kill_stray_servers, unload_all_models
+
         unload_all_models()
         kill_stray_servers()
 
@@ -63,18 +86,43 @@ def preload_all_models():
     """Предзагрузка эмбеддингов и реранкера в фоне."""
     try:
         from src.rag_pipeline import preload_all_models as _preload
+
         _preload()
     except Exception as e:
-        print(f"[STARTUP] Предзагрузка моделей не удалась: {e}")
+        logger.warning(f"Предзагрузка моделей не удалась: {e}")
 
+
+# ── Graceful shutdown (Windows) ──
+def _graceful_shutdown(signum=None, frame=None):
+    """Обработчик сигналов: выгружает модели перед выходом."""
+    logger.info(f"Получен сигнал {signum}, завершение работы...")
+    try:
+        from src.gguf_direct import kill_stray_servers, unload_all_models
+
+        unload_all_models()
+        kill_stray_servers()
+        logger.info("Модели выгружены.")
+    except Exception as e:
+        logger.error(f"Ошибка при выгрузке моделей: {e}")
+    sys.exit(0)
+
+
+# Регистрируем обработчики сигналов (SIGTERM, SIGINT)
+try:
+    signal.signal(signal.SIGTERM, _graceful_shutdown)
+    signal.signal(signal.SIGINT, _graceful_shutdown)
+except Exception as e:
+    logger.debug(f"Не удалось зарегистрировать signal handlers (не Windows?): {e}")
 
 # atexit — гарантированная очистка на Windows
-from src.gguf_direct import unload_all_models, kill_stray_servers
+from src.gguf_direct import kill_stray_servers, unload_all_models
+
 atexit.register(unload_all_models)
 atexit.register(kill_stray_servers)
 
 # ── Создаём приложение ──
 app = FastAPI(title="NotebookLM Local Clone", lifespan=lifespan)
+
 
 # ── Middleware: лимит загрузки ──
 @app.middleware("http")
@@ -87,8 +135,7 @@ async def enforce_upload_size(request, call_next):
                 status_code=413,
                 content={
                     "detail": (
-                        f"Файл слишком большой: {mb:.1f} МБ. "
-                        f"Лимит: {config.UPLOAD_MAX_SIZE_MB} МБ."
+                        f"Файл слишком большой: {mb:.1f} МБ. Лимит: {config.UPLOAD_MAX_SIZE_MB} МБ."
                     )
                 },
             )
@@ -110,11 +157,11 @@ app.mount("/static", StaticFiles(directory=os.path.join(config.BASE_DIR, "static
 app.mount("/files", StaticFiles(directory=config.NOTEBOOKS_DIR), name="notebooks")
 
 # ── Роутеры ──
-from routers.notebooks import router as notebooks_router
-from routers.files import router as files_router
-from routers.chat import router as chat_router
-from routers.gguf import router as gguf_router
 from routers.bookmarks import router as bookmarks_router
+from routers.chat import router as chat_router
+from routers.files import router as files_router
+from routers.gguf import router as gguf_router
+from routers.notebooks import router as notebooks_router
 from routers.settings import router as settings_router
 
 app.include_router(notebooks_router)
@@ -127,6 +174,8 @@ app.include_router(settings_router)
 # ── Точка входа ──
 if __name__ == "__main__":
     import uvicorn
+
+    logger.info(f"Сервер запускается на {config.HOST}:{config.PORT}")
     uvicorn.run(
         "main:app",
         host=config.HOST,

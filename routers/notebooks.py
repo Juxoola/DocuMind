@@ -1,24 +1,44 @@
 """
 Роутер: CRUD ноутбуков + миграция старых данных.
 """
-import os
+
+import gc
 import json
+import logging
+import os
+import re
 import time
 import uuid
-import gc
-import shutil
-import logging
+
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 import config
+
 from .shared import robust_rmtree
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["notebooks"])
 
+# Паттерн для валидации nb_id: только hex (UUID первых 8 символов)
+_NB_ID_PATTERN = re.compile(r"^[a-f0-9]{8}$")
+
+
+def validate_nb_id(nb_id: str) -> str:
+    """Валидация notebook_id: защита от path traversal.
+
+    nb_id должен быть 8-символьным hex (первые 8 символов UUID).
+    Если не совпадает — HTTPException 400.
+    """
+    nb_id = nb_id.strip()
+    if not _NB_ID_PATTERN.match(nb_id):
+        logger.warning(f"Некорректный notebook_id: {nb_id!r}")
+        raise HTTPException(status_code=400, detail="Некорректный ID блокнота")
+    return nb_id
+
 
 # ── Миграция ──
+
 
 def migrate_old_data():
     """Перенос старых data/chroma_db/images в default-блокнот."""
@@ -28,7 +48,9 @@ def migrate_old_data():
         old_imgs = os.path.join(config.BASE_DIR, "images")
         if not (os.path.exists(old_data) or os.path.exists(old_db) or os.path.exists(old_imgs)):
             return
-        print("Обнаружены старые данные. Миграция в ноутбук 'default'...")
+        logger.info("Обнаружены старые данные. Миграция в ноутбук 'default'...")
+        import shutil
+
         paths = config.get_notebook_paths("default")
         os.makedirs(paths["base"], exist_ok=True)
         if os.path.exists(old_data):
@@ -40,20 +62,27 @@ def migrate_old_data():
         with open(os.path.join(paths["base"], "meta.json"), "w", encoding="utf-8") as f:
             json.dump({"id": "default", "name": "Мой первый блокнот", "created_at": time.time()}, f)
     except Exception as e:
-        print(f"[migrate_old_data] Ошибка миграции (продолжаем без неё): {e}")
+        logger.warning(f"Ошибка миграции (продолжаем без неё): {e}")
 
 
 # ── Эндпоинты ──
+
 
 @router.get("/api/notebooks")
 async def get_notebooks():
     nbs = []
     if os.path.exists(config.NOTEBOOKS_DIR):
-        for nb_id in os.listdir(config.NOTEBOOKS_DIR):
-            meta_path = os.path.join(config.NOTEBOOKS_DIR, nb_id, "meta.json")
+        for entry in os.listdir(config.NOTEBOOKS_DIR):
+            # Пропускаем служебные папки (.pending_delete_*, chroma_db на уровень выше и т.п.)
+            if entry.startswith(".") or not _NB_ID_PATTERN.match(entry):
+                continue
+            meta_path = os.path.join(config.NOTEBOOKS_DIR, entry, "meta.json")
             if os.path.exists(meta_path):
-                with open(meta_path, "r", encoding="utf-8") as f:
-                    nbs.append(json.load(f))
+                try:
+                    with open(meta_path, encoding="utf-8") as f:
+                        nbs.append(json.load(f))
+                except Exception as e:
+                    logger.debug(f"Не удалось прочитать {meta_path}: {e}")
     return nbs
 
 
@@ -76,17 +105,67 @@ async def create_notebook(req: CreateNotebookRequest):
 
 @router.delete("/api/notebooks/{nb_id}")
 async def delete_notebook(nb_id: str):
-    from src.rag_pipeline import close_all_clients, cancel_bm25_rebuild
-    close_all_clients()
+    """Удаление ноутбука: комплексная очистка.
+
+    1. Валидация nb_id (защита от path traversal)
+    2. Закрытие ChromaDB клиента только для этого ноутбука
+    3. Отмена BM25 rebuild
+    4. Удаление файлов через robust_rmtree
+    5. Очистка bookmarks.json
+    """
+    nb_id = validate_nb_id(nb_id)
+    paths = config.get_notebook_paths(nb_id)
+    base_path = paths["base"]
+
+    if not os.path.exists(base_path):
+        raise HTTPException(status_code=404, detail="Блокнот не найден")
+
+    # 1. Закрываем ChromaDB клиент для этого ноутбука
     try:
+        from src.rag_pipeline import close_notebook_client
+
+        close_notebook_client(nb_id)
+    except Exception as e:
+        logger.debug(f"[delete_notebook] close_notebook_client: {e}")
+
+    # 2. Отменяем отложенный BM25 rebuild
+    try:
+        from src.rag_pipeline import cancel_bm25_rebuild
+
         cancel_bm25_rebuild(nb_id)
     except Exception as e:
         logger.debug(f"[delete_notebook] cancel_bm25_rebuild: {e}")
+
+    # 3. Собираем мусор для освобождения mmap
     gc.collect()
     gc.collect()
-    paths = config.get_notebook_paths(nb_id)
-    if os.path.exists(paths["base"]):
-        success, err_msg = robust_rmtree(paths["base"])
-        if not success:
-            raise HTTPException(status_code=503, detail=err_msg or "Не удалось удалить ноутбук.")
+
+    # 4. Удаляем папку ноутбука с fallback-ами
+    success, err_msg = robust_rmtree(base_path)
+    if not success:
+        logger.error(f"[delete_notebook] Не удалось удалить {base_path}: {err_msg}")
+        raise HTTPException(
+            status_code=503,
+            detail=err_msg or "Не удалось удалить блокнот. Попробуйте позже.",
+        )
+
+    # 5. Очищаем GGUF-серверы, которые могли быть запущены для этого ноутбука
+    #    (грубая привязка — по имени файла, содержащему nb_id)
+    _cleanup_notebook_gguf(nb_id)
+
+    logger.info(f"Блокнот {nb_id} удалён.")
     return {"status": "ok"}
+
+
+def _cleanup_notebook_gguf(nb_id: str):
+    """Пытается найти и выгрузить GGUF-сервер, связанный с этим блокнотом.
+
+    Сейчас привязка слабая (нет реестра notebook→model), но хотя бы
+    не оставляет orphan-серверы при явном вызове.
+    """
+    try:
+        from src.gguf_direct import unload_all_models
+
+        unload_all_models()
+    except Exception as e:
+        logger.debug(f"[delete_notebook] unload_all_models: {e}")

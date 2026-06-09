@@ -8,6 +8,7 @@
 - test_gguf_direct.py — detect_model_family, CACHE_TYPE_MAP (чистые функции).
 - test_main.py — FastAPI TestClient (монтируем только нужные эндпоинты).
 """
+
 import os
 import shutil
 import sys
@@ -28,6 +29,7 @@ def temp_notebooks_dir(monkeypatch):
     """
     tmp = tempfile.mkdtemp(prefix="nb_test_")
     import config as cfg
+
     monkeypatch.setattr(cfg, "NOTEBOOKS_DIR", tmp)
     monkeypatch.setattr(cfg, "BASE_DIR", PROJECT_ROOT)
     # Создаём поддиректории
@@ -45,5 +47,9 @@ def sanitize_env(monkeypatch):
     monkeypatch.setenv("UPLOAD_MAX_SIZE_MB", "500")
     # Перенаправляем rag_config.json во временную папку (тесты не загрязняют прод)
     import config as cfg
-    monkeypatch.setattr(cfg, "RAG_CONFIG_FILE",
-                        os.path.join(tempfile.gettempdir(), f"rag_config_test_{os.getpid()}.json"))
+
+    monkeypatch.setattr(
+        cfg,
+        "RAG_CONFIG_FILE",
+        os.path.join(tempfile.gettempdir(), f"rag_config_test_{os.getpid()}.json"),
+    )

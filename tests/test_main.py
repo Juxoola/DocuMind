@@ -15,7 +15,6 @@ from fastapi.testclient import TestClient
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 
-
 @pytest.fixture(scope="module")
 def client():
     """
@@ -101,6 +100,7 @@ def client():
     with patch.dict(sys.modules, mocks, clear=False):
         # Теперь импортируем main — все его зависимости уже замоканы
         import main as app_module
+
         app = app_module.app
         client = TestClient(app)
         yield client
@@ -154,14 +154,17 @@ class TestConfigEndpoints:
         assert "use_reranker" in data
 
     def test_update_rag_config(self, client):
-        resp = client.post("/api/update-rag-config", json={
-            "embedding_model": "test.gguf",
-            "reranker_model": "test-reranker.gguf",
-            "top_k_per_file": 10,
-            "rerank_pool": 30,
-            "final_top_n": 15,
-            "use_reranker": True,
-        })
+        resp = client.post(
+            "/api/update-rag-config",
+            json={
+                "embedding_model": "test.gguf",
+                "reranker_model": "test-reranker.gguf",
+                "top_k_per_file": 10,
+                "rerank_pool": 30,
+                "final_top_n": 15,
+                "use_reranker": True,
+            },
+        )
         assert resp.status_code == 200
 
 
@@ -220,11 +223,14 @@ class TestBookmarkEndpoints:
         assert resp.json() == {"bookmarks": []}
 
     def test_create_bookmark(self, client):
-        resp = client.post("/api/bookmarks", json={
-            "notebook_id": "test",
-            "question": "What is RAG?",
-            "answer": "Retrieval Augmented Generation",
-        })
+        resp = client.post(
+            "/api/bookmarks",
+            json={
+                "notebook_id": "test",
+                "question": "What is RAG?",
+                "answer": "Retrieval Augmented Generation",
+            },
+        )
         assert resp.status_code == 200
         assert "id" in resp.json()
 
@@ -233,12 +239,15 @@ class TestChatEndpoint:
     """Чат — базовая валидация."""
 
     def test_chat_no_files(self, client):
-        resp = client.post("/api/chat", json={
-            "query": "test",
-            "allowed_files": [],
-            "notebook_id": "test",
-            "max_tokens": 256,
-        })
+        resp = client.post(
+            "/api/chat",
+            json={
+                "query": "test",
+                "allowed_files": [],
+                "notebook_id": "test",
+                "max_tokens": 256,
+            },
+        )
         assert resp.status_code == 200
         assert resp.headers.get("content-type", "").startswith("text/event-stream")
         assert "[DONE]" in resp.text

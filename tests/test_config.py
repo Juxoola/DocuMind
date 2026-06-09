@@ -84,16 +84,19 @@ class TestGetSystemPrompt:
         """SYSTEM_PROMPT (обратная совместимость) == concise."""
         assert config.SYSTEM_PROMPT == config.get_system_prompt("concise")
 
-    @pytest.mark.parametrize("mode,keyword", [
-        ("concise", "СРАЗУ"),
-        ("detailed", "развёрнутый"),
-        ("summary", "сжатый"),
-        ("step_by_step", "пошаговую"),
-        ("checklist", "чек-лист"),
-        ("moderate", "средней длины"),
-        ("expert", "специалиста"),
-        ("eli5", "просто"),
-    ])
+    @pytest.mark.parametrize(
+        "mode,keyword",
+        [
+            ("concise", "СРАЗУ"),
+            ("detailed", "развёрнутый"),
+            ("summary", "сжатый"),
+            ("step_by_step", "пошаговую"),
+            ("checklist", "чек-лист"),
+            ("moderate", "средней длины"),
+            ("expert", "специалиста"),
+            ("eli5", "просто"),
+        ],
+    )
     def test_each_mode_has_distinct_keyword(self, mode, keyword):
         """Каждый режим содержит свои уникальные инструкции."""
         prompt = config.get_system_prompt(mode)

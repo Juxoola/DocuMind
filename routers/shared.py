@@ -9,20 +9,22 @@
 - Background tasks reference
 - safe_filename, robust_rmtree, _schedule_delete_on_reboot
 """
-import os
-import sys
-import stat
-import gc
-import shutil
-import time
-import logging
-import subprocess
-import ctypes
-from ctypes import wintypes
+
 import asyncio
+import ctypes
+import gc
+import logging
+import os
+import shutil
+import stat
+import subprocess
+import sys
+import time
+from ctypes import wintypes
 
 import requests
 import requests.adapters
+
 import config
 
 logger = logging.getLogger(__name__)
@@ -46,7 +48,6 @@ _http_session.mount(
 
 # ── Статус ингеста ──
 # F-fix #25: ключ — уникальный task_id (UUID), а не notebook_id
-import uuid as _uuid
 
 ingestion_status: dict = {}
 upload_cancel_flags: dict = {}
@@ -83,7 +84,9 @@ def _schedule_delete_on_reboot(path: str) -> None:
     kernel32 = ctypes.windll.kernel32
     kernel32.MoveFileExW.restype = wintypes.BOOL
     kernel32.MoveFileExW.argtypes = [wintypes.LPCWSTR, wintypes.LPCWSTR, wintypes.DWORD]
-    success = kernel32.MoveFileExW(path_w, None, MOVEFILE_DELAY_UNTIL_REBOOT | MOVEFILE_WRITE_THROUGH)
+    success = kernel32.MoveFileExW(
+        path_w, None, MOVEFILE_DELAY_UNTIL_REBOOT | MOVEFILE_WRITE_THROUGH
+    )
     if not success:
         err = ctypes.get_last_error()
         raise OSError(f"MoveFileExW failed, WinError={err}: {ctypes.FormatError(err)}")
@@ -128,7 +131,9 @@ def robust_rmtree(path: str, max_retries: int = 10, delay: float = 1.0) -> tuple
         try:
             result = subprocess.run(
                 ["cmd.exe", "/c", "rmdir", "/s", "/q", path],
-                capture_output=True, text=True, timeout=30,
+                capture_output=True,
+                text=True,
+                timeout=30,
             )
             if not os.path.exists(path):
                 return True, None
@@ -141,12 +146,14 @@ def robust_rmtree(path: str, max_retries: int = 10, delay: float = 1.0) -> tuple
     try:
         os.rename(path, deferred)
         return True, None
-    except Exception as rename_err:
+    except Exception:
         if sys.platform == "win32":
             try:
-                result = subprocess.run(
+                subprocess.run(
                     ["cmd.exe", "/c", "move", path, deferred],
-                    capture_output=True, text=True, timeout=10,
+                    capture_output=True,
+                    text=True,
+                    timeout=10,
                 )
                 if not os.path.exists(path):
                     return True, None

@@ -26,6 +26,7 @@ API:
     delete_bookmark(notebook_id, bookmark_id) -> bool
     mark_stale_for_file(notebook_id, file_name) -> int  # кол-во помеченных
 """
+
 import json
 import logging
 import os
@@ -111,8 +112,7 @@ def create_bookmark(notebook_id: str, payload: dict) -> dict:
             "thinking_mode": bool(payload.get("thinking_mode", False)),
             "title": (payload.get("title") or "").strip(),
             "tags": [
-                t.strip() for t in (payload.get("tags") or [])
-                if isinstance(t, str) and t.strip()
+                t.strip() for t in (payload.get("tags") or []) if isinstance(t, str) and t.strip()
             ],
             "status": "ok",
         }
@@ -133,7 +133,8 @@ def update_bookmark(notebook_id: str, bookmark_id: str, patch: dict) -> dict | N
                     b["title"] = (patch.get("title") or "").strip()
                 if "tags" in patch:
                     b["tags"] = [
-                        t.strip() for t in (patch.get("tags") or [])
+                        t.strip()
+                        for t in (patch.get("tags") or [])
                         if isinstance(t, str) and t.strip()
                     ]
                 items[i] = b

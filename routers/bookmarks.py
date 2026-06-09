@@ -1,14 +1,18 @@
 """
 Роутер: CRUD закладок (Q&A).
 """
+
 import logging
-from typing import List, Optional
+
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
 from src.bookmarks import (
-    list_bookmarks, get_bookmark, create_bookmark,
-    update_bookmark, delete_bookmark, mark_stale_for_file,
+    create_bookmark,
+    delete_bookmark,
+    get_bookmark,
+    list_bookmarks,
+    update_bookmark,
 )
 
 logger = logging.getLogger(__name__)
@@ -32,12 +36,12 @@ class CreateBookmarkRequest(BaseModel):
     notebook_id: str
     question: str
     answer: str
-    sources: List[dict] = []
-    model: Optional[str] = ""
-    answer_mode: Optional[str] = "concise"
-    thinking_mode: Optional[bool] = False
-    title: Optional[str] = ""
-    tags: List[str] = []
+    sources: list[dict] = []
+    model: str | None = ""
+    answer_mode: str | None = "concise"
+    thinking_mode: bool | None = False
+    title: str | None = ""
+    tags: list[str] = []
 
 
 @router.post("/api/bookmarks")
@@ -50,8 +54,8 @@ async def api_create_bookmark(req: CreateBookmarkRequest):
 
 class UpdateBookmarkRequest(BaseModel):
     notebook_id: str
-    title: Optional[str] = None
-    tags: Optional[List[str]] = None
+    title: str | None = None
+    tags: list[str] | None = None
 
 
 @router.patch("/api/bookmarks/{bookmark_id}")

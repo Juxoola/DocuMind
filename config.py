@@ -13,14 +13,16 @@ NOTEBOOKS_DIR = os.path.join(BASE_DIR, "notebooks")
 
 os.makedirs(NOTEBOOKS_DIR, exist_ok=True)
 
+
 def get_notebook_paths(notebook_id: str):
     nb_path = os.path.join(NOTEBOOKS_DIR, notebook_id)
     return {
         "base": nb_path,
         "data": os.path.join(nb_path, "data"),
         "chroma_db": os.path.join(nb_path, "chroma_db"),
-        "images": os.path.join(nb_path, "images")
+        "images": os.path.join(nb_path, "images"),
     }
+
 
 # Настройки сервера
 HOST = os.getenv("HOST", "0.0.0.0")
@@ -30,7 +32,14 @@ PORT = int(os.getenv("PORT", 8000))
 RELOAD = os.getenv("RELOAD", "false").lower() in ("1", "true", "yes")
 # F-fix #20: CORS origins через переменную окружения (для деплоя не на localhost).
 # Дефолт — dev-окружение (Vite на 5173, uvicorn на 8000).
-CORS_ORIGINS = [o.strip() for o in os.getenv("CORS_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173,http://localhost:8000,http://127.0.0.1:8000").split(",") if o.strip()]
+CORS_ORIGINS = [
+    o.strip()
+    for o in os.getenv(
+        "CORS_ORIGINS",
+        "http://localhost:5173,http://127.0.0.1:5173,http://localhost:8000,http://127.0.0.1:8000",
+    ).split(",")
+    if o.strip()
+]
 
 # ── Таймауты и лимиты (F-fix #24: магические числа вынесены в config) ──
 # Таймаут ожидания готовности GGUF-сервера при старте (секунд)
@@ -83,12 +92,26 @@ UPLOAD_MAX_SIZE_BYTES = UPLOAD_MAX_SIZE_MB * 1024 * 1024
 # Если прилетает файл с другим расширением — отдаём 415 Unsupported Media Type
 # сразу на upload, до того как мы сожрём диск и время на ингест.
 # Список синхронизирован с тем, что умеет src/ingestion.ingest_file().
-ALLOWED_UPLOAD_EXTENSIONS = frozenset({
-    ".pdf", ".pptx", ".docx",
-    ".mp4", ".avi", ".mkv", ".mov",
-    ".mp3", ".wav", ".m4a",
-    ".txt", ".md", ".png", ".jpg", ".jpeg", ".webp",
-})
+ALLOWED_UPLOAD_EXTENSIONS = frozenset(
+    {
+        ".pdf",
+        ".pptx",
+        ".docx",
+        ".mp4",
+        ".avi",
+        ".mkv",
+        ".mov",
+        ".mp3",
+        ".wav",
+        ".m4a",
+        ".txt",
+        ".md",
+        ".png",
+        ".jpg",
+        ".jpeg",
+        ".webp",
+    }
+)
 
 # Настройки эмбеддингов
 EMBEDDING_MODEL_NAME = os.getenv("EMBEDDING_MODEL_NAME", "Qwen3-Embedding-0.6B-v2.Q8_0.gguf")
@@ -144,7 +167,9 @@ VISION_TEMPERATURE = float(os.getenv("VISION_TEMPERATURE", 0.1))
 VISION_REPEAT_PENALTY = float(os.getenv("VISION_REPEAT_PENALTY", 1.3))
 VISION_TOP_P = float(os.getenv("VISION_TOP_P", 0.9))
 VISION_MIN_P = float(os.getenv("VISION_MIN_P", 0.05))
-VISION_CONCURRENCY = int(os.getenv("VISION_CONCURRENCY", 4)) # Количество параллельных потоков анализа
+VISION_CONCURRENCY = int(
+    os.getenv("VISION_CONCURRENCY", 4)
+)  # Количество параллельных потоков анализа
 
 # Настройки генерации Chat (творческие)
 CHAT_TEMPERATURE = float(os.getenv("CHAT_TEMPERATURE", 0.7))
@@ -241,7 +266,16 @@ SYSTEM_PROMPT_RULES = {
 
 # Канонический список ключей режимов — для UI-дропдауна и валидации на API.
 # Порядок важен: первый элемент идёт сверху в меню, последний — снизу.
-ANSWER_MODES = ("concise", "detailed", "moderate", "summary", "step_by_step", "checklist", "expert", "eli5")
+ANSWER_MODES = (
+    "concise",
+    "detailed",
+    "moderate",
+    "summary",
+    "step_by_step",
+    "checklist",
+    "expert",
+    "eli5",
+)
 
 SYSTEM_PROMPT_CITATION = (
     "ПРАВИЛО ЦИТИРОВАНИЯ (КРИТИЧЕСКИ ДЛЯ СИСТЕМЫ):\n"
@@ -250,7 +284,7 @@ SYSTEM_PROMPT_CITATION = (
     "- НИКОГДА не пиши цифру источника без квадратных скобок.\n"
     "- Если одно утверждение основано на нескольких источниках, пиши [1, 2].\n"
     "- Все формулы пиши внутри $...$ или $$...$$.\n"
-    "- Если ответа нет в источниках — скажи \"В документах этого нет\".\n"
+    '- Если ответа нет в источниках — скажи "В документах этого нет".\n'
     "- НИКОГДА не вставляй ссылки [N] внутрь блоков кода (```...```) или в комментарии к коду. Указывай источники только в тексте вокруг кода.\n"
 )
 
@@ -272,30 +306,25 @@ def get_system_prompt(mode: str = None) -> str:
     """
     if not mode or mode not in SYSTEM_PROMPT_RULES:
         mode = ANSWER_MODE_DEFAULT
-    return (
-        SYSTEM_PROMPT_BASE
-        + "\n"
-        + SYSTEM_PROMPT_RULES[mode]
-        + "\n"
-        + SYSTEM_PROMPT_CITATION
-    )
+    return SYSTEM_PROMPT_BASE + "\n" + SYSTEM_PROMPT_RULES[mode] + "\n" + SYSTEM_PROMPT_CITATION
+
 
 # ── Сохранение настроек ──
 
 RAG_CONFIG_FILE = os.path.join(BASE_DIR, "rag_config.json")
 
+
 def save_rag_config():
     config_data = {
         "embedding_model": EMBEDDING_MODEL_NAME,
         "reranker_model": RERANKER_MODEL_NAME,
-
         "top_k_per_file": RAG_TOP_K_PER_FILE,
         "rerank_pool": RAG_RERANK_POOL,
         "final_top_n": RAG_FINAL_TOP_N,
         "use_reranker": USE_RERANKER,
         "gguf_search_dirs": GGUF_SEARCH_DIRS,
         "query_expansion": RAG_QUERY_EXPANSION,
-        "rerank_score_threshold": RERANK_SCORE_THRESHOLD
+        "rerank_score_threshold": RERANK_SCORE_THRESHOLD,
     }
     try:
         with open(RAG_CONFIG_FILE, "w", encoding="utf-8") as f:
@@ -303,8 +332,18 @@ def save_rag_config():
     except Exception as e:
         logger.warning(f"Не удалось сохранить RAG config: {e}")
 
+
 def load_rag_config():
-    global EMBEDDING_MODEL_NAME, RERANKER_MODEL_NAME, RAG_TOP_K_PER_FILE, RAG_RERANK_POOL, RAG_FINAL_TOP_N, USE_RERANKER, GGUF_SEARCH_DIRS, RAG_QUERY_EXPANSION, RERANK_SCORE_THRESHOLD
+    global \
+        EMBEDDING_MODEL_NAME, \
+        RERANKER_MODEL_NAME, \
+        RAG_TOP_K_PER_FILE, \
+        RAG_RERANK_POOL, \
+        RAG_FINAL_TOP_N, \
+        USE_RERANKER, \
+        GGUF_SEARCH_DIRS, \
+        RAG_QUERY_EXPANSION, \
+        RERANK_SCORE_THRESHOLD
     try:
         if os.path.exists(RAG_CONFIG_FILE):
             with open(RAG_CONFIG_FILE, encoding="utf-8") as f:
@@ -317,12 +356,16 @@ def load_rag_config():
                 USE_RERANKER = data.get("use_reranker", USE_RERANKER)
                 GGUF_SEARCH_DIRS = data.get("gguf_search_dirs", GGUF_SEARCH_DIRS)
                 RAG_QUERY_EXPANSION = data.get("query_expansion", RAG_QUERY_EXPANSION)
-                RERANK_SCORE_THRESHOLD = float(data.get("rerank_score_threshold", RERANK_SCORE_THRESHOLD))
+                RERANK_SCORE_THRESHOLD = float(
+                    data.get("rerank_score_threshold", RERANK_SCORE_THRESHOLD)
+                )
     except Exception as e:
         logger.warning(f"Не удалось загрузить RAG config: {e}")
 
+
 # Загружаем настройки при старте
 load_rag_config()
+
 
 @lru_cache(maxsize=64)
 def resolve_model_path(path_or_filename: str) -> str:
@@ -341,6 +384,7 @@ def resolve_model_path(path_or_filename: str) -> str:
     # Быстрый путь: кешированный scan через gguf_manager
     try:
         from src.gguf_manager import find_gguf_by_name
+
         hit = find_gguf_by_name(path_or_filename)
         if hit:
             print(f"[CONFIG] Модель найдена: {hit}")

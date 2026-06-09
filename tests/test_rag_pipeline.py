@@ -20,6 +20,7 @@ def mock_llama_index():
     _rrf_fuse и _rrf_fuse_across_files импортируют TextNode и NodeWithScore
     из llama_index.core.schema — даём им работоспособные заменители.
     """
+
     class FakeTextNode:
         def __init__(self, text="", id_=None, metadata=None):
             self.text = text
@@ -70,6 +71,7 @@ class TestRrfFuse:
     def _get_funcs(self):
         """Импортируем после установки моков."""
         from src.rag_pipeline import _rrf_fuse
+
         return _rrf_fuse
 
     def test_empty_both(self, mock_llama_index):
@@ -119,6 +121,7 @@ class TestRrfFuseAcrossFiles:
 
     def test_empty_input(self, mock_llama_index):
         from src.rag_pipeline import _rrf_fuse_across_files
+
         assert _rrf_fuse_across_files([]) == []
 
     def test_single_file(self, mock_llama_index):
@@ -138,10 +141,13 @@ class TestRrfFuseAcrossFiles:
 
         from src.rag_pipeline import _rrf_fuse_across_files
 
-        big = [NodeWithScore(
-            node=TextNode(text=f"Big-{i}", id_=f"big_{i}"),
-            score=1.0 - i * 0.01,
-        ) for i in range(100)]
+        big = [
+            NodeWithScore(
+                node=TextNode(text=f"Big-{i}", id_=f"big_{i}"),
+                score=1.0 - i * 0.01,
+            )
+            for i in range(100)
+        ]
         small = [
             NodeWithScore(node=TextNode(text="Important", id_="golden"), score=0.99),
             NodeWithScore(node=TextNode(text="Other", id_="silver"), score=0.5),
@@ -157,18 +163,22 @@ class TestBm25RebuildApi:
 
     def test_schedule_cancel(self, mock_llama_index):
         from src.rag_pipeline import _schedule_bm25_rebuild, cancel_bm25_rebuild
+
         _schedule_bm25_rebuild("test_nb", "/tmp/fake_db")
         cancel_bm25_rebuild("test_nb")
 
     def test_cancel_nonexistent(self, mock_llama_index):
         from src.rag_pipeline import cancel_bm25_rebuild
+
         cancel_bm25_rebuild("never_scheduled")
 
     def test_flush_without_wait(self, mock_llama_index):
         from src.rag_pipeline import flush_bm25_rebuild
+
         with patch("src.rag_pipeline._rebuild_bm25_bg"):
             flush_bm25_rebuild("test_nb", db_path="/tmp/fake", wait=False)
 
     def test_is_bm25_ready_no_index(self, mock_llama_index):
         from src.rag_pipeline import is_bm25_ready
+
         assert is_bm25_ready("nonexistent") is False
