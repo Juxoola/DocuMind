@@ -1,122 +1,76 @@
 @echo off
-chcp 65001 >nul
-title NotebookLM Local Clone
 setlocal enabledelayedexpansion
+title NotebookLM Local Clone
 
-:: Цвета (ANSI)
-set "ESC=["
-set "GREEN=%ESC%32m"
-set "CYAN=%ESC%36m"
-set "YELLOW=%ESC%33m"
-set "RED=%ESC%31m"
-set "RESET=%ESC%0m"
-set "BOLD=%ESC%1m"
+chcp 65001 >nul 2>&1
 
-echo %BOLD%%CYAN%============================================%RESET%
-echo %BOLD%%CYAN%   NotebookLM Local Clone%RESET%
-echo %BOLD%%CYAN%============================================%RESET%
+echo ============================================
+echo   NotebookLM Local Clone
+echo ============================================
 echo.
 
-:: ── Проверка Python ──
 python --version >nul 2>&1
 if %errorlevel% neq 0 (
-    echo %RED%[ERROR] Python не найден!%RESET%
-    echo %YELLOW%Установите Python 3.11+: https://www.python.org/downloads/%RESET%
-    echo %YELLOW%ВАЖНО: при установке отметьте "Add Python to PATH"%RESET%
+    echo [ERROR] Python not found! Install Python 3.11+
     pause
     exit /b
 )
-for /f "tokens=*" %%a in ('python --version 2^>^&1') do set "PY_VER=%%a"
-echo %GREEN%[OK] %PY_VER%%RESET%
 
-:: ── Проверка Node.js (для frontend) ──
 node -v >nul 2>&1
-if %errorlevel% neq 0 (
-    echo %YELLOW%[WARN] Node.js не найден. Frontend не запустится.%RESET%
-    echo %YELLOW%       Установите: https://nodejs.org/%RESET%
-    set "NO_FRONTEND=1"
-) else (
-    for /f "tokens=*" %%a in ('node -v 2^>^&1') do set "NODE_VER=%%a"
-    echo %GREEN%[OK] %NODE_VER%%RESET%
-)
+if %errorlevel% neq 0 set NO_FRONTEND=1
 
-:: ── Проверка логов ──
 if not exist "logs" mkdir logs
 
-:: ── Очистка старых процессов llama-server ──
-echo %CYAN%[INFO] Проверка остаточных процессов...%RESET%
-tasklist /FI "IMAGENAME eq llama-server.exe" 2>NUL | find /I "llama-server.exe" >NUL
+tasklist /FI "IMAGENAME eq llama-server.exe" 2>NUL | find "llama-server.exe" >NUL
 if !errorlevel! equ 0 (
-    echo %YELLOW%[WARN] Найдены старые процессы llama-server. Завершаю...%RESET%
+    echo [INFO] Cleaning up old llama-server processes...
     taskkill /F /IM llama-server.exe >nul 2>&1
-    timeout /t 2 /nobreak >nul
 )
+if !errorlevel! equ 1 echo [INFO] No old processes found
 
-:: ── Запуск backend ──
 echo.
-echo %BOLD%%CYAN%[1/2] Запуск backend (FastAPI)...%RESET%
-start "Backend" /min cmd /c "python main.py" > logs\server.log 2>&1
+echo [1/2] Starting backend on http://localhost:8000
+start "NB-Backend" /min python main.py
 
-:: Ждём готовности backend
-echo %CYAN%[INFO] Ожидание готовности сервера...%RESET%
-set "READY="
+:: Healthcheck via PowerShell (built-in, no curl needed)
+set READY=
 for /l %%i in (1,1,30) do (
-    timeout /t 1 /nobreak >nul
-    curl -s http://127.0.0.1:8000/api/llm-status >nul 2>&1
-    if not errorlevel 1 set "READY=1" & goto :backend_ready
+    ping -n 2 127.0.0.1 >nul
+    powershell -Command "try { $r = Invoke-WebRequest -Uri 'http://127.0.0.1:8000/api/llm-status' -TimeoutSec 2 -UseBasicParsing; if ($r.StatusCode -eq 200) { exit 0 } } catch { exit 1 }" >nul 2>&1
+    if !errorlevel! equ 0 set READY=1 & goto ready
 )
-:backend_ready
-if defined READY (
-    echo %GREEN%[OK] Backend запущен: http://localhost:8000%RESET%
-) else (
-    echo %YELLOW%[WARN] Backend запущен, но не отвечает. Проверьте logs\server.log%RESET%
-)
+:ready
+if defined READY (echo [OK] Backend ready) else (echo [WARN] Backend healthcheck timed out)
 
-:: ── Запуск frontend ──
 if not defined NO_FRONTEND (
     echo.
-    echo %BOLD%%CYAN%[2/2] Запуск frontend (Vite)...%RESET%
-
+    echo [2/2] Starting frontend on http://localhost:5173
     if exist "frontend\node_modules" (
-        start "Frontend" /min cmd /c "cd frontend && npm run dev"
-        echo %GREEN%[OK] Frontend запущен: http://localhost:5173%RESET%
+        start "NB-Frontend" /min cmd /c "cd /d frontend && npm run dev"
+        echo [OK] Frontend ready
     ) else (
-        echo %YELLOW%[WARN] node_modules не найдены. Выполните npm install в папке frontend\%RESET%
-        echo %YELLOW%       или запустите setup.ps1 для полной установки.%RESET%
+        echo [WARN] Run "cd frontend ^&^& npm install" first
     )
 )
 
 echo.
-echo %BOLD%%GREEN%============================================%RESET%
-echo %BOLD%%GREEN%   Сервер запущен!%RESET%
-echo %BOLD%%GREEN%============================================%RESET%
+echo ============================================
+echo   Server is running!
+echo ============================================
+echo   Backend:  http://localhost:8000
+echo   Frontend: http://localhost:5173
+echo   API docs: http://localhost:8000/docs
 echo.
-echo   Backend:  %CYAN%http://localhost:8000%RESET%
-echo   Frontend: %CYAN%http://localhost:5173%RESET%
-echo   API docs: %CYAN%http://localhost:8000/docs%RESET%
+echo   Close this window to stop the server.
 echo.
-echo %YELLOW%  Закройте это окно для остановки сервера.%RESET%
-echo.
-
-:: Ожидание закрытия окна
 pause >nul
 
-:: ── Graceful shutdown ──
+:: Graceful shutdown
 echo.
-echo %CYAN%[INFO] Остановка сервера...%RESET%
-
-:: Выгружаем GGUF-модели через API
-curl -s -X POST http://127.0.0.1:8000/api/gguf-kill-all >nul 2>&1
-if !errorlevel! equ 0 (
-    echo %GREEN%[OK] Модели выгружены%RESET%
-) else (
-    echo %YELLOW%[WARN] API недоступен, завершаю процессы принудительно%RESET%
-)
-
-:: Убиваем процессы
-taskkill /F /FI "WINDOWTITLE eq Backend" >nul 2>&1
-taskkill /F /FI "WINDOWTITLE eq Frontend" >nul 2>&1
+echo Shutting down...
+powershell -Command "try { Invoke-WebRequest -Uri 'http://127.0.0.1:8000/api/gguf-kill-all' -Method POST -TimeoutSec 5 -UseBasicParsing } catch {}" >nul 2>&1
+taskkill /F /FI "WINDOWTITLE eq NB-Backend" >nul 2>&1
+taskkill /F /FI "WINDOWTITLE eq NB-Frontend" >nul 2>&1
 taskkill /F /IM llama-server.exe >nul 2>&1
-
-echo %GREEN%[OK] Сервер остановлен%RESET%
-timeout /t 2 /nobreak >nul
+echo Server stopped.
+timeout /t 2 >nul
