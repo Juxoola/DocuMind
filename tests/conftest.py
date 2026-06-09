@@ -43,3 +43,7 @@ def sanitize_env(monkeypatch):
     monkeypatch.setenv("GGUF_SEARCH_DIRS", "/dev/null")
     monkeypatch.setenv("LM_STUDIO_URL", "http://localhost:9999/v1")
     monkeypatch.setenv("UPLOAD_MAX_SIZE_MB", "500")
+    # Перенаправляем rag_config.json во временную папку (тесты не загрязняют прод)
+    import config as cfg
+    monkeypatch.setattr(cfg, "RAG_CONFIG_FILE",
+                        os.path.join(tempfile.gettempdir(), f"rag_config_test_{os.getpid()}.json"))

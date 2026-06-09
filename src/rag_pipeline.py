@@ -57,25 +57,25 @@ def unload_rag_models(hard=True):
 def preload_all_models():
     """Предзагрузка всех тяжелых моделей для ускорения работы."""
     print("[RAG] Предзагрузка моделей...")
-    init_settings()
+    try:
+        init_settings()
+    except Exception as e:
+        print(f"  [RAG] ⚠ Эмбеддинги не загружены (будут загружены lazily): {e}")
     if config.RERANKER_MODEL_NAME:
-        device = "cuda" if torch.cuda.is_available() else "cpu"
+        try:
+            device = "cuda" if torch.cuda.is_available() else "cpu"
 
-        if not (config.RERANKER_MODEL_NAME.lower().endswith('.gguf') or (os.path.isabs(config.RERANKER_MODEL_NAME) and os.path.exists(config.RERANKER_MODEL_NAME))):
-            raise RuntimeError(
-                "Поддерживаются только GGUF-модели реранкера. "
-                "Укажите путь к .gguf файлу в config.RERANKER_MODEL_NAME.\n"
-                f"Текущее значение: {config.RERANKER_MODEL_NAME}"
-            )
-        print(f"  [RAG] Предзагрузка GGUF реранкера: {config.RERANKER_MODEL_NAME}")
-        from src.gguf_direct import get_gguf_embedding_url
-        model_path = config.resolve_model_path(config.RERANKER_MODEL_NAME)
-        get_gguf_embedding_url(model_path, is_reranker=True)
+            if not (config.RERANKER_MODEL_NAME.lower().endswith('.gguf') or (os.path.isabs(config.RERANKER_MODEL_NAME) and os.path.exists(config.RERANKER_MODEL_NAME))):
+                print(f"  [RAG] ⚠ Реранкер пропущен: неверный формат ({config.RERANKER_MODEL_NAME})")
+            else:
+                print(f"  [RAG] Предзагрузка GGUF реранкера: {config.RERANKER_MODEL_NAME}")
+                from src.gguf_direct import get_gguf_embedding_url
+                model_path = config.resolve_model_path(config.RERANKER_MODEL_NAME)
+                get_gguf_embedding_url(model_path, is_reranker=True)
+        except Exception as e:
+            print(f"  [RAG] ⚠ Реранкер не загружен (будет загружен lazily): {e}")
 
-    # Загружаем GGUF LLM для зрения больше не нужно, так как он грузится динамически в ingestion.py
-    # и сразу очищается, экономя VRAM.
-
-    print("[RAG] Все модели загружены.")
+    print("[RAG] Предзагрузка завершена.")
 
 def init_settings(max_tokens=1024):
     global _model_cache
