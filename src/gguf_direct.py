@@ -583,12 +583,10 @@ def get_gguf_embedding_url(
         # Embedding/Reranker не генерируют текст авторегрессивно.
         # Параметры зависят от роли:
         #
-        # Embedding: -c 4096, -b 512, -ub 512
-        #   v_splitter в process_pdf режет vision-описания на чанки по 2048 символов.
-        #   Для русского текста 2048 chars ≈ 600-1500 токенов + prefix "Изображение PDF имя стр N: " ≈ 200-300 токенов.
-        #   С -c 2048 длинные описания (3000+ символов) превышали контекст → 500 "Context size has been exceeded"
-        #   и падение build_index. -c 4096 даёт запас с учётом prefix и Cyrillic-токенизации.
-        #   -b 512 (вместо 2048): для 0.6B модели 2048 batch выделяет огромные pre-allocated attention buffers
+        # Embedding: -c = n_parallel * 2048 (минимум 4096), -b 512, -ub 512
+        #   Каждый слот должен вмещать чанк до 2048 токенов (≈4096 символов русского).
+        #   С --parallel 4 → -c 8192 (по 2048 на слот).
+        #   -b 512: для 0.6B модели 2048 batch выделяет огромные pre-allocated attention buffers
         #   (~3-4GB на процесс через CUDA scratch). 512 хватает для чанков ≤2048 символов (≈1500 токенов).
         #
         # Reranker: -c 4096, -b 2048, -ub 2048
@@ -605,7 +603,12 @@ def get_gguf_embedding_url(
         if is_reranker:
             ctx, b_size, ub_size = "4096", "2048", "2048"
         else:
-            ctx, b_size, ub_size = "4096", "512", "512"
+            # Embedding: контекст зависит от числа параллельных слотов.
+            # Каждый слот должен вмещать чанк до 2048 токенов (≈4096 символов русского текста).
+            # С --parallel N итоговый -c = N * 2048, но не менее 4096.
+            min_ctx_per_slot = 2048
+            ctx = str(max(4096, n_parallel * min_ctx_per_slot))
+            b_size, ub_size = "512", "512"
         cmd.extend(["-c", ctx, "-b", b_size, "-ub", ub_size])
 
         # Квантование KV-cache: q8_0 = 50% экономии памяти против f16.
