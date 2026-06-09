@@ -18,7 +18,7 @@ async def stream_gguf_chat(
     min_p: float,
     model_family: str = "generic",
 ):
-    """Асинхронный стриминг через OpenAI-совместимый API сервера llama.cpp."""
+    """Асинхронный стриминг через OpenAI-совместимый API llama.cpp."""
     import httpx
 
     payload = {

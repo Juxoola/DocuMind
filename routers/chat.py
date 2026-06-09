@@ -306,6 +306,6 @@ async def chat(request: ChatRequest):
                 try:
                     _http_session.post(f"{active_llm}/slots/0/clear", timeout=1)
                 except Exception:
-                    pass
+                    logger.debug("chat: не удалось очистить слот GGUF")
 
     return StreamingResponse(generate(), media_type="text/event-stream")

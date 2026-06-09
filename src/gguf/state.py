@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 SERVER_EXE = os.path.join(config.BASE_DIR, "bin", "llama-server.exe")
 
-# ── Мультисерверное состояние (из gguf_direct) ──────────────────────
+# Мультисерверное состояние
 _server_processes: dict[str, "subprocess.Popen"] = {}
 _server_ports: dict[str, int] = {}
 _server_configs: dict[str, dict] = {}
@@ -35,7 +35,7 @@ _llm_load_state: dict = {
     "phase": None,
 }
 
-# ── Windows Job Object ──────────────────────────────────────────────
+# Windows Job Object
 _win32_job = None
 if os.name == "nt":
     try:
@@ -60,8 +60,7 @@ def _assign_to_job(process):
             logger.debug(f"AssignProcessToJobObject failed (non-critical): {e}")
 
 
-# ── CACHE_TYPE_MAP ──────────────────────────────────────────────────
-# Маппинг типов квантования KV-кэша для llama-server.
+# CACHE_TYPE_MAP — маппинг типов квантования KV-кэша
 CACHE_TYPE_MAP = {
     0: "f16",
     1: "f32",
@@ -72,7 +71,7 @@ CACHE_TYPE_MAP = {
     8: "q8_0",
 }
 
-# ── Persistent scan cache (из gguf_manager) ──────────────────────────
+# Persistent scan cache
 _GGUF_CACHE_FILE = os.path.join(config.BASE_DIR, "_gguf_scan_cache.json")
 _GGUF_CACHE_TTL_SEC = 300.0
 _gguf_cache_lock = threading.Lock()

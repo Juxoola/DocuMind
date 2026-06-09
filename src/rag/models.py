@@ -1,7 +1,4 @@
-"""Инициализация, предзагрузка и выгрузка RAG-моделей (embedding, reranker, LLM).
-
-Вынесено из rag_pipeline.py при рефакторинге.
-"""
+"""Инициализация, предзагрузка и выгрузка RAG-моделей (embedding, reranker, LLM)."""
 
 import gc
 import logging
@@ -22,8 +19,7 @@ def init_settings(max_tokens=1024):
     global _model_cache
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
-    # F-fix #6: lock на init-фазу. После инициализации cache hit не требует лока.
-    # Settings.llm пересоздаётся на каждом вызове — это идемпотентно, не под локом.
+    # init-фаза под lock; cache hit не требует лока. Settings.llm идемпотентен.
     with _init_lock:
         if "embed_model" not in _model_cache:
             model_name = config.EMBEDDING_MODEL_NAME
@@ -118,7 +114,7 @@ def unload_rag_models(hard=True):
     if not _model_cache:
         return
 
-    # F-fix #6: под локом, чтобы clear() не сломал параллельный init_settings
+    # Под локом — clear() не должен сломать параллельный init_settings
     with _init_lock:
         if hard:
             logger.info("[RAG] Выгрузка всех моделей (Embedding, Reranker)...")

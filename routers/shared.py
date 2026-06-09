@@ -1,14 +1,4 @@
-"""
-Общие состояние и утилиты для роутеров.
-
-Вынесено из main.py при рефакторинге.
-
-Содержит:
-- HTTP session (keep-alive)
-- Статус загрузки (ingestion_status, upload_cancel_flags)
-- Background tasks reference
-- safe_filename, robust_rmtree, _schedule_delete_on_reboot
-"""
+"""Общие состояние и утилиты для роутеров."""
 
 import asyncio
 import ctypes
@@ -46,8 +36,7 @@ _http_session.mount(
     ),
 )
 
-# ── Статус ингеста ──
-# F-fix #25: ключ — уникальный task_id (UUID), а не notebook_id
+# ── Статус ингеста (ключ — task_id, не notebook_id) ──
 
 ingestion_status: dict = {}
 upload_cancel_flags: dict = {}
@@ -102,12 +91,12 @@ def robust_rmtree(path: str, max_retries: int = 10, delay: float = 1.0) -> tuple
             try:
                 os.chmod(os.path.join(root, f), stat.S_IWRITE)
             except Exception:
-                pass
+                logger.debug("robust_rmtree: не удалось снять readonly c %s", f)
         for d in dirs:
             try:
                 os.chmod(os.path.join(root, d), stat.S_IWRITE)
             except Exception:
-                pass
+                logger.debug("robust_rmtree: не удалось снять readonly c %s", d)
 
     # Попытка 1: shutil.rmtree с backoff
     last_err = None
@@ -138,7 +127,7 @@ def robust_rmtree(path: str, max_retries: int = 10, delay: float = 1.0) -> tuple
             if not os.path.exists(path):
                 return True, None
         except Exception:
-            pass
+            logger.debug("robust_rmtree: cmd rmdir не удался для %s", path)
 
     # Попытка 3: soft-delete (rename в .pending_delete_<ts>)
     ts = int(time.time())
@@ -158,7 +147,7 @@ def robust_rmtree(path: str, max_retries: int = 10, delay: float = 1.0) -> tuple
                 if not os.path.exists(path):
                     return True, None
             except Exception:
-                pass
+                logger.debug("robust_rmtree: cmd move не удался для %s", path)
 
         # Попытка 4: MoveFileExW с DELAY_UNTIL_REBOOT
         if sys.platform == "win32":
@@ -166,7 +155,7 @@ def robust_rmtree(path: str, max_retries: int = 10, delay: float = 1.0) -> tuple
                 _schedule_delete_on_reboot(path)
                 return True, None
             except Exception:
-                pass
+                logger.debug("robust_rmtree: MoveFileExW не удался для %s", path)
 
         err_msg = (
             f"Не удалось удалить {path}: {last_err}. "

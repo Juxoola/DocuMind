@@ -96,7 +96,7 @@ async def upload_file(
                     try:
                         os.remove(file_path)
                     except Exception:
-                        pass
+                        logger.debug("upload: не удалось удалить недописанный файл")
                     raise HTTPException(
                         status_code=413,
                         detail=f"Файл превысил {config.UPLOAD_MAX_SIZE_MB} МБ во время записи.",
@@ -237,13 +237,13 @@ async def upload_file(
                 if os.path.exists(file_path):
                     os.remove(file_path)
             except Exception:
-                pass
+                logger.debug("cancel: не удалось удалить %s", file_path)
             sidecar = os.path.join(os.path.dirname(file_path), f"{file.filename}.json")
             try:
                 if os.path.exists(sidecar):
                     os.remove(sidecar)
             except Exception:
-                pass
+                logger.debug("cancel: не удалось удалить sidecar %s", sidecar)
             try:
                 images_dir = paths.get("images")
                 if images_dir and os.path.exists(images_dir):
@@ -253,9 +253,9 @@ async def upload_file(
                             try:
                                 os.remove(os.path.join(images_dir, f))
                             except Exception:
-                                pass
+                                logger.debug("cancel: не удалось удалить %s", f)
             except Exception:
-                pass
+                logger.debug("cancel: ошибка при чистке images")
             try:
                 from src.rag_pipeline import get_vector_store
 
@@ -263,7 +263,7 @@ async def upload_file(
                 collection = vector_store._collection
                 collection.delete(where={"file_name": file.filename})
             except Exception:
-                pass
+                logger.debug("cancel: не удалось очистить векторные индексы для %s", file.filename)
             ingestion_status[notebook_id] = {"is_uploading": False, "cancelled": True}
             q.put({"type": "cancelled", "filename": file.filename})
         except Exception as e:

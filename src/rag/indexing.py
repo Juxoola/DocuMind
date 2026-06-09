@@ -1,7 +1,4 @@
-"""ChromaDB операции: построение индекса, клиенты, close.
-
-Вынесено из rag_pipeline.py при рефакторинге.
-"""
+"""ChromaDB операции: построение индекса, клиенты, close."""
 
 import logging
 import os
@@ -26,8 +23,7 @@ def build_index(nodes, notebook_id: str):
     storage_context = StorageContext.from_defaults(vector_store=vector_store)
     index = VectorStoreIndex(nodes, storage_context=storage_context)
 
-    # Debounced BM25 rebuild: при batch из 10 файлов будет ОДНА пересборка
-    # через 30с после последнего файла, а не 10 параллельных (F-fix #4).
+    # Debounced BM25 rebuild: одна пересборка на batch
     paths = config.get_notebook_paths(notebook_id)
     db_path = paths["chroma_db"]
     _schedule_bm25_rebuild(notebook_id, db_path)
@@ -35,7 +31,7 @@ def build_index(nodes, notebook_id: str):
 
 
 def get_vector_store(notebook_id: str):
-    """Получить ChromaVectorStore для указанного ноутбука (с кешированием клиента)."""
+    """ChromaVectorStore для ноутбука (с кешированием клиента)."""
     global _client_cache
     paths = config.get_notebook_paths(notebook_id)
     db_path = paths["chroma_db"]
@@ -61,10 +57,7 @@ def close_all_clients():
 
 
 def close_notebook_client(notebook_id: str):
-    """Закрывает ChromaDB клиент только для указанного ноутбука.
-
-    В отличие от close_all_clients(), не трогает другие блокноты.
-    """
+    """Закрыть ChromaDB клиент для указанного ноутбука. Не трогает другие."""
     global _client_cache
     from config import get_notebook_paths
 

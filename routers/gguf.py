@@ -68,7 +68,7 @@ def _get_gguf_servers_info() -> list:
                 }
             )
     except Exception:
-        pass
+        logger.debug("gguf: не удалось получить информацию о серверах")
     return servers
 
 
@@ -134,7 +134,7 @@ async def api_vram():
                 free_mib = int(parts[2])
                 total_mib = int(parts[3])
     except Exception:
-        pass
+        logger.debug("gguf: не удалось запросить nvidia-smi (GPU)")
     per_process = []
     try:
         out = subprocess.run(
@@ -158,7 +158,7 @@ async def api_vram():
                     except (ValueError, IndexError):
                         continue
     except Exception:
-        pass
+        logger.debug("gguf: не удалось запросить nvidia-smi (per-process)")
     return {
         "gpu": {
             "name": gpu_name,

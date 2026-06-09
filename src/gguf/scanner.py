@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 
 
 def _dir_mtime(root: str) -> float:
-    """mtime директории + бонус за file-count (любое добавление/удаление меняет count)."""
+    """Возвращает mtime директории."""
     try:
         st = os.stat(root)
         return st.st_mtime
@@ -25,7 +25,7 @@ def _dir_mtime(root: str) -> float:
 
 
 def _scan_gguf_dirs_uncached() -> list[dict]:
-    """Полный os.walk без кеша. Дорогая операция — вызывать редко."""
+    """Полный os.walk без кеша."""
     results = []
     search_dirs = [d.strip() for d in config.GGUF_SEARCH_DIRS.split(";") if d.strip()]
 
@@ -62,10 +62,7 @@ def _scan_gguf_dirs_uncached() -> list[dict]:
 
 
 def scan_gguf_dirs() -> list[dict]:
-    """Сканирует директории на наличие GGUF и mmproj файлов.
-    Использует persistent mtime-keyed cache — повторные вызовы при неизменных
-    директориях практически бесплатны.
-    """
+    """Сканирует директории на наличие GGUF-файлов с mtime-кэшем."""
     with _gguf_cache_lock:
         cached = None
         try:
@@ -73,7 +70,7 @@ def scan_gguf_dirs() -> list[dict]:
                 with open(_GGUF_CACHE_FILE, encoding="utf-8") as f:
                     cached = json.load(f)
         except Exception:
-            cached = None
+            cached = None  # best-effort
 
         if cached:
             try:
@@ -87,7 +84,7 @@ def scan_gguf_dirs() -> list[dict]:
                 if age < _GGUF_CACHE_TTL_SEC and roots_valid:
                     return cached.get("results", [])
             except Exception:
-                pass
+                pass  # best-effort
 
         # Cold path: полный os.walk + persist
         results = _scan_gguf_dirs_uncached()
@@ -108,17 +105,17 @@ def scan_gguf_dirs() -> list[dict]:
 
 
 def invalidate_scan_cache():
-    """Сбросить кеш (например, после добавления новой GGUF в поисковую директорию)."""
+    """Сбрасывает кеш (например, после добавления новой модели)."""
     with _gguf_cache_lock:
         try:
             if os.path.exists(_GGUF_CACHE_FILE):
                 os.remove(_GGUF_CACHE_FILE)
         except Exception:
-            pass
+            pass  # best-effort
 
 
 def find_gguf_by_name(filename: str) -> str | None:
-    """Быстрый поиск файла по имени в GGUF_SEARCH_DIRS. Использует scan cache."""
+    """Быстрый поиск файла по имени через scan cache."""
     if not filename:
         return None
     name = os.path.basename(filename)

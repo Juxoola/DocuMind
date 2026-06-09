@@ -25,11 +25,7 @@ _NB_ID_PATTERN = re.compile(r"^[a-f0-9]{8}$")
 
 
 def validate_nb_id(nb_id: str) -> str:
-    """Валидация notebook_id: защита от path traversal.
-
-    nb_id должен быть 8-символьным hex (первые 8 символов UUID).
-    Если не совпадает — HTTPException 400.
-    """
+    """Валидация notebook_id: 8-символьный hex, защита от path traversal."""
     nb_id = nb_id.strip()
     if not _NB_ID_PATTERN.match(nb_id):
         logger.warning(f"Некорректный notebook_id: {nb_id!r}")
@@ -105,14 +101,7 @@ async def create_notebook(req: CreateNotebookRequest):
 
 @router.delete("/api/notebooks/{nb_id}")
 async def delete_notebook(nb_id: str):
-    """Удаление ноутбука: комплексная очистка.
-
-    1. Валидация nb_id (защита от path traversal)
-    2. Закрытие ChromaDB клиента только для этого ноутбука
-    3. Отмена BM25 rebuild
-    4. Удаление файлов через robust_rmtree
-    5. Очистка bookmarks.json
-    """
+    """Удаление ноутбука: закрытие ChromaDB, отмена BM25, удаление файлов."""
     nb_id = validate_nb_id(nb_id)
     paths = config.get_notebook_paths(nb_id)
     base_path = paths["base"]

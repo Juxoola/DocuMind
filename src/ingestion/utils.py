@@ -27,7 +27,7 @@ logging.getLogger("lightning.pytorch.utilities.migration").setLevel(logging.ERRO
 logging.getLogger("lightning.pytorch").setLevel(logging.ERROR)
 logging.getLogger("whisperx").setLevel(logging.WARNING)
 
-# ── Фикс: inspect.stack() ───────────────────────────────────────────
+# Фикс: inspect.stack()
 _orig_getmodule = _inspect_module.getmodule
 
 
@@ -40,15 +40,15 @@ def _safe_getmodule(obj, filename=None):
 
 _inspect_module.getmodule = _safe_getmodule
 
-# ── Фикс для Windows DLL ────────────────────────────────────────────
+# Фикс для Windows DLL
 try:
     lib_dir = os.path.join(os.path.dirname(torch.__file__), "lib")
     if os.path.exists(lib_dir):
         os.add_dll_directory(lib_dir)
 except Exception:
-    pass
+    pass  # best-effort
 
-# ── HTTP session (keep-alive) ────────────────────────────────────────
+# HTTP session (keep-alive)
 _http_session = requests.Session()
 _http_session.mount(
     "http://",
@@ -65,7 +65,7 @@ _http_session.mount(
     ),
 )
 
-# ── Subprocess registry ─────────────────────────────────────────────
+# Subprocess registry
 _active_subprocesses: dict = {}
 
 
@@ -85,18 +85,18 @@ def unregister_subprocess(notebook_id, popen):
 
 
 def kill_subprocesses(notebook_id):
-    """Немедленно убивает все subprocess-ы, зарегистрированные для этого блокнота."""
+    """Убивает все subprocess-ы блокнота."""
     procs = _active_subprocesses.pop(notebook_id, [])
     for p in procs:
         try:
             if p.poll() is None:
                 p.terminate()
         except Exception:
-            pass
+            pass  # best-effort
     return len(procs)
 
 
-# ── Исключение ──────────────────────────────────────────────────────
+# Исключение
 
 
 class IngestionCancelled(Exception):
@@ -104,11 +104,11 @@ class IngestionCancelled(Exception):
     pass
 
 
-# ── Утилиты ─────────────────────────────────────────────────────────
+# Утилиты
 
 
 def _safe_print(msg):
-    """Print с защитой от cp1251 PowerShell (emoji/non-ASCII)."""
+    """Безопасный вывод с защитой от cp1251."""
     try:
         logger.info(msg)
     except UnicodeEncodeError:
@@ -120,7 +120,7 @@ def _safe_print(msg):
 
 
 def cleanup_gpu():
-    """Принудительная очистка всей видеопамяти перед тяжелыми задачами."""
+    """Принудительная очистка видеопамяти перед тяжелыми задачами."""
     try:
         from src.rag_pipeline import unload_rag_models
         unload_rag_models(hard=False)

@@ -8,8 +8,7 @@ _SEMANTIC_SPLITTER_CACHE = None
 
 
 def _get_splitter():
-    """Возвращает SemanticSplitterNodeParser если эмбеддинг-сервер запущен,
-    иначе SentenceSplitter (fallback)."""
+    """Возвращает SemanticSplitterNodeParser или SentenceSplitter (fallback)."""
     global _SEMANTIC_SPLITTER_CACHE
     if _SEMANTIC_SPLITTER_CACHE is not None:
         return _SEMANTIC_SPLITTER_CACHE

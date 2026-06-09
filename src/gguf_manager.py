@@ -45,7 +45,7 @@ def get_server_status() -> dict:
         if r.status_code == 200:
             return {"running": True, "info": _server_info}
     except Exception:
-        pass
+        logger.debug("gguf_manager: health-check не удался")
     return {"running": True, "info": _server_info, "status": "initializing"}
 
 
@@ -99,7 +99,7 @@ def start_gguf_server(
                 logger.info(f"[GGUF Manager] Сервер готов на порту {port}")
                 return {"status": "ok", "url": f"http://127.0.0.1:{port}/v1", "info": _server_info}
         except Exception:
-            pass
+            logger.debug("gguf_manager: сервер ещё не готов, ждём...")
         if _server_process.poll() is not None:
             return {"status": "error", "msg": "Процесс сервера завершился ошибкой"}
     return {"status": "error", "msg": "Таймаут запуска сервера"}
@@ -116,7 +116,7 @@ def stop_gguf_server() -> dict:
             try:
                 _server_process.kill()
             except Exception:
-                pass
+                pass  # best-effort
     _server_process = None
     _server_info = {}
     return {"status": "ok"}

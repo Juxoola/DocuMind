@@ -1,7 +1,4 @@
-"""RAG retrieval pipeline: Query Expansion, гибридный поиск (RRF), реранкинг.
-
-Вынесено из rag_pipeline.py при рефакторинге.
-"""
+"""RAG retrieval pipeline: Query Expansion, гибридный поиск (RRF), реранкинг."""
 
 import logging
 import os
@@ -40,13 +37,7 @@ _QUERY_GEN_PROMPT = (
 
 
 def _get_qe_llm():
-    """Returns an LLM instance for Query Expansion.
-
-    Priority:
-    1. Running GGUF LLM server (get_active_llm_url)
-    2. LM Studio (config.LM_STUDIO_URL)
-    3. None — QE will be skipped silently
-    """
+    """LLM для Query Expansion: GGUF → LM Studio → None (QE пропускается)."""
     from src.gguf_direct import get_active_llm_url
 
     url = get_active_llm_url()
@@ -86,18 +77,7 @@ def _get_qe_llm():
 
 
 def _rrf_fuse(vector_results, bm25_results, k: int = 60):
-    """Reciprocal Rank Fusion (Cormack et al. 2009).
-
-    RRF_score(d) = Σ 1 / (k + rank_i(d)) для каждого retriever i.
-
-    Args:
-        vector_results: list[NodeWithScore] от vector_retriever
-        bm25_results:   list[NodeWithScore] от BM25Retriever (или [])
-        k: константа сглаживания (60 — стандарт)
-
-    Returns:
-        list[NodeWithScore], отсортированный по RRF score desc, без дубликатов.
-    """
+    """Reciprocal Rank Fusion (Cormack et al. 2009). Возвращает список NodeWithScore, отсортированный по RRF score desc, без дубликатов."""
     scores: dict = {}
     nodes_by_id: dict = {}
 
@@ -116,15 +96,7 @@ def _rrf_fuse(vector_results, bm25_results, k: int = 60):
 
 
 def _rrf_fuse_across_files(file_results, k: int = 60):
-    """F2: Merge RRF scores across files so big files don't dominate.
-
-    Args:
-        file_results: list of (file_name, [NodeWithScore]) tuples
-        k: RRF constant
-
-    Returns:
-        list[NodeWithScore] sorted by cross-file RRF score desc, deduplicated.
-    """
+    """Merge RRF scores across files so big files don't dominate. Возвращает list[NodeWithScore] sorted by cross-file RRF score desc."""
     scores: dict = {}
     nodes_by_id: dict = {}
 
@@ -142,7 +114,7 @@ def _rrf_fuse_across_files(file_results, k: int = 60):
 
 
 def retrieve_nodes(query: str, notebook_id: str, allowed_files=None, max_tokens=1024):
-    """Для каждого выбранного файла выполняем отдельный гибридный поиск топ-K чанков."""
+    """Для каждого выбранного файла — отдельный гибридный поиск топ-K чанков."""
     init_settings(max_tokens=max_tokens)
     vector_store = get_vector_store(notebook_id)
     index = VectorStoreIndex.from_vector_store(vector_store)

@@ -39,7 +39,7 @@ async def update_model_dirs(req: UpdateModelDirsRequest):
 
         invalidate_scan_cache()
     except Exception:
-        pass
+        logger.debug("settings: не удалось инвалидировать кэш сканирования")
     return {"status": "ok", "new_dirs": config.GGUF_SEARCH_DIRS}
 
 

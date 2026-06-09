@@ -27,13 +27,13 @@ from src.ingestion.vision import describe_image_with_lmstudio, get_vision_url
 
 logger = logging.getLogger(__name__)
 
-# ── WhisperX кеш ────────────────────────────────────────────────────
+# WhisperX кеш
 _whisper_model_cache: dict = {}
 _whisper_lock = threading.Lock()
 
 
 def get_or_load_whisper(model_name: str = "medium", device: str = "cuda", compute_type: str = "int8"):
-    """Возвращает кешированную WhisperX-модель или грузит и кладёт в кеш."""
+    """Возвращает кешированную WhisperX-модель или загружает её."""
     key = (model_name, device, compute_type)
     with _whisper_lock:
         if key in _whisper_model_cache:
@@ -46,7 +46,7 @@ def get_or_load_whisper(model_name: str = "medium", device: str = "cuda", comput
 
 
 def unload_whisper_model():
-    """Выгружает ВСЕ кешированные WhisperX-модели и освобождает VRAM."""
+    """Выгружает все кешированные WhisperX-модели."""
     with _whisper_lock:
         if not _whisper_model_cache:
             return
@@ -162,7 +162,7 @@ def process_audio_video(file_path, images_dir, is_video=False, progress_cb=None,
                     try:
                         process.terminate()
                     except Exception:
-                        pass
+                        pass  # best-effort
                     raise IngestionCancelled(f"Cancelled during frame extraction at {format_seconds(current_sec)}")
                 frame_counter += 1
                 raw_frame = process.stdout.read(chunk_size)
@@ -196,7 +196,7 @@ def process_audio_video(file_path, images_dir, is_video=False, progress_cb=None,
                                             try:
                                                 os.remove(frame_list[-1][0])
                                             except Exception:
-                                                pass
+                                                pass  # best-effort
                                             frame_list[-1] = (img_path, current_sec)
                                     prev_saved_thumb = thumb
                             stable_since_sec = current_sec

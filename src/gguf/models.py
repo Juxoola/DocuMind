@@ -3,10 +3,7 @@
 
 
 def detect_model_family(gguf_path: str) -> str:
-    """Определяет семейство модели по имени файла.
-
-    Returns: qwen | gemma3 | gemma4 | deepseek | llama | generic
-    """
+    """Определяет семейство модели по имени файла."""
     name = gguf_path.lower()
     if any(x in name for x in ["qwen", "qwq"]):
         return "qwen"

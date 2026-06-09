@@ -19,7 +19,7 @@ def get_image_base64(image_path):
 
 
 def get_vision_url(llm_settings, progress_cb=None):
-    """Ленивая инициализация Vision-сервера только когда он реально нужен."""
+    """Ленивая инициализация Vision-сервера, когда нужен."""
     if not llm_settings or not llm_settings.get("use_gguf_direct"):
         return None
 

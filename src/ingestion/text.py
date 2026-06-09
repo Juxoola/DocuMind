@@ -20,8 +20,7 @@ logger = logging.getLogger(__name__)
 
 
 def _analyze_page_for_vision(page):
-    """Чистый анализ одной страницы без побочных эффектов.
-    Возвращает (text, has_real_graphics)."""
+    """Анализирует страницу: извлекает текст, определяет наличие графики."""
     text = page.get_text()
     images = page.get_images()
     drawings = page.get_drawings()
@@ -175,7 +174,7 @@ def process_pdf(file_path, images_dir, llm_settings=None, shared_llm_url=None,
                             try:
                                 os.remove(frame_info["path"])
                             except Exception:
-                                pass
+                                pass  # best-effort
                         if progress_cb:
                             progress_cb(65 + int(done_count / n * 25), f"Описание PDF: {done_count}/{n}")
                 except IngestionCancelled:
@@ -230,16 +229,16 @@ def process_pptx(file_path, images_dir, llm_settings=None, shared_llm_url=None,
             try:
                 deck.Close()
             except Exception:
-                pass
+                pass  # best-effort
         if app is not None:
             try:
                 app.Quit()
             except Exception:
-                pass
+                pass  # best-effort
         try:
             pythoncom.CoUninitialize()
         except Exception:
-            pass
+            pass  # best-effort
     return nodes
 
 
@@ -280,14 +279,14 @@ def process_docx(file_path, images_dir, llm_settings=None, shared_llm_url=None,
             try:
                 doc.Close()
             except Exception:
-                pass
+                pass  # best-effort
         if app is not None:
             try:
                 app.Quit()
             except Exception:
-                pass
+                pass  # best-effort
         try:
             pythoncom.CoUninitialize()
         except Exception:
-            pass
+            pass  # best-effort
     return nodes

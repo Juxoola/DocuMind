@@ -1,7 +1,4 @@
-"""Построение контекста, промптов и получение URL эмбеддинг-сервера.
-
-Вынесено из rag_pipeline.py при рефакторинге.
-"""
+"""Построение контекста, промптов и получение URL эмбеддинг-сервера."""
 
 import logging
 import os
@@ -13,11 +10,7 @@ logger = logging.getLogger(__name__)
 
 
 def build_file_context(nodes, notebook_id: str):
-    """Каждый чанк получает свой порядковый номер [N].
-
-    Returns:
-        (sources: list[dict], context_str: str)
-    """
+    """Каждый чанк получает порядковый номер [N]. Возвращает sources и context_str."""
     paths = config.get_notebook_paths(notebook_id)
 
     sources = []

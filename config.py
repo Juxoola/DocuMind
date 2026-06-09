@@ -392,7 +392,7 @@ def resolve_model_path(path_or_filename: str) -> str:
 
         hit = find_gguf_by_name(path_or_filename)
         if hit:
-            print(f"[CONFIG] Модель найдена: {hit}")
+            logger.info(f"[CONFIG] Модель найдена: {hit}")
             return os.path.normpath(hit).lower()
     except Exception as e:
         logger.debug(f"[CONFIG] gguf_manager.find_gguf_by_name failed: {e}")
@@ -405,7 +405,7 @@ def resolve_model_path(path_or_filename: str) -> str:
         for dirpath, _dirnames, filenames in os.walk(base_dir):
             if filename in filenames:
                 full_path = os.path.join(dirpath, filename)
-                print(f"[CONFIG] Модель найдена (fallback walk): {full_path}")
+                logger.info(f"[CONFIG] Модель найдена (fallback walk): {full_path}")
                 return os.path.normpath(full_path).lower()
 
     return path_or_filename

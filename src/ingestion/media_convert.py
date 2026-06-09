@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 
 
 def ensure_720p_video(file_path, prog_cb=None, cancel_check=None, notebook_id=None):
-    """Оптимизирует видео до 720p HEVC (NVENC), турбо-режим для длинных видео."""
+    """Оптимизирует видео до 720p HEVC (NVENC), турбо для длинных видео."""
     ext = os.path.splitext(file_path)[1].lower()
     if ext not in [".mp4", ".avi", ".mkv", ".mov"]:
         return file_path
@@ -42,7 +42,7 @@ def ensure_720p_video(file_path, prog_cb=None, cancel_check=None, notebook_id=No
         except subprocess.TimeoutExpired:
             _safe_print(f"[ensure_720p_video] WARNING get_duration timeout для {os.path.basename(path)} (30с)")
         except Exception:
-            pass
+            pass  # best-effort
         return 0
 
     _safe_print(f"[ensure_720p_video] Начало: {os.path.basename(file_path)}")
@@ -71,7 +71,7 @@ def ensure_720p_video(file_path, prog_cb=None, cancel_check=None, notebook_id=No
             try:
                 os.remove(temp_final)
             except Exception:
-                pass
+                pass  # best-effort
             raise IngestionCancelled("Cancelled during 720p encode")
     else:
         if _is_cancelled():
@@ -149,12 +149,12 @@ def ensure_720p_video(file_path, prog_cb=None, cancel_check=None, notebook_id=No
             try:
                 os.remove(temp_final)
             except Exception:
-                pass
+                pass  # best-effort
             raise IngestionCancelled("Cancelled after video merge")
         try:
             shutil.rmtree(temp_dir)
         except Exception:
-            pass
+            pass  # best-effort
 
     if os.path.exists(temp_final) and os.path.getsize(temp_final) > 1000:
         if os.path.exists(file_path):
