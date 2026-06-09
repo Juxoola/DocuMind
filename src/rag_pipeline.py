@@ -121,7 +121,7 @@ def init_settings(max_tokens=1024):
             from src.gguf_direct import get_gguf_embedding_url
 
             model_path = config.resolve_model_path(model_name)
-            url = get_gguf_embedding_url(model_path)
+            url = get_gguf_embedding_url(model_path, n_parallel=config.EMBEDDING_N_PARALLEL)
             try:
                 from src.gguf_direct import get_active_embedding_parallel
 
