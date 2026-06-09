@@ -1,6 +1,10 @@
 """
 Роутер: CRUD закладок (Q&A).
 """
+#
+# Файл: bookmarks.py — эндпоинты для создания, чтения, обновления и удаления
+# закладок (сохранённых вопросов-ответов) в блокнотах.
+#
 
 import logging
 
@@ -19,6 +23,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["bookmarks"])
 
 
+# Список всех закладок блокнота.
 @router.get("/api/bookmarks")
 async def api_list_bookmarks(notebook_id: str = Query(...)):
     return {"bookmarks": list_bookmarks(notebook_id)}
@@ -44,6 +49,7 @@ class CreateBookmarkRequest(BaseModel):
     tags: list[str] = []
 
 
+# Создание новой закладки (вопрос + ответ + источники).
 @router.post("/api/bookmarks")
 async def api_create_bookmark(req: CreateBookmarkRequest):
     try:
@@ -58,6 +64,7 @@ class UpdateBookmarkRequest(BaseModel):
     tags: list[str] | None = None
 
 
+# Частичное обновление закладки (title, tags) — question/answer не перезаписываются.
 @router.patch("/api/bookmarks/{bookmark_id}")
 async def api_update_bookmark(bookmark_id: str, req: UpdateBookmarkRequest):
     patch = {k: v for k, v in req.model_dump().items() if k != "notebook_id" and v is not None}
@@ -67,6 +74,7 @@ async def api_update_bookmark(bookmark_id: str, req: UpdateBookmarkRequest):
     return bm
 
 
+# Удаление закладки по ID.
 @router.delete("/api/bookmarks/{bookmark_id}")
 async def api_delete_bookmark(bookmark_id: str, notebook_id: str = Query(...)):
     ok = delete_bookmark(notebook_id, bookmark_id)

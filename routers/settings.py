@@ -1,6 +1,10 @@
 """
 Роутер: настройки RAG и GGUF.
 """
+#
+# Файл: settings.py — чтение/запись конфигурации RAG (модели эмбеддингов, реранкер)
+# и GGUF (директории поиска, размер контекста, слои GPU).
+#
 
 import logging
 
@@ -13,6 +17,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["settings"])
 
 
+# Текущая конфигурация GGUF: директории поиска, контекст, слои GPU, потоки.
 @router.get("/api/gguf-config")
 async def api_get_gguf_config():
     return {
@@ -27,6 +32,7 @@ class UpdateModelDirsRequest(BaseModel):
     dirs: str
 
 
+# Обновление путей поиска GGUF-моделей + сброс кэша сканирования.
 @router.post("/api/update-model-dirs")
 async def update_model_dirs(req: UpdateModelDirsRequest):
     config.GGUF_SEARCH_DIRS = req.dirs
@@ -40,6 +46,7 @@ async def update_model_dirs(req: UpdateModelDirsRequest):
     return {"status": "ok", "new_dirs": config.GGUF_SEARCH_DIRS}
 
 
+# Текущие настройки RAG: модели эмбеддингов/реранкера, top-k, использование реранкера.
 @router.get("/api/rag-config")
 async def get_rag_config():
     return {
@@ -61,6 +68,7 @@ class UpdateRagConfigRequest(BaseModel):
     use_reranker: bool
 
 
+# Обновление RAG-конфигурации: сохраняет в файл и выгружает старые модели для перезагрузки.
 @router.post("/api/update-rag-config")
 async def update_rag_config(req: UpdateRagConfigRequest):
     from src.rag_pipeline import unload_rag_models

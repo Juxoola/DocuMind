@@ -3,6 +3,10 @@ NotebookLM Local Clone — основной модуль.
 
 Запуск: python main.py
 """
+#
+# Файл: main.py — точка входа FastAPI-приложения. Настраивает логгирование, CORS,
+# статику, lifespan (миграция + предзагрузка моделей), middleware контроля размера загрузок.
+#
 
 import atexit
 import logging
@@ -42,6 +46,7 @@ _lifespan_cleanup_done = False
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Lifespan-менеджер: cleanup pending_delete, миграция старых данных, фоновая предзагрузка моделей.
     global _lifespan_cleanup_done
 
     logger.info("Запуск сервера...")
@@ -76,6 +81,7 @@ async def lifespan(app: FastAPI):
         kill_stray_servers()
 
 
+# Фоновая предзагрузка RAG-моделей (эмбеддинги, реранкер) — запускается в отдельном потоке при старте.
 def preload_all_models():
     try:
         from src.rag_pipeline import preload_all_models as _preload
@@ -102,7 +108,7 @@ def _shutdown_models():
         logger.error(f"Ошибка при выгрузке моделей: {e}")
 
 
-# Windows Console Control Handler — перехватывает CTRL_CLOSE/CTRL_BREAK
+# Windows Console Control Handler — перехватывает CTRL_CLOSE/CTRL_BREAK для graceful shutdown.
 if os.name == "nt":
     try:
         import ctypes
@@ -135,6 +141,7 @@ atexit.register(kill_stray_servers)
 app = FastAPI(title="NotebookLM Local Clone", lifespan=lifespan)
 
 
+# Middleware: проверяет Content-Length для /api/upload до передачи в роутер — отклоняет файлы больше лимита.
 @app.middleware("http")
 async def enforce_upload_size(request, call_next):
     if request.url.path.startswith("/api/upload"):
@@ -164,6 +171,7 @@ os.makedirs(os.path.join(config.BASE_DIR, "static"), exist_ok=True)
 app.mount("/static", StaticFiles(directory=os.path.join(config.BASE_DIR, "static")), name="static")
 app.mount("/files", StaticFiles(directory=config.NOTEBOOKS_DIR), name="notebooks")
 
+# Регистрация всех роутеров приложения.
 from routers.bookmarks import router as bookmarks_router
 from routers.chat import router as chat_router
 from routers.files import router as files_router

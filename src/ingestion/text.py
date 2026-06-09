@@ -1,4 +1,5 @@
 """Обработка текстовых документов: PDF, PPTX, DOCX."""
+# PDF: параллельный разбор через ThreadPoolExecutor, Vision для страниц с графикой
 
 import json
 import logging

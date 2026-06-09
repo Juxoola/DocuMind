@@ -1,4 +1,8 @@
 """Общие состояние и утилиты для роутеров."""
+#
+# Файл: shared.py — глобальные объекты (HTTP-сессия, флаги отмены, фоновые задачи)
+# и утилиты для безопасной работы с файловой системой (удаление, имена).
+#
 
 import asyncio
 import ctypes
@@ -19,6 +23,7 @@ import config
 
 logger = logging.getLogger(__name__)
 
+# HTTP-сессия с пулом соединений — используется всеми роутерами для внешних API-вызовов (LLM, эмбеддинги).
 _http_session = requests.Session()
 _http_session.mount(
     "http://",
@@ -35,11 +40,13 @@ _http_session.mount(
     ),
 )
 
+# Глобальное состояние: статус ингеста, флаги отмены, реестр фоновых asyncio-задач.
 ingestion_status: dict = {}
 upload_cancel_flags: dict = {}
 _background_tasks: "set[asyncio.Task]" = set()
 
 
+# Валидатор имени файла — защита от path traversal и недопустимых символов Windows.
 def safe_filename(filename: str) -> str:
     from fastapi import HTTPException
 
@@ -76,6 +83,7 @@ def _schedule_delete_on_reboot(path: str) -> None:
         raise OSError(f"MoveFileExW failed, WinError={err}: {ctypes.FormatError(err)}")
 
 
+# Многоуровневое удаление: chmod + retry, gc, cmd.exe rmdir, отложенное удаление через перезагрузку.
 def robust_rmtree(path: str, max_retries: int = 10, delay: float = 1.0) -> tuple:
     if not os.path.exists(path):
         return True, None

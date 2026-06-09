@@ -5,7 +5,12 @@
   from src.rag_pipeline import ...
 продолжали работать без изменений.
 """
+#
+# Файл: rag_pipeline.py — trampoline (заглушка совместимости).
+# Все функции RAG живут в src/rag/ (retrieval, indexing, prompt, models, bm25, state).
+#
 
+# Импорт всех подмодулей RAG: BM25, индексация, модели, промпты, поиск, состояние.
 from src.rag.bm25 import (
     _rebuild_bm25_bg,
     _schedule_bm25_rebuild,
@@ -40,6 +45,7 @@ from src.rag.state import (
     _rerank_session,
 )
 
+# Полный список публичного API для удобства импорта и рефакторинга.
 __all__ = [
     "_BM25_DEBOUNCE_SEC",
     "_QUERY_GEN_PROMPT",

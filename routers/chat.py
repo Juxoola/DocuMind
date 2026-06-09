@@ -1,6 +1,10 @@
 """
 Роутер: чат-эндпоинт (SSE-стриминг).
 """
+#
+# Файл: chat.py — SSE-стриминг ответа LLM с поддержкой RAG-контекста, GGUF (локальный)
+# и OpenAI-совместимых API. Обрабатывает текстовые и multi-modal (изображения) запросы.
+#
 
 import json
 import logging
@@ -19,6 +23,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["chat"])
 
 
+# Модель запроса чата: query + RAG-параметры + настройки GGUF/OpenAI + режим ответа.
 class ChatRequest(BaseModel):
     query: str
     allowed_files: list[str]
@@ -49,6 +54,7 @@ class ChatRequest(BaseModel):
     mtp_enabled: bool | None = False
 
 
+# Основной эндпоинт чата: выполняет RAG-поиск, выбирает LLM-бэкенд (GGUF/OpenAI), стримит SSE-ответ.
 @router.post("/api/chat")
 async def chat(request: ChatRequest):
     import asyncio
@@ -132,6 +138,7 @@ async def chat(request: ChatRequest):
     else:
         active_llm = None
 
+    # Внутренний генератор SSE-событий: последовательно отправляет источники, токены ответа, статистику.
     async def generate():
         nonlocal query_for_rag, sources, context
         token_count = 0
@@ -185,6 +192,7 @@ async def chat(request: ChatRequest):
 
             yield f"data: {json.dumps({'type': 'sources', 'sources': sources}, ensure_ascii=False)}\n\n"
 
+            # Ветка GGUF: стриминг через локальный llama-server с детекцией <think>-тегов для chain-of-thought.
             if use_direct_gguf:
                 from src.gguf_direct import detect_model_family, stream_gguf_chat
 

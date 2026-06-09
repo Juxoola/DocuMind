@@ -3,6 +3,11 @@
 Вынесено из gguf_direct.py при рефакторинге.
 """
 
+# Файл: server.py — запуск/остановка серверов llama-server для LLM,
+# эмбеддингов и реранкеров. Содержит логику выбора порта, сборки
+# аргументов командной строки, ожидания готовности (health check)
+# и корректной выгрузки моделей.
+
 import gc
 import logging
 import os
@@ -32,7 +37,10 @@ from src.gguf.state import (
 logger = logging.getLogger(__name__)
 
 
-
+# ---------------------------------------------------------------------------
+# is_server_ready — опрос /health с таймаутом 1 с.
+# Используется в цикле ожидания после запуска серверного процесса.
+# ---------------------------------------------------------------------------
 
 def is_server_ready(port: int) -> bool:
 
@@ -43,7 +51,13 @@ def is_server_ready(port: int) -> bool:
         return False
 
 
-
+# ---------------------------------------------------------------------------
+# _start_llm_server_sync — синхронный запуск llama-server для LLM.
+# 1. Выбор случайного порта через socket bind()+close().
+# 2. Сборка командной строки: модель, контекст, GPU, кеш, MTP/thinking.
+# 3. Запуск подпроцесса и ожидание готовности (health check) до 60 с.
+# 4. При падении — чтение stderr для диагностики.
+# ---------------------------------------------------------------------------
 
 def _start_llm_server_sync(gguf_path: str, mmproj_path: str, current_config: dict) -> str:
 
@@ -104,6 +118,9 @@ def _start_llm_server_sync(gguf_path: str, mmproj_path: str, current_config: dic
     process = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=creationflags)
     _assign_to_job(process)
 
+    # Цикл ожидания: каждые 0.5 с проверяем /health.
+    # Если процесс упал — читаем stderr и выбрасываем RuntimeError.
+    # Если не дождались за 60 с — убиваем процесс и TimeoutError.
     start_wait = time.time()
     while time.time() - start_wait < 60:
         if is_server_ready(port):
@@ -154,7 +171,12 @@ def unload_rag_models_safe():
         pass
 
 
-
+# ---------------------------------------------------------------------------
+# get_gguf_llm — основная точка входа для загрузки LLM.
+# Синхронная: возвращает URL сервера или выбрасывает исключение.
+# Проверяет кеш процессов; если конфиг совпадает — возвращает готовый URL.
+# Иначе выгружает старые модели и запускает новую.
+# ---------------------------------------------------------------------------
 
 def get_gguf_llm(
     gguf_path: str,
@@ -358,7 +380,11 @@ def get_llm_status() -> dict:
     return state
 
 
-
+# ---------------------------------------------------------------------------
+# get_gguf_embedding_url — запуск сервера для эмбеддингов или реранкера.
+# Отличается от LLM: флаг --embedding/--reranking, меньший контекст,
+# отсутствие MTP/thinking. Роль определяет набор параметров.
+# ---------------------------------------------------------------------------
 
 def get_gguf_embedding_url(
     gguf_path: str, n_threads: int = None, is_reranker: bool = False, n_parallel: int = 1
@@ -460,7 +486,10 @@ def get_active_embedding_parallel(gguf_path: str = None) -> int:
         return 1
 
 
-
+# ---------------------------------------------------------------------------
+# kill_stray_servers — принудительное завершение ВСЕХ процессов
+# llama-server вне нашего управления. Вызывается при перезагрузке.
+# ---------------------------------------------------------------------------
 
 def kill_stray_servers():
 
@@ -487,6 +516,12 @@ def count_running_servers() -> int:
         logger.debug(f"count llama-server processes failed: {e}")
         return 0
 
+
+# ---------------------------------------------------------------------------
+# unload_all_models — выгрузка одной или всех моделей.
+# Останавливает процесс (через taskkill/pkill), чистит словари.
+# В конце — gc.collect() + torch.cuda.empty_cache().
+# ---------------------------------------------------------------------------
 
 def unload_all_models(role: str = None):
 

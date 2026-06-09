@@ -5,6 +5,11 @@
   from src.gguf_manager import ...
 продолжали работать без изменений.
 """
+#
+# Файл: gguf_manager.py — trampoline + legacy-функции.
+# Кроме реэкспорта из src/gguf/, содержит устаревшие standalone-функции
+# (start_gguf_server, stop_gguf_server) для обратной совместимости.
+#
 
 import logging
 import os
@@ -31,6 +36,7 @@ _server_process = None
 _server_info = {}
 
 
+# Legacy-функция: проверяет, жив ли старый standalone-сервер (не из пула src/gguf/).
 def get_server_status() -> dict:
     global _server_process, _server_info
     if _server_process is None or _server_process.poll() is not None:
@@ -47,6 +53,7 @@ def get_server_status() -> dict:
     return {"running": True, "info": _server_info, "status": "initializing"}
 
 
+# Legacy-функция: запускает отдельный llama-server на свободном порту (устаревший API).
 def start_gguf_server(
     gguf_path: str,
     mmproj_path: str | None = None,
@@ -102,6 +109,7 @@ def start_gguf_server(
     return {"status": "error", "msg": "Таймаут запуска сервера"}
 
 
+# Legacy-функция: останавливает ранее запущенный standalone-сервер.
 def stop_gguf_server() -> dict:
     global _server_process, _server_info
     if _server_process:
@@ -118,6 +126,7 @@ def stop_gguf_server() -> dict:
     return {"status": "ok"}
 
 
+# Legacy-функция: возвращает URL запущенного standalone-сервера или None.
 def get_gguf_server_url() -> str | None:
     status = get_server_status()
     if status["running"]:
@@ -125,6 +134,7 @@ def get_gguf_server_url() -> str | None:
     return None
 
 
+# Полный список публичного API для удобства импорта и рефакторинга.
 __all__ = [
     "_dir_mtime",
     "_gguf_cache_lock",

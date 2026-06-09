@@ -14,6 +14,7 @@ NOTEBOOKS_DIR = os.path.join(BASE_DIR, "notebooks")
 os.makedirs(NOTEBOOKS_DIR, exist_ok=True)
 
 
+# Пути для хранения данных каждого notebook: data, chroma_db, images.
 def get_notebook_paths(notebook_id: str):
     nb_path = os.path.join(NOTEBOOKS_DIR, notebook_id)
     return {
@@ -51,6 +52,7 @@ LLM_DEFAULT_MODEL = os.getenv("LLM_DEFAULT_MODEL", "gpt-4o")
 EMBEDDING_DEFAULT_API_KEY = os.getenv("EMBEDDING_DEFAULT_API_KEY", "lm-studio")
 EMBEDDING_DEFAULT_MODEL = os.getenv("EMBEDDING_DEFAULT_MODEL", "text-embedding-ada-002")
 
+# Настройка лимитов загрузки файлов и список разрешённых расширений.
 UPLOAD_MAX_SIZE_MB = int(os.getenv("UPLOAD_MAX_SIZE_MB", "500"))
 UPLOAD_MAX_SIZE_BYTES = UPLOAD_MAX_SIZE_MB * 1024 * 1024
 
@@ -79,6 +81,8 @@ EMBEDDING_MODEL_NAME = os.getenv("EMBEDDING_MODEL_NAME", "Qwen3-Embedding-0.6B-v
 RERANKER_MODEL_NAME = os.getenv("RERANKER_MODEL_NAME", "Qwen3-Reranker-0.6B-v2.Q8_0.gguf")
 EMBEDDING_N_PARALLEL = int(os.getenv("EMBEDDING_N_PARALLEL", "4"))
 
+# Параметры RAG-пайплайна: сколько чанков искать на файл (top_k),
+# пул для реранкера, итоговое число, пороговые фильтры.
 RAG_TOP_K_PER_FILE = int(os.getenv("RAG_TOP_K_PER_FILE", 5))
 RAG_RERANK_POOL = int(os.getenv("RAG_RERANK_POOL", 30))
 RAG_FINAL_TOP_N = int(os.getenv("RAG_FINAL_TOP_N", 15))
@@ -88,6 +92,8 @@ RERANK_SCORE_THRESHOLD = float(os.getenv("RERANK_SCORE_THRESHOLD", "0.05"))
 MIN_FINAL_CHUNKS = int(os.getenv("MIN_FINAL_CHUNKS", "5"))
 RAG_TOP_K_RATIO = float(os.getenv("RAG_TOP_K_RATIO", "0.1"))
 
+# Настройки GGUF-сервера: порт, пути поиска моделей, параметры
+# инференса (контекст, кол-во потоков, GPU-слои).
 GGUF_SEARCH_DIRS = os.getenv("GGUF_SEARCH_DIRS", "F:/llm;C:/test/models")
 GGUF_SERVER_PORT = int(os.getenv("GGUF_SERVER_PORT", 8081))
 GGUF_SERVER_HOST = os.getenv("GGUF_SERVER_HOST", "127.0.0.1")
@@ -116,6 +122,8 @@ SYSTEM_PROMPT_BASE = (
 
 ANSWER_MODE_DEFAULT = "concise"
 
+# Словарь правил ответа для разных режимов (concise, detailed, summary,
+# step_by_step, checklist, moderate, expert, eli5). Выбирается через answer_mode.
 SYSTEM_PROMPT_RULES = {
     "concise": (
         "ПРАВИЛА ОТВЕТА:\n"
@@ -270,6 +278,9 @@ def load_rag_config():
 load_rag_config()
 
 
+# Поиск GGUF-файла: сначала абсолютный путь, потом по имени через
+# gguf_manager, затем рекурсивный обход GGUF_SEARCH_DIRS.
+# Результат кешируется (lru_cache на 64 записи).
 @lru_cache(maxsize=64)
 def resolve_model_path(path_or_filename: str) -> str:
     if not path_or_filename:

@@ -1,6 +1,10 @@
 """
 Роутер: CRUD ноутбуков + миграция старых данных.
 """
+#
+# Файл: notebooks.py — создание, удаление и список блокнотов (notebooks),
+# а также миграция данных из старой плоской структуры в именованные блокноты.
+#
 
 import gc
 import json
@@ -23,6 +27,7 @@ router = APIRouter(tags=["notebooks"])
 _NB_ID_PATTERN = re.compile(r"^[a-f0-9]{8}$")
 
 
+# Валидация notebook_id: строго 8 hex-символов — защита от path traversal.
 def validate_nb_id(nb_id: str) -> str:
     nb_id = nb_id.strip()
     if not _NB_ID_PATTERN.match(nb_id):
@@ -31,6 +36,7 @@ def validate_nb_id(nb_id: str) -> str:
     return nb_id
 
 
+# Миграция старых данных (data/, chroma_db/, images/) в блокнот 'default'.
 def migrate_old_data():
     try:
         old_data = os.path.join(config.BASE_DIR, "data")
@@ -55,6 +61,7 @@ def migrate_old_data():
         logger.warning(f"Ошибка миграции (продолжаем без неё): {e}")
 
 
+# Список всех блокнотов — читает meta.json из каждой поддиректории notebooks/.
 @router.get("/api/notebooks")
 async def get_notebooks():
     nbs = []
@@ -89,6 +96,7 @@ async def create_notebook(req: CreateNotebookRequest):
     return meta
 
 
+# Удаление блокнота: закрывает ChromaDB-клиент, отменяет BM25-перестроение, удаляет директорию.
 @router.delete("/api/notebooks/{nb_id}")
 async def delete_notebook(nb_id: str):
     nb_id = validate_nb_id(nb_id)

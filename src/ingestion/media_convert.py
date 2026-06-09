@@ -1,4 +1,5 @@
 """Медиа-конвертация: 720p ресайз видео, конвертация аудио в mp3."""
+# GPU-кодирование HEVC (NVENC): single-encode для коротких, турбо-сегментация для длинных (>2мин)
 
 import concurrent.futures
 import logging

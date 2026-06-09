@@ -1,5 +1,9 @@
 """BM25 lifecycle: сборка, debounce, отмена, проверка готовности."""
 
+# Фоновая пересборка BM25-индекса с debounce-защитой:
+# при каждом новом документе таймер сбрасывается, полная сборка
+# запускается через _BM25_DEBOUNCE_SEC секунд бездействия.
+
 import logging
 import os
 import threading
@@ -18,6 +22,9 @@ from src.rag.state import (
 logger = logging.getLogger(__name__)
 
 
+# Фактическая пересборка BM25: читает все записи из ChromaDB
+# пачками по _PAGE_SIZE, создаёт TextNode'ы и сохраняет BM25Retriever
+# на диск. Запускается в фоновом потоке.
 def _rebuild_bm25_bg(notebook_id: str, db_path: str):
     _PAGE_SIZE = 2000
     try:
@@ -74,6 +81,8 @@ def _rebuild_bm25_bg(notebook_id: str, db_path: str):
         logger.warning(f"[RAG] Ошибка фоновой сборки BM25: {e}")
 
 
+# Планирование пересборки BM25 с debounce: отменяет предыдущий
+# таймер для этого notebook и запускает новый на _BM25_DEBOUNCE_SEC секунд.
 def _schedule_bm25_rebuild(notebook_id: str, db_path: str):
     with _bm25_pending_lock:
         old = _bm25_pending_timers.get(notebook_id)
@@ -106,6 +115,7 @@ def _schedule_bm25_rebuild(notebook_id: str, db_path: str):
         )
 
 
+# Отмена запланированной пересборки BM25 (например, при удалении блокнота).
 def cancel_bm25_rebuild(notebook_id: str):
     with _bm25_pending_lock:
         timer = _bm25_pending_timers.pop(notebook_id, None)
@@ -117,6 +127,8 @@ def cancel_bm25_rebuild(notebook_id: str):
                 logger.debug(f"[cancel_bm25_rebuild] timer.cancel: {e}")
 
 
+# Принудительный запуск пересборки BM25 сейчас (с отменой debounce).
+# wait=True — синхронно в текущем потоке; wait=False — в фоновом потоке.
 def flush_bm25_rebuild(
     notebook_id: str,
     db_path: str = None,
@@ -156,6 +168,8 @@ def flush_bm25_rebuild(
         _bm25_rebuilding.discard(notebook_id)
 
 
+# Проверка: готов ли BM25-индекс для notebook (существует на диске,
+# нет активных таймеров и фоновых пересборок).
 def is_bm25_ready(notebook_id: str) -> bool:
     paths = config.get_notebook_paths(notebook_id)
     bm25_dir = os.path.join(paths["base"], "bm25")

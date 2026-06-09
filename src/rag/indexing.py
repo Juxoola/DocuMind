@@ -1,5 +1,8 @@
 """ChromaDB операции: построение индекса, клиенты, close."""
 
+# Единственная точка создания VectorStoreIndex и управления
+# ChromaDB PersistentClient'ами с кешированием по пути БД.
+
 import logging
 import os
 
@@ -16,6 +19,8 @@ from src.rag.state import _client_cache
 logger = logging.getLogger(__name__)
 
 
+# Построение векторного индекса из nodes и запуск фоновой
+# пересборки BM25. Вызывается после обработки загруженного файла.
 def build_index(nodes, notebook_id: str):
     init_settings()
     vector_store = get_vector_store(notebook_id)
@@ -28,6 +33,8 @@ def build_index(nodes, notebook_id: str):
     return index
 
 
+# Получение или создание ChromaVectorStore для notebook_id.
+# Клиенты кешируются по пути БД — один notebook = один PersistentClient.
 def get_vector_store(notebook_id: str):
     global _client_cache
     paths = config.get_notebook_paths(notebook_id)
@@ -42,6 +49,7 @@ def get_vector_store(notebook_id: str):
     return ChromaVectorStore(chroma_collection=chroma_collection)
 
 
+# Закрытие всех открытых ChromaDB клиентов (при shutdown приложения).
 def close_all_clients():
     global _client_cache
     for path, client in _client_cache.items():
@@ -52,6 +60,7 @@ def close_all_clients():
     _client_cache.clear()
 
 
+# Закрытие клиента для конкретного notebook (при удалении блокнота).
 def close_notebook_client(notebook_id: str):
     global _client_cache
     from config import get_notebook_paths

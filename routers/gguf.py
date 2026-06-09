@@ -1,6 +1,10 @@
 """
 Роутер: управление GGUF-моделями, VRAM, предзагрузка LLM.
 """
+#
+# Файл: gguf.py — эндпоинты для сканирования GGUF-моделей, мониторинга VRAM,
+# загрузки/выгрузки моделей и стриминга статуса предзагрузки.
+#
 
 import asyncio
 import json
@@ -26,6 +30,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["gguf"])
 
 
+# Сканирование директорий в поиске .gguf-файлов — возвращает список доступных моделей.
 @router.get("/api/gguf-models")
 async def api_scan_gguf_models():
     try:
@@ -68,6 +73,7 @@ def _get_gguf_servers_info() -> list:
     return servers
 
 
+# Выгрузка всех GGUF-моделей: останавливает серверы и освобождает VRAM.
 @router.post("/api/gguf-unload")
 async def api_gguf_unload_all():
     unload_all_models()
@@ -81,6 +87,7 @@ async def api_gguf_kill_all():
     return {"status": "ok", "msg": "Все процессы llama-server завершены"}
 
 
+# Мониторинг VRAM через nvidia-smi + информация о запущенных llama-server.
 @router.get("/api/vram")
 async def api_vram():
     import shutil
@@ -212,6 +219,7 @@ async def api_llm_status():
     return get_llm_status()
 
 
+# Стриминг статуса LLM в реальном времени через SSE — для отслеживания прогресса предзагрузки.
 @router.get("/api/llm-status/stream")
 async def api_llm_status_stream():
     async def event_gen():

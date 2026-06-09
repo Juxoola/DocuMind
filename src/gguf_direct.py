@@ -5,9 +5,15 @@
   from src.gguf_direct import ...
 продолжали работать без изменений.
 """
+#
+# Файл: gguf_direct.py — trampoline (заглушка совместимости).
+# Все символы живут в src/gguf/; этот файл реэкспортирует их,
+# чтобы не ломать существующие импорты после рефакторинга.
+#
 
 import requests  # noqa: F401 — нужно для patch("src.gguf_direct.requests.get") в тестах
 
+# Реэкспорт из src/gguf/ — модели, сервер, состояние потока.
 from src.gguf.models import detect_model_family
 from src.gguf.server import (
     _start_llm_server_sync,
@@ -38,6 +44,7 @@ from src.gguf.state import (
 )
 from src.gguf.streaming import stream_gguf_chat
 
+# Полный список публичного API для удобства импорта и рефакторинга.
 __all__ = [
     "CACHE_TYPE_MAP",
     "SERVER_EXE",

@@ -26,6 +26,10 @@ API:
     delete_bookmark(notebook_id, bookmark_id) -> bool
     mark_stale_for_file(notebook_id, file_name) -> int  # кол-во помеченных
 """
+#
+# Файл: bookmarks.py (src/) — постоянное хранение закладок в JSON-файлах.
+# Потокобезопасность через per-notebook Lock; атомарная запись через tmp + replace.
+#
 
 import json
 import logging
@@ -42,6 +46,7 @@ _write_locks: dict = {}
 _locks_guard = threading.Lock()
 
 
+# Возвращает per-notebook Lock для потокобезопасного чтения/записи bookmarks.json.
 def _lock_for(notebook_id: str) -> threading.Lock:
     with _locks_guard:
         lock = _write_locks.get(notebook_id)
@@ -71,6 +76,7 @@ def _read_bookmarks(notebook_id: str) -> list:
         return []
 
 
+# Атомарная запись bookmarks.json: tmp-файл + os.replace (атомарно на большинстве ФС).
 def _write_bookmarks(notebook_id: str, bookmarks: list) -> None:
     path = _bookmarks_path(notebook_id)
     os.makedirs(os.path.dirname(path), exist_ok=True)

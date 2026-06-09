@@ -1,6 +1,11 @@
 """Асинхронный стриминг чат-ответов через llama-server API.
 """
 
+# Файл: streaming.py — асинхронный генератор для получения ответов
+# от llama-server через SSE (Server-Sent Events). Разбирает поток
+# data: событий, извлекает reasoning_content и content, оборачивает
+# мышление в теги <think>...</think> (или <|channel|> для gemma4).
+
 import json
 import logging
 
@@ -21,6 +26,8 @@ async def stream_gguf_chat(
 
     import httpx
 
+    # Формируем запрос к /v1/chat/completions со stream=True.
+    # Для gemma4 используются теги <|channel|>, для остальных — <think>.
     payload = {
         "messages": messages,
         "stream": True,
@@ -45,6 +52,9 @@ async def stream_gguf_chat(
                 r.raise_for_status()
                 is_thinking = False
 
+                # Парсинг SSE-потока: строки вида "data: {...}".
+                # reasoning_content → оборачиваем в OPEN_TAG/CLOSE_TAG,
+                # content — выдаём как есть.
                 async for line in r.aiter_lines():
                     if line:
                         line_str = line

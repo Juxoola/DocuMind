@@ -1,5 +1,8 @@
 """Построение контекста, промптов и получение URL эмбеддинг-сервера."""
 
+# Преобразует отранжированные NodeWithScore в читаемый текст
+# для LLM, собирает финальный промпт с источниками и системными правилами.
+
 import logging
 import os
 
@@ -9,6 +12,9 @@ from src.rag.state import _model_cache
 logger = logging.getLogger(__name__)
 
 
+# Собирает из списка узлов две структуры: sources (список словарей
+# с текстом, метаданными, ссылками на изображения) и context_str
+# (склеенный текст всех источников для вставки в промпт).
 def build_file_context(nodes, notebook_id: str):
     paths = config.get_notebook_paths(notebook_id)
 
@@ -48,6 +54,8 @@ def build_file_context(nodes, notebook_id: str):
     return sources, context_str
 
 
+# Формирует финальный промпт: системный промпт (с правилами ответа
+# и цитирования), контекст из источников и вопрос пользователя.
 def make_prompt(
     query: str,
     context_str: str,
@@ -64,6 +72,8 @@ def make_prompt(
     )
 
 
+# Возвращает URL эмбеддинг-сервера из кеша (через _model_cache).
+# Используется для проверки, что сервер жив (health check).
 def get_embedding_url() -> str | None:
     global _model_cache
     embed = _model_cache.get("embed_model")
