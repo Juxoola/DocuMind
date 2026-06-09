@@ -64,6 +64,23 @@ def _assign_to_job(process):
             logger.debug(f"AssignProcessToJobObject failed (non-critical): {e}")
 
 
+# Маппинг типов квантования KV-кэша для llama-server.
+# Ключ — значение gguf_kv_quant из UI/Settings; значение — флаг --cache-type-k/v.
+#
+# F-fix #34: q4_k и q5_k НЕ поддерживаются llama.cpp для KV-cache.
+# Допустимы только: f32, f16, bf16, q8_0, q4_0, q4_1, iq4_nl, q5_0, q5_1.
+# Коммит cd2dd6e ошибочно добавил q4_k/q5_k в map — llama-server падал
+# при старте с "retcode=1" и пустым stderr.
+CACHE_TYPE_MAP = {
+    0: "f16",
+    1: "f32",
+    2: "q4_0",
+    3: "q4_1",
+    4: "q4_0",  # было "q4_k" — невалидно. Fallback на q4_0.
+    6: "q5_0",  # было "q5_k" — невалидно. Fallback на q5_0.
+    8: "q8_0",
+}
+
 SERVER_EXE = os.path.join(config.BASE_DIR, "bin", "llama-server.exe")
 
 def detect_model_family(gguf_path: str) -> str:
@@ -108,22 +125,6 @@ def _start_llm_server_sync(
     # Для параллельной работы нужно расширить общий контекст, чтобы каждому слоту хватило места
     total_ctx = current_config["ctx_size"] * current_config["n_parallel"]
 
-    # Маппинг типов квантования для llama-server.
-    # Ключ — значение gguf_kv_quant из UI/Settings; значение — флаг --cache-type-k/v.
-    #
-    # F-fix #34: q4_k и q5_k НЕ поддерживаются llama.cpp для KV-cache.
-    # Допустимы только: f32, f16, bf16, q8_0, q4_0, q4_1, iq4_nl, q5_0, q5_1.
-    # Коммит cd2dd6e ошибочно добавил q4_k/q5_k в map — llama-server падал
-    # при старте с "retcode=1" и пустым stderr.
-    CACHE_TYPE_MAP = {
-        0: "f16",
-        1: "f32",
-        2: "q4_0",
-        3: "q4_1",
-        4: "q4_0",  # было "q4_k" — невалидно. Fallback на q4_0 (то же что было до регрессии).
-        6: "q5_0",  # было "q5_k" — невалидно. Fallback на q5_0.
-        8: "q8_0",
-    }
     type_k_str = CACHE_TYPE_MAP.get(current_config["type_k"], "f16")
     type_v_str = CACHE_TYPE_MAP.get(current_config["type_v"], "f16")
 
