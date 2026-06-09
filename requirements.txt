@@ -1,39 +1,46 @@
-# --- Core RAG & LLM ---
-llama-index-core
+# ── Core RAG & LLM ──
+llama-index-core==0.14.21
 llama-index-readers-file
-llama-index-llms-openai
-llama-index-vector-stores-chroma
-llama-index-retrievers-bm25
-rank_bm25
-chromadb
+llama-index-llms-openai==0.7.5
+llama-index-vector-stores-chroma==0.5.5
+llama-index-retrievers-bm25==0.7.1
+rank-bm25==0.2.2
+chromadb==1.5.8
 
-# --- Speech & Audio (WhisperX) ---
+# ── Speech & Audio (WhisperX) ──
 # torch обязателен для WhisperX
-torch
-torchaudio
-whisperx
+torch==2.11.0
+torchaudio==2.11.0
+whisperx==3.8.5
 
-# --- Backend & API ---
-fastapi
-uvicorn
-requests
-pydantic
-pydantic-settings
-python-dotenv
+# ── Backend & API ──
+fastapi==0.136.1
+uvicorn==0.46.0
+requests==2.33.1
+pydantic==2.13.3
+pydantic-settings==2.14.0
+python-dotenv==1.2.2
+python-multipart==0.0.27
 
-# --- Image & Video Processing ---
-opencv-python
-numpy
-imageio-ffmpeg
+# ── Image & Video Processing ──
+opencv-python==4.13.0.92
+numpy==2.3.2
+imageio-ffmpeg==0.6.0
 
-# --- Document Processing ---
-pymupdf
-python-docx
-python-pptx
+# ── Document Processing ──
+PyMuPDF==1.27.2.3
+python-docx==1.2.0
+python-pptx==1.0.2
 
-# --- Utils ---
-watchfiles
+# ── Utils ──
+watchfiles==1.1.1
 
-# ── Опциональные зависимости ──
-# Windows-only зависимости для чтения .pptx через COM (требует MS Office):
-#   pip install -r requirements-windows.txt
+# ── Dev ──
+pytest==9.0.3
+pytest-asyncio==1.4.0
+pytest-cov==7.1.0
+httpx==0.28.1
+ruff==0.15.16
+
+# ── Windows ──
+pywin32==311

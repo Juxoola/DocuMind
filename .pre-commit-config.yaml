@@ -1,0 +1,33 @@
+repos:
+  # Используем system hooks (не требуют установки изолированных env)
+  - repo: local
+    hooks:
+      - id: ruff-lint
+        name: ruff lint
+        entry: ruff check
+        args: [--fix]
+        language: system
+        types: [python]
+        stages: [pre-commit]
+
+      - id: ruff-format
+        name: ruff format
+        entry: ruff format
+        language: system
+        types: [python]
+        stages: [pre-commit]
+
+      - id: pytest-backend
+        name: pytest (backend)
+        entry: python -m pytest tests/ -q
+        language: system
+        pass_filenames: false
+        stages: [pre-commit]
+
+      - id: vitest-frontend
+        name: vitest (frontend)
+        entry: cmd /c "cd frontend && npx vitest run"
+        language: system
+        pass_filenames: false
+        files: ^frontend/
+        stages: [pre-commit]
