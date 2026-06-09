@@ -68,7 +68,6 @@ async def chat(request: ChatRequest):
 
         return StreamingResponse(no_files(), media_type="text/event-stream")
 
-    # 1. RAG
     from src.rag_pipeline import build_file_context, retrieve_nodes
 
     query_for_rag = request.query
@@ -87,7 +86,6 @@ async def chat(request: ChatRequest):
         sources, context = await asyncio.to_thread(build_file_context, nodes, request.notebook_id)
         logger.debug(f"DEBUG: RAG нашёл {len(nodes)} фрагментов.")
 
-    # 2. LLM
     active_llm = None
     use_direct_gguf = False
     if request.use_gguf == "true" and request.gguf_model_path:
@@ -134,7 +132,6 @@ async def chat(request: ChatRequest):
     else:
         active_llm = None
 
-    # 3. Генерация ответа
     async def generate():
         nonlocal query_for_rag, sources, context
         token_count = 0

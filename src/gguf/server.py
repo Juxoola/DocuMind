@@ -36,7 +36,7 @@ logger = logging.getLogger(__name__)
 
 
 def is_server_ready(port: int) -> bool:
-    """Проверяет, готов ли сервер принимать запросы."""
+
     try:
         r = requests.get(f"http://127.0.0.1:{port}/health", timeout=1)
         return r.status_code == 200
@@ -48,7 +48,7 @@ def is_server_ready(port: int) -> bool:
 
 
 def _start_llm_server_sync(gguf_path: str, mmproj_path: str, current_config: dict) -> str:
-    """Запускает llama-server и ждёт готовности (блокирует до 60с)."""
+
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     s.bind(("", 0))
     port = s.getsockname()[1]
@@ -102,7 +102,7 @@ def _start_llm_server_sync(gguf_path: str, mmproj_path: str, current_config: dic
     logger.info(f"[GGUF Server] Запуск: {os.path.basename(gguf_path)} на порту {port}...")
     logger.info(f"[GGUF Server]   cmd: {' '.join(cmd)}")
 
-    creationflags = 0x08000000  # CREATE_NO_WINDOW
+    creationflags = 0x08000000
     process = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=creationflags)
     _assign_to_job(process)
 
@@ -140,21 +140,21 @@ def _start_llm_server_sync(gguf_path: str, mmproj_path: str, current_config: dic
         try:
             process.kill()
         except Exception:
-            pass  # best-effort
+            pass
     try:
         process.wait(timeout=5)
     except Exception:
-        pass  # best-effort
+        pass
     raise TimeoutError("Сервер не ответил за 60 секунд")
 
 
 def unload_rag_models_safe():
-    """Best-effort выгрузка RAG-моделей перед запуском LLM."""
+
     try:
         from src.rag_pipeline import unload_rag_models
         unload_rag_models(hard=False)
     except Exception:
-        pass  # best-effort
+        pass
 
 
 # Публичный запуск LLM
@@ -179,7 +179,7 @@ def get_gguf_llm(
     mtp_enabled: bool = False,
     n_ubatch: int = 256,
 ) -> str:
-    """Запускает llama-server для модели (синхронно). Возвращает URL."""
+
     gguf_path = os.path.normpath(config.resolve_model_path(gguf_path)).lower()
     if mmproj_path:
         mmproj_path = os.path.normpath(config.resolve_model_path(mmproj_path)).lower()
@@ -266,7 +266,7 @@ def preload_gguf_llm(
     mtp_enabled: bool = False,
     n_ubatch: int = 256,
 ) -> dict:
-    """Асинхронно запускает llama-server в фоне. Возвращает сразу."""
+
     import uuid
 
     gguf_path = os.path.normpath(config.resolve_model_path(gguf_path)).lower()
@@ -342,7 +342,7 @@ def preload_gguf_llm(
 
 
 def get_llm_status() -> dict:
-    """Возвращает текущее состояние LLM для UI."""
+
     with _lock:
         state = _llm_load_state.copy()
     if state.get("started_at") and state.get("state") == "loading":
@@ -371,7 +371,7 @@ def get_llm_status() -> dict:
 def get_gguf_embedding_url(
     gguf_path: str, n_threads: int = None, is_reranker: bool = False, n_parallel: int = 1
 ) -> str:
-    """Запускает llama-server для эмбеддингов или реранкера. Возвращает URL."""
+
     role = "reranker" if is_reranker else "embedding"
     n_parallel = max(1, int(n_parallel or 1))
 
@@ -454,7 +454,7 @@ def get_gguf_embedding_url(
 
 
 def get_active_embedding_parallel(gguf_path: str = None) -> int:
-    """Возвращает n_parallel запущенного embedding-сервера (по умолчанию 1)."""
+
     with _lock:
         if gguf_path:
             cfg = _server_configs.get(gguf_path)
@@ -472,7 +472,7 @@ def get_active_embedding_parallel(gguf_path: str = None) -> int:
 
 
 def kill_stray_servers():
-    """Убивает все запущенные процессы llama-server.exe в системе."""
+
     logger.info("[GGUF Server] Поиск и завершение сторонних процессов llama-server...")
     try:
         if os.name == "nt":
@@ -484,7 +484,7 @@ def kill_stray_servers():
 
 
 def count_running_servers() -> int:
-    """Считает количество запущенных процессов llama-server.exe в системе."""
+
     try:
         if os.name == "nt":
             output = subprocess.check_output(["tasklist", "/FI", "IMAGENAME eq llama-server.exe", "/NH"], text=True)
@@ -498,7 +498,7 @@ def count_running_servers() -> int:
 
 
 def unload_all_models(role: str = None):
-    """Убивает процессы серверов. Если указан role — только серверы с этой ролью."""
+
     if not _server_processes:
         return
 
@@ -517,9 +517,9 @@ def unload_all_models(role: str = None):
                     try:
                         requests.post(f"http://127.0.0.1:{port}/slots/0/clear", timeout=0.5)
                     except Exception:
-                        pass  # best-effort
+                        pass
             except Exception:
-                pass  # best-effort
+                pass
             try:
                 if sys.platform == "win32":
                     subprocess.run(["taskkill", "/F", "/T", "/PID", str(process.pid)], capture_output=True, timeout=5)
@@ -528,7 +528,7 @@ def unload_all_models(role: str = None):
                 try:
                     process.wait(timeout=5)
                 except Exception:
-                    pass  # best-effort
+                    pass
             except Exception as e:
                 logger.error(f"[GGUF Server] Ошибка при остановке {os.path.basename(path)}: {e}")
 
@@ -544,17 +544,17 @@ def unload_all_models(role: str = None):
             torch.cuda.empty_cache()
             torch.cuda.ipc_collect()
         except Exception:
-            pass  # best-effort
+            pass
     time.sleep(0.1)
 
 
 def get_loaded_models():
-    """Возвращает список путей к запущенным LLM моделям (без эмбеддингов)."""
+
     return [path for path in _server_processes.keys() if _server_roles.get(path, "llm") == "llm"]
 
 
 def get_active_llm_url() -> str | None:
-    """Возвращает URL первого живого LLM-сервера или None."""
+
     with _lock:
         for path, process in _server_processes.items():
             if _server_roles.get(path) == "llm" and process.poll() is None:

@@ -19,7 +19,7 @@ def get_image_base64(image_path):
 
 
 def get_vision_url(llm_settings, progress_cb=None):
-    """Ленивая инициализация Vision-сервера, когда нужен."""
+
     if not llm_settings or not llm_settings.get("use_gguf_direct"):
         return None
 
@@ -76,7 +76,7 @@ def _clean_think_tags(text):
 
 
 def describe_image_with_lmstudio(image_path, llm_settings=None, existing_llm_url=None):
-    """Детальный анализ изображения через Vision LLM."""
+
     prompt = """Проведи детальный анализ изображения. 
 
 1. ГРАФИКА: 

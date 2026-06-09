@@ -37,19 +37,17 @@ _QUERY_GEN_PROMPT = (
 
 
 def _get_qe_llm():
-    """LLM для Query Expansion: GGUF → LM Studio → None (QE пропускается)."""
     from src.gguf_direct import get_active_llm_url
 
     url = get_active_llm_url()
     if url:
         logger.debug(f"[QE] Используем GGUF LLM для Query Expansion: {url}")
     else:
-        url = config.LM_STUDIO_URL  # фоллбэк на LM Studio
+        url = config.LM_STUDIO_URL
         logger.debug(f"[QE] GGUF LLM не найден, пробуем LM Studio: {url}")
     try:
         import requests as _req
 
-        # Быстрая проверка доступности сервера (без ретраев)
         _req.get(url.replace("/v1", "").rstrip("/") + "/health", timeout=1)
     except Exception:
         logger.debug("[QE] LLM-сервер недоступен, Query Expansion пропускается")
@@ -77,7 +75,6 @@ def _get_qe_llm():
 
 
 def _rrf_fuse(vector_results, bm25_results, k: int = 60):
-    """Reciprocal Rank Fusion (Cormack et al. 2009). Возвращает список NodeWithScore, отсортированный по RRF score desc, без дубликатов."""
     scores: dict = {}
     nodes_by_id: dict = {}
 
@@ -96,7 +93,6 @@ def _rrf_fuse(vector_results, bm25_results, k: int = 60):
 
 
 def _rrf_fuse_across_files(file_results, k: int = 60):
-    """Merge RRF scores across files so big files don't dominate. Возвращает list[NodeWithScore] sorted by cross-file RRF score desc."""
     scores: dict = {}
     nodes_by_id: dict = {}
 
@@ -114,7 +110,6 @@ def _rrf_fuse_across_files(file_results, k: int = 60):
 
 
 def retrieve_nodes(query: str, notebook_id: str, allowed_files=None, max_tokens=1024):
-    """Для каждого выбранного файла — отдельный гибридный поиск топ-K чанков."""
     init_settings(max_tokens=max_tokens)
     vector_store = get_vector_store(notebook_id)
     index = VectorStoreIndex.from_vector_store(vector_store)
@@ -122,7 +117,6 @@ def retrieve_nodes(query: str, notebook_id: str, allowed_files=None, max_tokens=
     if not allowed_files:
         return []
 
-    # Загрузка BM25 ретривера
     paths = config.get_notebook_paths(notebook_id)
     bm25_dir = os.path.join(paths["base"], "bm25")
 
@@ -146,7 +140,6 @@ def retrieve_nodes(query: str, notebook_id: str, allowed_files=None, max_tokens=
 
     all_nodes = []
 
-    # Определяем, доступен ли LLM для Query Expansion
     qe_llm = _get_qe_llm() if config.RAG_QUERY_EXPANSION else None
     if config.RAG_QUERY_EXPANSION:
         if qe_llm:
@@ -154,7 +147,6 @@ def retrieve_nodes(query: str, notebook_id: str, allowed_files=None, max_tokens=
         else:
             logger.info("  [RAG] Query Expansion отключён (нет доступного LLM-сервера)")
 
-    # Строим фильтр по файлам
     if len(allowed_files) == 1:
         file_filter = MetadataFilters(
             filters=[
@@ -185,7 +177,6 @@ def retrieve_nodes(query: str, notebook_id: str, allowed_files=None, max_tokens=
 
     try:
         if use_qe:
-            # F2 + QE: per-file retrievers в QueryFusionRetriever
             per_file_retrievers = []
             for fname in allowed_files:
                 ff = MetadataFilters(
@@ -272,7 +263,6 @@ def retrieve_nodes(query: str, notebook_id: str, allowed_files=None, max_tokens=
                 f"  [RAG] 🔍 {label} по {len(allowed_files)} файлам: {len(all_nodes)} фрагм."
             )
         else:
-            # QE выключен → per-file RRF
             if len(allowed_files) == 1:
                 vec_results = vector_retriever.retrieve(query)
                 bm25_results = bm25_retriever.retrieve(query) if bm25_retriever else []
@@ -326,7 +316,6 @@ def retrieve_nodes(query: str, notebook_id: str, allowed_files=None, max_tokens=
         logger.info(f"Ошибка унифицированного поиска: {e}")
         all_nodes = []
 
-    # ── Реренкинг ────────────────────────────────────────────────────
     if all_nodes and config.USE_RERANKER:
         if len(all_nodes) > config.RAG_RERANK_POOL:
             all_nodes.sort(
@@ -422,7 +411,6 @@ def retrieve_nodes(query: str, notebook_id: str, allowed_files=None, max_tokens=
         all_nodes.sort(key=lambda x: x.score, reverse=True)
         all_nodes = all_nodes[: config.RAG_FINAL_TOP_N]
 
-        # F6: Adaptive threshold через MAD
         import statistics as _stats
 
         if len(all_nodes) >= 4:
@@ -451,7 +439,6 @@ def retrieve_nodes(query: str, notebook_id: str, allowed_files=None, max_tokens=
                 f"(мин. score: {all_nodes[-1].score:.3f})"
             )
 
-        # F6+: Top-K relevance ratio
         if config.RAG_TOP_K_RATIO > 0 and all_nodes:
             top_score = all_nodes[0].score
             ratio_thr = top_score * config.RAG_TOP_K_RATIO

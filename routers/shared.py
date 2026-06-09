@@ -44,7 +44,6 @@ _background_tasks: "set[asyncio.Task]" = set()
 
 
 def safe_filename(filename: str) -> str:
-    """Валидация имени файла (path traversal, null-байты, reserved names)."""
     from fastapi import HTTPException
 
     if not filename or not isinstance(filename, str):
@@ -64,7 +63,6 @@ def safe_filename(filename: str) -> str:
 
 
 def _schedule_delete_on_reboot(path: str) -> None:
-    """MoveFileExW с MOVEFILE_DELAY_UNTIL_REBOOT — удаление после перезагрузки."""
     if sys.platform != "win32":
         raise OSError("MoveFileExW доступен только на Windows")
     MOVEFILE_DELAY_UNTIL_REBOOT = 0x00000004
@@ -82,7 +80,6 @@ def _schedule_delete_on_reboot(path: str) -> None:
 
 
 def robust_rmtree(path: str, max_retries: int = 10, delay: float = 1.0) -> tuple:
-    """Надёжное удаление директории (shutil → cmd → rename → MoveFileExW)."""
     if not os.path.exists(path):
         return True, None
 
@@ -98,7 +95,6 @@ def robust_rmtree(path: str, max_retries: int = 10, delay: float = 1.0) -> tuple
             except Exception:
                 logger.debug("robust_rmtree: не удалось снять readonly c %s", d)
 
-    # Попытка 1: shutil.rmtree с backoff
     last_err = None
     for i in range(max_retries):
         try:
@@ -115,7 +111,6 @@ def robust_rmtree(path: str, max_retries: int = 10, delay: float = 1.0) -> tuple
             if i < max_retries - 1:
                 time.sleep(delay + i * 0.5)
 
-    # Попытка 2: cmd.exe rmdir
     if sys.platform == "win32":
         try:
             result = subprocess.run(
@@ -129,7 +124,6 @@ def robust_rmtree(path: str, max_retries: int = 10, delay: float = 1.0) -> tuple
         except Exception:
             logger.debug("robust_rmtree: cmd rmdir не удался для %s", path)
 
-    # Попытка 3: soft-delete (rename в .pending_delete_<ts>)
     ts = int(time.time())
     deferred = f"{path}.pending_delete_{ts}"
     try:
@@ -149,7 +143,6 @@ def robust_rmtree(path: str, max_retries: int = 10, delay: float = 1.0) -> tuple
             except Exception:
                 logger.debug("robust_rmtree: cmd move не удался для %s", path)
 
-        # Попытка 4: MoveFileExW с DELAY_UNTIL_REBOOT
         if sys.platform == "win32":
             try:
                 _schedule_delete_on_reboot(path)

@@ -33,7 +33,7 @@ _whisper_lock = threading.Lock()
 
 
 def get_or_load_whisper(model_name: str = "medium", device: str = "cuda", compute_type: str = "int8"):
-    """Возвращает кешированную WhisperX-модель или загружает её."""
+
     key = (model_name, device, compute_type)
     with _whisper_lock:
         if key in _whisper_model_cache:
@@ -46,7 +46,7 @@ def get_or_load_whisper(model_name: str = "medium", device: str = "cuda", comput
 
 
 def unload_whisper_model():
-    """Выгружает все кешированные WhisperX-модели."""
+
     with _whisper_lock:
         if not _whisper_model_cache:
             return
@@ -58,7 +58,7 @@ def unload_whisper_model():
 
 
 def save_high_res_frame(video_path, time_sec, output_path):
-    """Сохраняет кадр из видео в высоком разрешении через ffmpeg."""
+
     try:
         from imageio_ffmpeg import get_ffmpeg_exe
 
@@ -72,7 +72,7 @@ def save_high_res_frame(video_path, time_sec, output_path):
 def process_audio_video(file_path, images_dir, is_video=False, progress_cb=None,
                         llm_settings=None, cancel_check=None, notebook_id=None,
                         keep_vision_alive=False, keep_whisper_alive=False):
-    """Обрабатывает аудио/видео: транскрибация → извлечение кадров → Vision."""
+
     def _is_cancelled():
         return bool(cancel_check and cancel_check())
 
@@ -162,7 +162,7 @@ def process_audio_video(file_path, images_dir, is_video=False, progress_cb=None,
                     try:
                         process.terminate()
                     except Exception:
-                        pass  # best-effort
+                        pass
                     raise IngestionCancelled(f"Cancelled during frame extraction at {format_seconds(current_sec)}")
                 frame_counter += 1
                 raw_frame = process.stdout.read(chunk_size)
@@ -196,7 +196,7 @@ def process_audio_video(file_path, images_dir, is_video=False, progress_cb=None,
                                             try:
                                                 os.remove(frame_list[-1][0])
                                             except Exception:
-                                                pass  # best-effort
+                                                pass
                                             frame_list[-1] = (img_path, current_sec)
                                     prev_saved_thumb = thumb
                             stable_since_sec = current_sec

@@ -53,7 +53,6 @@ async def api_gguf_status():
 
 
 def _get_gguf_servers_info() -> list:
-    """Возвращает информацию о запущенных GGUF-серверах из внутреннего реестра."""
     servers = []
     try:
         from src.gguf_direct import _server_ports, _server_processes, _server_roles
@@ -95,7 +94,6 @@ async def api_gguf_kill_all():
 async def api_vram():
     import shutil
 
-    # Проверка наличия nvidia-smi (может отсутствовать на Windows без CUDA)
     if not shutil.which("nvidia-smi"):
         return {
             "gpu": {

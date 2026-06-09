@@ -50,7 +50,7 @@ if os.name == "nt":
 
 
 def _assign_to_job(process):
-    """Привязывает процесс к Job Object (только для Windows)."""
+
     if _win32_job is not None:
         try:
             ctypes.windll.kernel32.AssignProcessToJobObject(

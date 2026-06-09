@@ -15,11 +15,9 @@ logger = logging.getLogger(__name__)
 
 
 def init_settings(max_tokens=1024):
-    """Инициализация Settings.embed_model (GGUF эмбеддинг) и Settings.llm (LM Studio)."""
     global _model_cache
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
-    # init-фаза под lock; cache hit не требует лока. Settings.llm идемпотентен.
     with _init_lock:
         if "embed_model" not in _model_cache:
             model_name = config.EMBEDDING_MODEL_NAME
@@ -75,7 +73,6 @@ def init_settings(max_tokens=1024):
 
 
 def preload_all_models():
-    """Предзагрузка всех тяжелых моделей для ускорения работы."""
     logger.info("[RAG] Предзагрузка моделей...")
     try:
         init_settings()
@@ -106,15 +103,10 @@ def preload_all_models():
 
 
 def unload_rag_models(hard=True):
-    """Выгрузка моделей RAG.
-
-    Если hard=False, модели остаются в памяти (только очистка кэша).
-    """
     global _model_cache
     if not _model_cache:
         return
 
-    # Под локом — clear() не должен сломать параллельный init_settings
     with _init_lock:
         if hard:
             logger.info("[RAG] Выгрузка всех моделей (Embedding, Reranker)...")

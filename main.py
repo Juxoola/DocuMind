@@ -49,7 +49,6 @@ async def lifespan(app: FastAPI):
 
     logger.info("Запуск сервера...")
 
-    # Cleanup остатков .pending_delete_* от прошлой сессии
     try:
         import glob
 
@@ -63,12 +62,10 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"Ошибка cleanup pending_delete: {e}")
 
-    # Миграция старых данных
     from routers.notebooks import migrate_old_data
 
     migrate_old_data()
 
-    # Фоновая предзагрузка моделей
     threading.Thread(target=preload_all_models, daemon=True).start()
 
     yield
@@ -83,7 +80,6 @@ async def lifespan(app: FastAPI):
 
 
 def preload_all_models():
-    """Предзагрузка эмбеддингов и реранкера в фоне."""
     try:
         from src.rag_pipeline import preload_all_models as _preload
 
@@ -94,14 +90,12 @@ def preload_all_models():
 
 # ── Graceful shutdown (Windows) ──
 def _graceful_shutdown(signum=None, frame=None):
-    """Обработчик сигналов: выгружает модели перед выходом."""
     logger.info(f"Получен сигнал {signum}, завершение работы...")
     _shutdown_models()
     sys.exit(0)
 
 
 def _shutdown_models():
-    """Выгружает модели без выхода из процесса."""
     try:
         from src.gguf_direct import kill_stray_servers, unload_all_models
 
@@ -124,11 +118,10 @@ if os.name == "nt":
         _console_handler = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.DWORD)
 
         def _handler(dwCtrlType: int) -> bool:
-            """Обработчик консольных событий Windows."""
-            if dwCtrlType in (0, 1, 2, 5):  # CTRL_C_EVENT, CTRL_BREAK_EVENT, CTRL_CLOSE_EVENT
+            if dwCtrlType in (0, 1, 2, 5):
                 logger.info("Получен сигнал закрытия консоли Windows, выгрузка моделей...")
                 _shutdown_models()
-            return False  # False = передать следующему обработчику
+            return False
 
         ctypes.windll.kernel32.SetConsoleCtrlHandler(_console_handler(_handler), True)
         logger.debug("Windows Console Control Handler установлен.")

@@ -173,7 +173,7 @@ VISION_TOP_P = float(os.getenv("VISION_TOP_P", 0.9))
 VISION_MIN_P = float(os.getenv("VISION_MIN_P", 0.05))
 VISION_CONCURRENCY = int(
     os.getenv("VISION_CONCURRENCY", 4)
-)  # Количество параллельных потоков анализа
+)
 
 # Настройки генерации Chat (творческие)
 CHAT_TEMPERATURE = float(os.getenv("CHAT_TEMPERATURE", 0.7))
@@ -305,10 +305,6 @@ SYSTEM_PROMPT = (
 
 
 def get_system_prompt(mode: str = None) -> str:
-    """
-    Собирает финальный системный промпт под выбранный режим ответа.
-    Неизвестный/пустой mode → ANSWER_MODE_DEFAULT (concise).
-    """
     if not mode or mode not in SYSTEM_PROMPT_RULES:
         mode = ANSWER_MODE_DEFAULT
     return SYSTEM_PROMPT_BASE + "\n" + SYSTEM_PROMPT_RULES[mode] + "\n" + SYSTEM_PROMPT_CITATION
@@ -374,19 +370,12 @@ load_rag_config()
 
 @lru_cache(maxsize=64)
 def resolve_model_path(path_or_filename: str) -> str:
-    """
-    Если путь абсолютный и существует — возвращает его.
-    Иначе ищет файл через gguf_manager.find_gguf_by_name (mtime-keyed cache),
-    и только в крайнем случае делает свежий os.walk.
-    """
     if not path_or_filename:
         return ""
 
-    # Если это уже существующий абсолютный путь
     if os.path.isabs(path_or_filename) and os.path.exists(path_or_filename):
         return os.path.normpath(path_or_filename).lower()
 
-    # Быстрый путь: кешированный scan через gguf_manager
     try:
         from src.gguf_manager import find_gguf_by_name
 
@@ -397,7 +386,6 @@ def resolve_model_path(path_or_filename: str) -> str:
     except Exception as e:
         logger.debug(f"[CONFIG] gguf_manager.find_gguf_by_name failed: {e}")
 
-    # Fallback (на случай если gguf_manager не импортируется): свежий os.walk
     search_dirs = [d.strip() for d in GGUF_SEARCH_DIRS.split(";") if d.strip()]
     filename = os.path.basename(path_or_filename)
 

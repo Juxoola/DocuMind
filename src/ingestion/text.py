@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 
 
 def _analyze_page_for_vision(page):
-    """Анализирует страницу: извлекает текст, определяет наличие графики."""
+
     text = page.get_text()
     images = page.get_images()
     drawings = page.get_drawings()
@@ -59,7 +59,7 @@ def _analyze_page_for_vision(page):
 def process_pdf(file_path, images_dir, llm_settings=None, shared_llm_url=None,
                 original_filename=None, progress_cb=None, cancel_check=None,
                 keep_vision_alive=False):
-    """Обрабатывает PDF: извлечение текста, распознавание графики, Vision."""
+
     def _is_cancelled():
         return bool(cancel_check and cancel_check())
 
@@ -174,7 +174,7 @@ def process_pdf(file_path, images_dir, llm_settings=None, shared_llm_url=None,
                             try:
                                 os.remove(frame_info["path"])
                             except Exception:
-                                pass  # best-effort
+                                pass
                         if progress_cb:
                             progress_cb(65 + int(done_count / n * 25), f"Описание PDF: {done_count}/{n}")
                 except IngestionCancelled:
@@ -193,7 +193,7 @@ def process_pdf(file_path, images_dir, llm_settings=None, shared_llm_url=None,
 
 def process_pptx(file_path, images_dir, llm_settings=None, shared_llm_url=None,
                  progress_cb=None, cancel_check=None, keep_vision_alive=False):
-    """Обрабатывает PPTX: конвертация в PDF через COM, затем process_pdf."""
+
     nodes = []
     file_name = os.path.basename(file_path)
     pdf_path = os.path.splitext(file_path)[0] + ".pdf"
@@ -229,22 +229,22 @@ def process_pptx(file_path, images_dir, llm_settings=None, shared_llm_url=None,
             try:
                 deck.Close()
             except Exception:
-                pass  # best-effort
+                pass
         if app is not None:
             try:
                 app.Quit()
             except Exception:
-                pass  # best-effort
+                pass
         try:
             pythoncom.CoUninitialize()
         except Exception:
-            pass  # best-effort
+            pass
     return nodes
 
 
 def process_docx(file_path, images_dir, llm_settings=None, shared_llm_url=None,
                  progress_cb=None, cancel_check=None, keep_vision_alive=False):
-    """Обрабатывает DOCX: конвертация в PDF через COM, затем process_pdf."""
+
     nodes = []
     file_name = os.path.basename(file_path)
     pdf_path = os.path.splitext(file_path)[0] + ".pdf"
@@ -279,14 +279,14 @@ def process_docx(file_path, images_dir, llm_settings=None, shared_llm_url=None,
             try:
                 doc.Close()
             except Exception:
-                pass  # best-effort
+                pass
         if app is not None:
             try:
                 app.Quit()
             except Exception:
-                pass  # best-effort
+                pass
         try:
             pythoncom.CoUninitialize()
         except Exception:
-            pass  # best-effort
+            pass
     return nodes

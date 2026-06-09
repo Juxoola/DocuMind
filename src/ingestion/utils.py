@@ -85,14 +85,14 @@ def unregister_subprocess(notebook_id, popen):
 
 
 def kill_subprocesses(notebook_id):
-    """Убивает все subprocess-ы блокнота."""
+
     procs = _active_subprocesses.pop(notebook_id, [])
     for p in procs:
         try:
             if p.poll() is None:
                 p.terminate()
         except Exception:
-            pass  # best-effort
+            pass
     return len(procs)
 
 
@@ -100,7 +100,7 @@ def kill_subprocesses(notebook_id):
 
 
 class IngestionCancelled(Exception):
-    """Поднимается, когда пользователь запросил отмену обработки файла."""
+
     pass
 
 
@@ -108,7 +108,7 @@ class IngestionCancelled(Exception):
 
 
 def _safe_print(msg):
-    """Безопасный вывод с защитой от cp1251."""
+
     try:
         logger.info(msg)
     except UnicodeEncodeError:
@@ -120,7 +120,7 @@ def _safe_print(msg):
 
 
 def cleanup_gpu():
-    """Принудительная очистка видеопамяти перед тяжелыми задачами."""
+
     try:
         from src.rag_pipeline import unload_rag_models
         unload_rag_models(hard=False)

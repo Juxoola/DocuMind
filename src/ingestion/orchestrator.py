@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 def ingest_file(file_path, notebook_id, progress_cb=None, llm_settings=None,
                 cancel_check=None, keep_vision_alive=False, keep_whisper_alive=False):
-    """Загружает и обрабатывает файл: определяет тип и вызывает нужный процессор."""
+
     def _is_cancelled():
         return bool(cancel_check and cancel_check())
 

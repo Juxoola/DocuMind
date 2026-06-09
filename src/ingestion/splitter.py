@@ -8,7 +8,7 @@ _SEMANTIC_SPLITTER_CACHE = None
 
 
 def _get_splitter():
-    """Возвращает SemanticSplitterNodeParser или SentenceSplitter (fallback)."""
+
     global _SEMANTIC_SPLITTER_CACHE
     if _SEMANTIC_SPLITTER_CACHE is not None:
         return _SEMANTIC_SPLITTER_CACHE

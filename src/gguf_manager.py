@@ -33,7 +33,6 @@ _server_info = {}
 
 
 def get_server_status() -> dict:
-    """Проверяет статус запущенного сервера (устаревшее)."""
     global _server_process, _server_info
     if _server_process is None or _server_process.poll() is not None:
         return {"running": False, "info": {}}
@@ -57,7 +56,6 @@ def start_gguf_server(
     threads: int | None = None,
     mtp_enabled: bool = False,
 ) -> dict:
-    """Запускает llama-server.exe (устаревшее, используйте get_gguf_llm)."""
     global _server_process, _server_info
     if _server_process:
         stop_gguf_server()
@@ -106,7 +104,6 @@ def start_gguf_server(
 
 
 def stop_gguf_server() -> dict:
-    """Останавливает сервер (устаревшее)."""
     global _server_process, _server_info
     if _server_process:
         _server_process.terminate()
@@ -116,14 +113,13 @@ def stop_gguf_server() -> dict:
             try:
                 _server_process.kill()
             except Exception:
-                pass  # best-effort
+                pass
     _server_process = None
     _server_info = {}
     return {"status": "ok"}
 
 
 def get_gguf_server_url() -> str | None:
-    """Возвращает URL сервера (устаревшее)."""
     status = get_server_status()
     if status["running"]:
         return f"{status['info']['url']}/v1"

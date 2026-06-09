@@ -25,7 +25,6 @@ _NB_ID_PATTERN = re.compile(r"^[a-f0-9]{8}$")
 
 
 def validate_nb_id(nb_id: str) -> str:
-    """Валидация notebook_id: 8-символьный hex, защита от path traversal."""
     nb_id = nb_id.strip()
     if not _NB_ID_PATTERN.match(nb_id):
         logger.warning(f"Некорректный notebook_id: {nb_id!r}")
@@ -37,7 +36,6 @@ def validate_nb_id(nb_id: str) -> str:
 
 
 def migrate_old_data():
-    """Перенос старых data/chroma_db/images в default-блокнот."""
     try:
         old_data = os.path.join(config.BASE_DIR, "data")
         old_db = os.path.join(config.BASE_DIR, "chroma_db")
@@ -69,7 +67,6 @@ async def get_notebooks():
     nbs = []
     if os.path.exists(config.NOTEBOOKS_DIR):
         for entry in os.listdir(config.NOTEBOOKS_DIR):
-            # Пропускаем служебные папки (.pending_delete_*, chroma_db на уровень выше и т.п.)
             if entry.startswith(".") or not _NB_ID_PATTERN.match(entry):
                 continue
             meta_path = os.path.join(config.NOTEBOOKS_DIR, entry, "meta.json")
@@ -101,7 +98,6 @@ async def create_notebook(req: CreateNotebookRequest):
 
 @router.delete("/api/notebooks/{nb_id}")
 async def delete_notebook(nb_id: str):
-    """Удаление ноутбука: закрытие ChromaDB, отмена BM25, удаление файлов."""
     nb_id = validate_nb_id(nb_id)
     paths = config.get_notebook_paths(nb_id)
     base_path = paths["base"]
@@ -109,7 +105,6 @@ async def delete_notebook(nb_id: str):
     if not os.path.exists(base_path):
         raise HTTPException(status_code=404, detail="Блокнот не найден")
 
-    # 1. Закрываем ChromaDB клиент для этого ноутбука
     try:
         from src.rag_pipeline import close_notebook_client
 
@@ -117,7 +112,6 @@ async def delete_notebook(nb_id: str):
     except Exception as e:
         logger.debug(f"[delete_notebook] close_notebook_client: {e}")
 
-    # 2. Отменяем отложенный BM25 rebuild
     try:
         from src.rag_pipeline import cancel_bm25_rebuild
 
@@ -125,11 +119,9 @@ async def delete_notebook(nb_id: str):
     except Exception as e:
         logger.debug(f"[delete_notebook] cancel_bm25_rebuild: {e}")
 
-    # 3. Собираем мусор для освобождения mmap
     gc.collect()
     gc.collect()
 
-    # 4. Удаляем папку ноутбука с fallback-ами
     success, err_msg = robust_rmtree(base_path)
     if not success:
         logger.error(f"[delete_notebook] Не удалось удалить {base_path}: {err_msg}")
