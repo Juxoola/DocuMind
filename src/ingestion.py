@@ -971,7 +971,7 @@ def process_pdf(
                                 )
                             else:
                                 # Только очень длинные описания (>4К) — split
-                                desc_nodes = v_splitter.get_nodes_from_documents(
+                                desc_nodes = splitter.get_nodes_from_documents(
                                     [
                                         TextNode(
                                             text=full_text,
