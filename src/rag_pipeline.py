@@ -905,6 +905,21 @@ def retrieve_nodes(query: str, notebook_id: str, allowed_files=None, max_tokens=
     return all_nodes
 
 
+def get_embedding_url() -> str | None:
+    """Возвращает URL активного эмбеддинг-сервера, или None если не запущен."""
+    global _model_cache
+    embed = _model_cache.get("embed_model")
+    if embed is not None:
+        try:
+            return embed.api_base
+        except Exception:
+            return None
+    reranker = _model_cache.get("reranker")
+    if reranker is not None:
+        return reranker
+    return None
+
+
 def build_file_context(nodes, notebook_id: str):
     """
     Каждый чанк получает свой порядковый номер [N].

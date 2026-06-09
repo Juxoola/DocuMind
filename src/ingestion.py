@@ -24,6 +24,49 @@ from pptx import Presentation
 import config
 from src.gguf_direct import get_gguf_llm, unload_all_models
 
+# ── Semantic splitter (чанки = темы) ──
+_SEMANTIC_SPLITTER_CACHE = None
+
+
+def _get_splitter() -> SentenceSplitter:
+    """Возвращает SemanticSplitterNodeParser если эмбеддинг-сервер запущен,
+    иначе SentenceSplitter (fallback).
+
+    SemanticSplitter эмбеддит каждое предложение и режет в точке, где
+    эмбеддинг резко меняется — каждый чанк = одна тема.
+    """
+    global _SEMANTIC_SPLITTER_CACHE
+    if _SEMANTIC_SPLITTER_CACHE is not None:
+        return _SEMANTIC_SPLITTER_CACHE
+
+    try:
+        from llama_index.core.node_parser import SemanticSplitterNodeParser
+        from llama_index.embeddings.openai import OpenAIEmbedding
+
+        from src.rag_pipeline import get_embedding_url
+
+        url = get_embedding_url()
+        if url:
+            embed_model = OpenAIEmbedding(
+                api_base=url,
+                api_key=config.EMBEDDING_DEFAULT_API_KEY,
+                model=config.EMBEDDING_DEFAULT_MODEL,
+            )
+            _SEMANTIC_SPLITTER_CACHE = SemanticSplitterNodeParser(
+                embed_model=embed_model,
+                buffer_size=1,
+                breakpoint_percentile_threshold=95,
+            )
+            logger.info(f"[Splitter] SemanticSplitterNodeParser (embedding: {url})")
+            return _SEMANTIC_SPLITTER_CACHE
+    except Exception as e:
+        logger.warning(f"[Splitter] SemanticSplitter недоступен, fallback на SentenceSplitter: {e}")
+
+    fallback = SentenceSplitter(chunk_size=2048, chunk_overlap=256)
+    _SEMANTIC_SPLITTER_CACHE = fallback
+    return fallback
+
+
 logger = logging.getLogger(__name__)
 
 # F-fix #11: модульный кеш WhisperX-модели.
@@ -637,7 +680,7 @@ def process_audio_video(
 
             # Собираем результаты по мере готовности для обновления прогресса
             # Используем большой chunk_size, чтобы описания не разрывались
-            splitter = SentenceSplitter(chunk_size=2048, chunk_overlap=128)
+            splitter = _get_splitter()
             try:
                 for idx, future in enumerate(futures):
                     if _is_cancelled():
@@ -772,7 +815,7 @@ def process_pdf(
     doc = fitz.open(file_path)
     frame_data = []
     frame_list = []
-    splitter = SentenceSplitter(chunk_size=2048, chunk_overlap=256)
+    splitter = _get_splitter()
 
     # Параллельный разбор страниц: page.get_text() + get_drawings() GIL-free (PyMuPDF native).
     # Один ThreadPoolExecutor на весь PDF; cancel-check между батчами.
@@ -1498,9 +1541,7 @@ def ingest_file(
                     text = f.read()
 
             doc = TextNode(text=text, metadata={"file_name": os.path.basename(file_path)})
-            nodes = SentenceSplitter(chunk_size=2048, chunk_overlap=256).get_nodes_from_documents(
-                [doc]
-            )
+            nodes = _get_splitter().get_nodes_from_documents([doc])
     finally:
         # Мы НЕ выгружаем модели в finally, чтобы они оставались в памяти для следующего файла в батче.
         # Модели будут выгружены автоматически, если потребуется память для другого типа моделей.
