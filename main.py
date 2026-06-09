@@ -96,6 +96,12 @@ def preload_all_models():
 def _graceful_shutdown(signum=None, frame=None):
     """Обработчик сигналов: выгружает модели перед выходом."""
     logger.info(f"Получен сигнал {signum}, завершение работы...")
+    _shutdown_models()
+    sys.exit(0)
+
+
+def _shutdown_models():
+    """Выгружает модели без выхода из процесса."""
     try:
         from src.gguf_direct import kill_stray_servers, unload_all_models
 
@@ -104,8 +110,30 @@ def _graceful_shutdown(signum=None, frame=None):
         logger.info("Модели выгружены.")
     except Exception as e:
         logger.error(f"Ошибка при выгрузке моделей: {e}")
-    sys.exit(0)
 
+
+# ── Windows Console Control Handler ──
+# При закрытии окна консоли (X button) или Ctrl+Break Windows посылает
+# CTRL_CLOSE_EVENT/CTRL_BREAK_EVENT. signal.signal() их не ловит.
+# SetConsoleCtrlHandler — единственный способ перехватить их.
+if os.name == "nt":
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        _console_handler = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.DWORD)
+
+        def _handler(dwCtrlType: int) -> bool:
+            """Обработчик консольных событий Windows."""
+            if dwCtrlType in (0, 1, 2, 5):  # CTRL_C_EVENT, CTRL_BREAK_EVENT, CTRL_CLOSE_EVENT
+                logger.info("Получен сигнал закрытия консоли Windows, выгрузка моделей...")
+                _shutdown_models()
+            return False  # False = передать следующему обработчику
+
+        ctypes.windll.kernel32.SetConsoleCtrlHandler(_console_handler(_handler), True)
+        logger.debug("Windows Console Control Handler установлен.")
+    except Exception as e:
+        logger.debug(f"SetConsoleCtrlHandler не удался (не критично): {e}")
 
 # Регистрируем обработчики сигналов (SIGTERM, SIGINT)
 try:

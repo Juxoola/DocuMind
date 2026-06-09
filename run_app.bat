@@ -9,6 +9,7 @@ echo   NotebookLM Local Clone
 echo ============================================
 echo.
 
+:: Check Python
 python --version >nul 2>&1
 if %errorlevel% neq 0 (
     echo [ERROR] Python not found! Install Python 3.11+
@@ -16,23 +17,32 @@ if %errorlevel% neq 0 (
     exit /b
 )
 
+:: Detect venv (setup.ps1 creates .venv, use it if exists)
+set PYTHON_CMD=python
+if exist ".venv\Scripts\python.exe" (
+    set PYTHON_CMD=.venv\Scripts\python.exe
+    echo [OK] Using venv: .venv
+)
+
+:: Node.js check
 node -v >nul 2>&1
 if %errorlevel% neq 0 set NO_FRONTEND=1
 
+:: Logs
 if not exist "logs" mkdir logs
 
-tasklist /FI "IMAGENAME eq llama-server.exe" 2>NUL | find "llama-server.exe" >NUL
+:: Kill old llama-server processes
+tasklist /FI "IMAGENAME eq llama-server.exe" 2>NUL | findstr "llama-server.exe" >NUL
 if !errorlevel! equ 0 (
-    echo [INFO] Cleaning up old llama-server processes...
+    echo [INFO] Cleaning up old llama-server...
     taskkill /F /IM llama-server.exe >nul 2>&1
 )
-if !errorlevel! equ 1 echo [INFO] No old processes found
 
 echo.
 echo [1/2] Starting backend on http://localhost:8000
-start "NB-Backend" /min python main.py
+start "NB-Backend" /min cmd /c "%PYTHON_CMD% main.py"
 
-:: Healthcheck via PowerShell (built-in, no curl needed)
+:: Healthcheck via PowerShell
 set READY=
 for /l %%i in (1,1,30) do (
     ping -n 2 127.0.0.1 >nul
