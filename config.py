@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+import threading
 from functools import lru_cache
 
 # Отключаем онлайн-проверки Hugging Face (используем только локальный кэш)
@@ -310,3 +311,8 @@ def resolve_model_path(path_or_filename: str) -> str:
                 return os.path.normpath(full_path).lower()
 
     return path_or_filename
+
+
+# RLock для потокобезопасного обновления runtime-настроек.
+# Защищает update_rag_config и другие операции, меняющие глобальные переменные.
+_config_lock = threading.RLock()

@@ -35,8 +35,9 @@ class UpdateModelDirsRequest(BaseModel):
 # Обновление путей поиска GGUF-моделей + сброс кэша сканирования.
 @router.post("/api/update-model-dirs")
 async def update_model_dirs(req: UpdateModelDirsRequest):
-    config.GGUF_SEARCH_DIRS = req.dirs
-    config.save_rag_config()
+    with config._config_lock:
+        config.GGUF_SEARCH_DIRS = req.dirs
+        config.save_rag_config()
     try:
         from src.gguf_manager import invalidate_scan_cache
 
@@ -73,12 +74,13 @@ class UpdateRagConfigRequest(BaseModel):
 async def update_rag_config(req: UpdateRagConfigRequest):
     from src.rag_pipeline import unload_rag_models
 
-    config.EMBEDDING_MODEL_NAME = req.embedding_model
-    config.RERANKER_MODEL_NAME = req.reranker_model
-    config.RAG_TOP_K_PER_FILE = req.top_k_per_file
-    config.RAG_RERANK_POOL = req.rerank_pool
-    config.RAG_FINAL_TOP_N = req.final_top_n
-    config.USE_RERANKER = req.use_reranker
-    config.save_rag_config()
-    unload_rag_models()
+    with config._config_lock:
+        config.EMBEDDING_MODEL_NAME = req.embedding_model
+        config.RERANKER_MODEL_NAME = req.reranker_model
+        config.RAG_TOP_K_PER_FILE = req.top_k_per_file
+        config.RAG_RERANK_POOL = req.rerank_pool
+        config.RAG_FINAL_TOP_N = req.final_top_n
+        config.USE_RERANKER = req.use_reranker
+        config.save_rag_config()
+        unload_rag_models()
     return {"status": "ok"}

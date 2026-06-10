@@ -118,10 +118,11 @@ def _start_llm_server_sync(gguf_path: str, mmproj_path: str, current_config: dic
     process = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=creationflags)
     _assign_to_job(process)
 
-    # Цикл ожидания: каждые 0.5 с проверяем /health.
+    # Цикл ожидания с exponential backoff: 0.05 → 0.1 → 0.2 → 0.4 → 0.8 → 1.0 с.
     # Если процесс упал — читаем stderr и выбрасываем RuntimeError.
     # Если не дождались за 60 с — убиваем процесс и TimeoutError.
     start_wait = time.time()
+    backoff = 0.05
     while time.time() - start_wait < 60:
         if is_server_ready(port):
             logger.info("[GGUF Server] Готов!")
@@ -137,13 +138,15 @@ def _start_llm_server_sync(gguf_path: str, mmproj_path: str, current_config: dic
                 _, stderr = process.communicate(timeout=1)
             except Exception:
                 stderr = b""
+                logger.debug("llama-server communicate failed")
             stderr_text = (stderr or b"").decode("utf-8", errors="ignore")[:500]
             retcode = process.returncode
             raise RuntimeError(
                 f"Сервер llama-server упал при запуске (pid={process.pid}, retcode={retcode}). "
                 f"stderr: {stderr_text}"
             )
-        time.sleep(0.5)
+        time.sleep(backoff)
+        backoff = min(backoff * 2, 1.0)
 
     try:
         if sys.platform == "win32":
@@ -454,6 +457,7 @@ def get_gguf_embedding_url(
         _assign_to_job(process)
 
         start_wait = time.time()
+        backoff = 0.05
         while time.time() - start_wait < 60:
             if is_server_ready(port):
                 logger.info(f"[GGUF Server] {role.capitalize()} готов!")
@@ -465,7 +469,8 @@ def get_gguf_embedding_url(
 
             if process.poll() is not None:
                 raise RuntimeError(f"{role.capitalize()} сервер упал при запуске")
-            time.sleep(0.5)
+            time.sleep(backoff)
+            backoff = min(backoff * 2, 1.0)
 
         process.terminate()
         raise TimeoutError(f"{role.capitalize()} сервер не ответил за 60 секунд")
