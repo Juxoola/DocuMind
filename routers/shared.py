@@ -80,7 +80,7 @@ def _schedule_delete_on_reboot(path: str) -> None:
 
 
 # Многоуровневое удаление: chmod + retry, gc, cmd.exe rmdir, отложенное удаление через перезагрузку.
-def robust_rmtree(path: str, max_retries: int = 10, delay: float = 1.0) -> tuple:
+def robust_rmtree(path: str, max_retries: int = 3, delay: float = 0.5) -> tuple:
     if not os.path.exists(path):
         return True, None
 

@@ -247,6 +247,25 @@ def process_pptx(
 
     nodes = []
     file_name = os.path.basename(file_path)
+
+    # Быстрый путь: python-pptx — не требует Office, работает сразу
+    try:
+        prs = Presentation(file_path)
+        for i, slide in enumerate(prs.slides):
+            nodes.append(
+                TextNode(
+                    text="\n".join([sh.text for sh in slide.shapes if hasattr(sh, "text")]),
+                    metadata={"file_name": file_name, "page": i + 1},
+                )
+            )
+        logger.info(f"[PPTX] Обработано через python-pptx: {len(nodes)} слайдов")
+        return nodes
+    except IngestionCancelled:
+        raise
+    except Exception as e:
+        logger.info(f"python-pptx не справился ({e}), пробую COM-конвертацию в PDF...")
+
+    # Медленный путь: COM (PowerPoint) → PDF → process_pdf с Vision
     pdf_path = os.path.splitext(file_path)[0] + ".pdf"
     import pythoncom
     import win32com.client
@@ -276,15 +295,8 @@ def process_pptx(
     except IngestionCancelled:
         raise
     except Exception as e:
-        logger.warning(f"COM-конвертация PPTX не удалась, резерв через python-pptx: {e}")
-        prs = Presentation(file_path)
-        for i, slide in enumerate(prs.slides):
-            nodes.append(
-                TextNode(
-                    text="\n".join([sh.text for sh in slide.shapes if hasattr(sh, "text")]),
-                    metadata={"file_name": file_name, "page": i + 1},
-                )
-            )
+        logger.warning(f"COM-конвертация PPTX не удалась: {e}")
+        raise
     finally:
         if deck is not None:
             try:
@@ -315,6 +327,25 @@ def process_docx(
 
     nodes = []
     file_name = os.path.basename(file_path)
+
+    # Быстрый путь: python-docx — не требует Office, работает сразу
+    try:
+        import docx as _docx
+
+        nodes.append(
+            TextNode(
+                text="\n".join([p.text for p in _docx.Document(file_path).paragraphs]),
+                metadata={"file_name": file_name},
+            )
+        )
+        logger.info(f"[DOCX] Обработано через python-docx: 1 узел")
+        return nodes
+    except IngestionCancelled:
+        raise
+    except Exception as e:
+        logger.info(f"python-docx не справился ({e}), пробую COM-конвертацию в PDF...")
+
+    # Медленный путь: COM (Word) → PDF → process_pdf с Vision
     pdf_path = os.path.splitext(file_path)[0] + ".pdf"
     import pythoncom
     import win32com.client
@@ -344,15 +375,8 @@ def process_docx(
     except IngestionCancelled:
         raise
     except Exception as e:
-        logger.warning(f"COM-конвертация DOCX не удалась, резерв через python-docx: {e}")
-        import docx as _docx
-
-        nodes.append(
-            TextNode(
-                text="\n".join([p.text for p in _docx.Document(file_path).paragraphs]),
-                metadata={"file_name": file_name},
-            )
-        )
+        logger.warning(f"COM-конвертация DOCX не удалась: {e}")
+        raise
     finally:
         if doc is not None:
             try:

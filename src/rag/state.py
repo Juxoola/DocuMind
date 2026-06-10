@@ -6,6 +6,8 @@
 import logging
 import threading
 
+import requests
+
 import config
 from routers.shared import make_http_session
 
@@ -19,8 +21,19 @@ _model_cache: dict = {}
 _client_cache: dict = {}
 
 # HTTP-сессия для реранкера: отдельный connection pool,
-# чтобы не конкурировать с основными запросами приложения
-_rerank_session = make_http_session(config.HTTP_POOL_SIZE_RERANK)
+# чтобы не конкурировать с основными запросами приложения.
+# Ленивая инициализация — сессия создаётся при первом запросе, а не при импорте.
+_rerank_session: requests.Session | None = None
+_rerank_session_lock = threading.Lock()
+
+
+def _get_rerank_session() -> requests.Session:
+    global _rerank_session
+    if _rerank_session is None:
+        with _rerank_session_lock:
+            if _rerank_session is None:
+                _rerank_session = make_http_session(config.HTTP_POOL_SIZE_RERANK)
+    return _rerank_session
 
 # Debounce-механизм для BM25: несколько вызовов _schedule_bm25_rebuild
 # подряд сбрасывают таймер, чтобы пересборка запускалась только после

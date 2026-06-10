@@ -40,9 +40,9 @@ from src.rag.state import (
     _bm25_pending_timers,
     _bm25_rebuilding,
     _client_cache,
+    _get_rerank_session,
     _init_lock,
     _model_cache,
-    _rerank_session,
 )
 
 # Полный список публичного API для удобства импорта и рефакторинга.
@@ -55,10 +55,10 @@ __all__ = [
     "_bm25_rebuilding",
     "_client_cache",
     "_get_qe_llm",
+    "_get_rerank_session",
     "_init_lock",
     "_model_cache",
     "_rebuild_bm25_bg",
-    "_rerank_session",
     "_rrf_fuse",
     "_rrf_fuse_across_files",
     "_schedule_bm25_rebuild",

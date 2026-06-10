@@ -23,7 +23,7 @@ import config
 from src.rag.bm25 import flush_bm25_rebuild, is_bm25_ready
 from src.rag.indexing import get_vector_store
 from src.rag.models import init_settings
-from src.rag.state import _model_cache, _rerank_session
+from src.rag.state import _model_cache, _get_rerank_session
 
 logger = logging.getLogger(__name__)
 
@@ -408,7 +408,7 @@ def retrieve_nodes(query: str, notebook_id: str, allowed_files=None, max_tokens=
             _rerank_start = _time.time()
             scores = [0.0] * len(all_nodes)
 
-            resp = _rerank_session.post(
+            resp = _get_rerank_session().post(
                 f"{url}/v1/rerank",
                 json={
                     "model": "gguf-reranker",

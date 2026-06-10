@@ -6,6 +6,7 @@
 # и OpenAI-совместимых API. Обрабатывает текстовые и multi-modal (изображения) запросы.
 #
 
+import asyncio
 import json
 import logging
 import time
@@ -57,7 +58,6 @@ class ChatRequest(BaseModel):
 # Основной эндпоинт чата: выполняет RAG-поиск, выбирает LLM-бэкенд (GGUF/OpenAI), стримит SSE-ответ.
 @router.post("/api/chat")
 async def chat(request: ChatRequest):
-    import asyncio
 
     global_start_time = time.time()
     logger.debug(

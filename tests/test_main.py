@@ -77,15 +77,11 @@ def client():
         import src.gguf_direct
 
         src.gguf_direct.get_gguf_llm = MagicMock(return_value="http://127.0.0.1:49152")
-        src.gguf_direct.get_gguf_embedding_url = MagicMock(
-            return_value="http://127.0.0.1:49153"
-        )
+        src.gguf_direct.get_gguf_embedding_url = MagicMock(return_value="http://127.0.0.1:49153")
         src.gguf_direct.preload_gguf_llm = MagicMock(
             return_value={"status": "ready", "port": 49152}
         )
-        src.gguf_direct.get_llm_status = MagicMock(
-            return_value={"state": "idle", "port": None}
-        )
+        src.gguf_direct.get_llm_status = MagicMock(return_value={"state": "idle", "port": None})
         src.gguf_direct.unload_all_models = MagicMock()
         src.gguf_direct.kill_stray_servers = MagicMock()
         src.gguf_direct.count_running_servers = MagicMock(return_value=0)

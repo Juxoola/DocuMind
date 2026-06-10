@@ -589,18 +589,12 @@ def kill_stray_servers():
 
 def count_running_servers() -> int:
 
-    try:
-        if os.name == "nt":
-            output = subprocess.check_output(
-                ["tasklist", "/FI", "IMAGENAME eq llama-server.exe", "/NH"], text=True
-            )
-            return output.count("llama-server.exe")
-        else:
-            output = subprocess.check_output(["pgrep", "-c", "llama-server"], text=True)
-            return int(output.strip())
-    except Exception as e:
-        logger.debug(f"count llama-server processes failed: {e}")
-        return 0
+    with _lock:
+        alive = 0
+        for path, proc in _server_processes.items():
+            if proc.poll() is None:
+                alive += 1
+        return alive
 
 
 # ---------------------------------------------------------------------------
