@@ -89,7 +89,7 @@ RAG_RERANK_POOL = int(os.getenv("RAG_RERANK_POOL", 30))
 RAG_FINAL_TOP_N = int(os.getenv("RAG_FINAL_TOP_N", 15))
 USE_RERANKER = os.getenv("USE_RERANKER", "true").lower() == "true"
 RAG_QUERY_EXPANSION = os.getenv("RAG_QUERY_EXPANSION", "true").lower() == "true"
-RERANK_SCORE_THRESHOLD = float(os.getenv("RERANK_SCORE_THRESHOLD", "0.05"))
+RERANK_SCORE_THRESHOLD = float(os.getenv("RERANK_SCORE_THRESHOLD", "0.1"))
 MIN_FINAL_CHUNKS = int(os.getenv("MIN_FINAL_CHUNKS", "5"))
 RAG_TOP_K_RATIO = float(os.getenv("RAG_TOP_K_RATIO", "0.1"))
 

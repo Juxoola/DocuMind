@@ -8,7 +8,7 @@ import logging
 import os
 import time as _time
 
-from llama_index.core import QueryBundle, VectorStoreIndex
+from llama_index.core import QueryBundle, Settings, VectorStoreIndex
 from llama_index.core.retrievers import QueryFusionRetriever
 from llama_index.core.schema import NodeWithScore
 from llama_index.core.vector_stores.types import (
@@ -245,6 +245,24 @@ def retrieve_nodes(query: str, notebook_id: str, allowed_files=None, max_tokens=
                             line = line.strip()
                             if line:
                                 queries.append(line)
+
+                        if queries:
+                            embed = Settings.embed_model
+                            orig_emb = embed.get_text_embedding(original_query)
+                            valid = []
+                            for q in queries:
+                                q_emb = embed.get_text_embedding(q)
+                                dot = sum(a * b for a, b in zip(orig_emb, q_emb))
+                                norm_o = sum(a * a for a in orig_emb) ** 0.5
+                                norm_q = sum(b * b for b in q_emb) ** 0.5
+                                sim = dot / (norm_o * norm_q) if norm_o * norm_q > 0 else 0
+                                if sim >= 0.6:
+                                    valid.append(q)
+                                else:
+                                    logger.debug(f"[QE] Запрос отфильтрован по cos-sim={sim:.3f}: {q}")
+                            if valid:
+                                logger.info(f"  [RAG] QE валидация: {len(queries)}→{len(valid)} запросов (порог 0.6)")
+                            queries = valid
 
                         return [QueryBundle(q) for q in queries[: fusion_retriever.num_queries - 1]]
                     except Exception as qe_err:
