@@ -83,16 +83,9 @@ class IngestionCancelled(Exception):
 # Очистка видеопамяти перед тяжёлыми задачами (выгрузка RAG-моделей)
 def cleanup_gpu():
 
-    try:
-        from src.rag_pipeline import unload_rag_models
-
-        unload_rag_models(hard=False)
-        gc.collect()
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
-        logger.info("[GPU] Память полностью очищена для анализа.")
-    except Exception as e:
-        logger.error(f"[GPU] Ошибка при очистке: {e}")
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
 
 
 def format_seconds(s):
