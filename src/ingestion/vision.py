@@ -3,14 +3,13 @@
 
 import base64
 import logging
-import os
 import re
 import time
 
 import config
-from src.gguf_direct import get_gguf_llm, unload_all_models
-from src.ingestion.utils import _http_session, cleanup_gpu
 from routers.shared import safe_extract_llm_response
+from src.gguf_direct import get_gguf_llm
+from src.ingestion.utils import _http_session, cleanup_gpu
 
 logger = logging.getLogger(__name__)
 
@@ -59,9 +58,12 @@ def get_vision_url(llm_settings, progress_cb=None):
             n_parallel=v_conc,
             mtp_enabled=v_mtp,
             custom_args=[
-                "--reasoning", "off",
-                "--reasoning-format", "none",
-                "--reasoning-budget", "0",
+                "--reasoning",
+                "off",
+                "--reasoning-format",
+                "none",
+                "--reasoning-budget",
+                "0",
                 "--no-context-shift",
             ],
         )
@@ -102,7 +104,9 @@ def describe_image_with_lmstudio(image_path, llm_settings=None, existing_llm_url
             try:
                 v_temp = float(llm_settings.get("vision_temperature") or config.VISION_TEMPERATURE)
                 v_max = int(llm_settings.get("vision_max_tokens") or 4096)
-                v_r_pen = float(llm_settings.get("vision_repeat_penalty") or config.VISION_REPEAT_PENALTY)
+                v_r_pen = float(
+                    llm_settings.get("vision_repeat_penalty") or config.VISION_REPEAT_PENALTY
+                )
                 v_top_p = float(llm_settings.get("vision_top_p") or config.VISION_TOP_P)
                 v_min_p = float(llm_settings.get("vision_min_p") or config.VISION_MIN_P)
                 v_pres = float(llm_settings.get("vision_presence_penalty") or 0.0)
@@ -140,7 +144,9 @@ def describe_image_with_lmstudio(image_path, llm_settings=None, existing_llm_url
                         ans = safe_extract_llm_response(res) or "Ошибка извлечения ответа"
                         reason = res.get("choices", [{}])[0].get("finish_reason")
                         ans = _clean_think_tags(ans)
-                        logger.info(f"[Ingestion] Описание получено ({len(ans)} симв.). Причина завершения: {reason}")
+                        logger.info(
+                            f"[Ingestion] Описание получено ({len(ans)} симв.). Причина завершения: {reason}"
+                        )
                         return ans
                 elif r.status_code == 500:
                     logger.info(f"[Ingestion] GGUF 500 (попытка {attempt + 1}). Повтор...")
@@ -154,8 +160,12 @@ def describe_image_with_lmstudio(image_path, llm_settings=None, existing_llm_url
         return "Ошибка анализа после всех попыток"
 
     api_url = (llm_settings.get("llm_url") if llm_settings else None) or config.LM_STUDIO_URL
-    api_key = (llm_settings.get("llm_api_key") if llm_settings else None) or config.LLM_DEFAULT_API_KEY
-    model_name = (llm_settings.get("llm_model") if llm_settings else None) or config.LLM_DEFAULT_MODEL
+    api_key = (
+        llm_settings.get("llm_api_key") if llm_settings else None
+    ) or config.LLM_DEFAULT_API_KEY
+    model_name = (
+        llm_settings.get("llm_model") if llm_settings else None
+    ) or config.LLM_DEFAULT_MODEL
     try:
         v_temp = float(llm_settings.get("vision_temperature") or 0.2)
         payload = {
@@ -165,7 +175,12 @@ def describe_image_with_lmstudio(image_path, llm_settings=None, existing_llm_url
                     "role": "user",
                     "content": [
                         {"type": "text", "text": prompt},
-                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{get_image_base64(image_path)}"}},
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:image/jpeg;base64,{get_image_base64(image_path)}"
+                            },
+                        },
                     ],
                 }
             ],

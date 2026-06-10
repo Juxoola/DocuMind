@@ -38,9 +38,13 @@ def _analyze_page_for_vision(page):
             rect = d.get("rect")
             fill = d.get("fill")
             is_page_background = (
-                len(items) == 1 and items[0][0] == "re"
-                and fill is not None and all(c >= 0.99 for c in fill)
-                and rect is not None and (rect.x1 - rect.x0) > 200 and (rect.y1 - rect.y0) > 200
+                len(items) == 1
+                and items[0][0] == "re"
+                and fill is not None
+                and all(c >= 0.99 for c in fill)
+                and rect is not None
+                and (rect.x1 - rect.x0) > 200
+                and (rect.y1 - rect.y0) > 200
             )
             if is_page_background:
                 continue
@@ -52,7 +56,11 @@ def _analyze_page_for_vision(page):
                     vertical_lines += 1
             graphics_weight += 1
         if not has_real_graphics:
-            if graphics_weight > 8 or (horizontal_lines >= 3 and vertical_lines >= 1) or (horizontal_lines + vertical_lines >= 6):
+            if (
+                graphics_weight > 8
+                or (horizontal_lines >= 3 and vertical_lines >= 1)
+                or (horizontal_lines + vertical_lines >= 6)
+            ):
                 has_real_graphics = True
     return text, has_real_graphics
 
@@ -73,9 +81,16 @@ def _analyze_and_build_page(page_num, doc, images_dir, file_name, splitter):
     return page_num, local_nodes, image_path
 
 
-def process_pdf(file_path, images_dir, llm_settings=None, shared_llm_url=None,
-                original_filename=None, progress_cb=None, cancel_check=None,
-                keep_vision_alive=False):
+def process_pdf(
+    file_path,
+    images_dir,
+    llm_settings=None,
+    shared_llm_url=None,
+    original_filename=None,
+    progress_cb=None,
+    cancel_check=None,
+    keep_vision_alive=False,
+):
 
     def _is_cancelled():
         return bool(cancel_check and cancel_check())
@@ -110,7 +125,9 @@ def process_pdf(file_path, images_dir, llm_settings=None, shared_llm_url=None,
                     ex.shutdown(wait=False, cancel_futures=True)
                     raise IngestionCancelled(f"Cancelled at page {page_num + 1}")
                 futures.append(
-                    ex.submit(_analyze_and_build_page, page_num, doc, images_dir, file_name, splitter)
+                    ex.submit(
+                        _analyze_and_build_page, page_num, doc, images_dir, file_name, splitter
+                    )
                 )
             artifacts = [None] * total_pages
             for fut in as_completed(futures):
@@ -131,10 +148,18 @@ def process_pdf(file_path, images_dir, llm_settings=None, shared_llm_url=None,
             v_conc = int(llm_settings.get("vision_concurrency") or config.VISION_CONCURRENCY)
             n = len(frame_list)
             if progress_cb:
-                progress_cb(65, f"Анализ {n} страниц PDF ({'параллельно' if v_conc > 1 else 'последовательно'})...")
+                progress_cb(
+                    65,
+                    f"Анализ {n} страниц PDF ({'параллельно' if v_conc > 1 else 'последовательно'})...",
+                )
 
             with ThreadPoolExecutor(max_workers=v_conc) as executor:
-                futures = {executor.submit(describe_image_with_lmstudio, f["path"], llm_settings, shared_llm_url): f for f in frame_list}
+                futures = {
+                    executor.submit(
+                        describe_image_with_lmstudio, f["path"], llm_settings, shared_llm_url
+                    ): f
+                    for f in frame_list
+                }
                 done_count = 0
                 try:
                     for future in as_completed(futures):
@@ -145,20 +170,50 @@ def process_pdf(file_path, images_dir, llm_settings=None, shared_llm_url=None,
                         desc = future.result()
                         done_count += 1
                         if desc and "Изображение без описания" not in desc:
-                            full_text = f"Изображение PDF {file_name} стр {frame_info['page']}: {desc}"
+                            full_text = (
+                                f"Изображение PDF {file_name} стр {frame_info['page']}: {desc}"
+                            )
                             if len(full_text) <= config.GGUF_CTX_EMBED_CHARS:
-                                nodes.append(TextNode(text=full_text, metadata={"file_name": file_name, "image_path": frame_info["path"], "page": frame_info["page"]}))
+                                nodes.append(
+                                    TextNode(
+                                        text=full_text,
+                                        metadata={
+                                            "file_name": file_name,
+                                            "image_path": frame_info["path"],
+                                            "page": frame_info["page"],
+                                        },
+                                    )
+                                )
                             else:
-                                desc_nodes = splitter.get_nodes_from_documents([TextNode(text=full_text, metadata={"file_name": file_name, "image_path": frame_info["path"], "page": frame_info["page"]})])
+                                desc_nodes = splitter.get_nodes_from_documents(
+                                    [
+                                        TextNode(
+                                            text=full_text,
+                                            metadata={
+                                                "file_name": file_name,
+                                                "image_path": frame_info["path"],
+                                                "page": frame_info["page"],
+                                            },
+                                        )
+                                    ]
+                                )
                                 nodes.extend(desc_nodes)
-                            frame_data.append({"page": frame_info["page"], "image_path": frame_info["path"], "description": desc})
+                            frame_data.append(
+                                {
+                                    "page": frame_info["page"],
+                                    "image_path": frame_info["path"],
+                                    "description": desc,
+                                }
+                            )
                         else:
                             try:
                                 os.remove(frame_info["path"])
                             except Exception:
                                 pass
                         if progress_cb:
-                            progress_cb(65 + int(done_count / n * 25), f"Описание PDF: {done_count}/{n}")
+                            progress_cb(
+                                65 + int(done_count / n * 25), f"Описание PDF: {done_count}/{n}"
+                            )
                 except IngestionCancelled:
                     raise
 
@@ -167,14 +222,28 @@ def process_pdf(file_path, images_dir, llm_settings=None, shared_llm_url=None,
 
     if frame_data:
         frame_data.sort(key=lambda x: x["page"])
-        metadata_json = {"file_name": file_name, "is_video": False, "transcript": [], "frames": frame_data}
-        with open(os.path.join(os.path.dirname(file_path), f"{file_name}.json"), "w", encoding="utf-8") as f:
+        metadata_json = {
+            "file_name": file_name,
+            "is_video": False,
+            "transcript": [],
+            "frames": frame_data,
+        }
+        with open(
+            os.path.join(os.path.dirname(file_path), f"{file_name}.json"), "w", encoding="utf-8"
+        ) as f:
             json.dump(metadata_json, f, ensure_ascii=False, indent=2)
     return nodes
 
 
-def process_pptx(file_path, images_dir, llm_settings=None, shared_llm_url=None,
-                 progress_cb=None, cancel_check=None, keep_vision_alive=False):
+def process_pptx(
+    file_path,
+    images_dir,
+    llm_settings=None,
+    shared_llm_url=None,
+    progress_cb=None,
+    cancel_check=None,
+    keep_vision_alive=False,
+):
 
     nodes = []
     file_name = os.path.basename(file_path)
@@ -192,10 +261,16 @@ def process_pptx(file_path, images_dir, llm_settings=None, shared_llm_url=None,
         if os.path.exists(pdf_path):
             if os.path.exists(file_path):
                 os.remove(file_path)
-            nodes = process_pdf(pdf_path, images_dir, llm_settings, shared_llm_url,
-                                original_filename=os.path.basename(pdf_path),
-                                progress_cb=progress_cb, cancel_check=cancel_check,
-                                keep_vision_alive=keep_vision_alive)
+            nodes = process_pdf(
+                pdf_path,
+                images_dir,
+                llm_settings,
+                shared_llm_url,
+                original_filename=os.path.basename(pdf_path),
+                progress_cb=progress_cb,
+                cancel_check=cancel_check,
+                keep_vision_alive=keep_vision_alive,
+            )
         else:
             raise Exception("PDF conversion failed")
     except IngestionCancelled:
@@ -204,8 +279,12 @@ def process_pptx(file_path, images_dir, llm_settings=None, shared_llm_url=None,
         logger.warning(f"COM-конвертация PPTX не удалась, резерв через python-pptx: {e}")
         prs = Presentation(file_path)
         for i, slide in enumerate(prs.slides):
-            nodes.append(TextNode(text="\n".join([sh.text for sh in slide.shapes if hasattr(sh, "text")]),
-                                  metadata={"file_name": file_name, "page": i + 1}))
+            nodes.append(
+                TextNode(
+                    text="\n".join([sh.text for sh in slide.shapes if hasattr(sh, "text")]),
+                    metadata={"file_name": file_name, "page": i + 1},
+                )
+            )
     finally:
         if deck is not None:
             try:
@@ -224,8 +303,15 @@ def process_pptx(file_path, images_dir, llm_settings=None, shared_llm_url=None,
     return nodes
 
 
-def process_docx(file_path, images_dir, llm_settings=None, shared_llm_url=None,
-                 progress_cb=None, cancel_check=None, keep_vision_alive=False):
+def process_docx(
+    file_path,
+    images_dir,
+    llm_settings=None,
+    shared_llm_url=None,
+    progress_cb=None,
+    cancel_check=None,
+    keep_vision_alive=False,
+):
 
     nodes = []
     file_name = os.path.basename(file_path)
@@ -243,10 +329,16 @@ def process_docx(file_path, images_dir, llm_settings=None, shared_llm_url=None,
         if os.path.exists(pdf_path):
             if os.path.exists(file_path):
                 os.remove(file_path)
-            nodes = process_pdf(pdf_path, images_dir, llm_settings, shared_llm_url,
-                                original_filename=os.path.basename(pdf_path),
-                                progress_cb=progress_cb, cancel_check=cancel_check,
-                                keep_vision_alive=keep_vision_alive)
+            nodes = process_pdf(
+                pdf_path,
+                images_dir,
+                llm_settings,
+                shared_llm_url,
+                original_filename=os.path.basename(pdf_path),
+                progress_cb=progress_cb,
+                cancel_check=cancel_check,
+                keep_vision_alive=keep_vision_alive,
+            )
         else:
             raise Exception("PDF conversion failed")
     except IngestionCancelled:
@@ -254,8 +346,13 @@ def process_docx(file_path, images_dir, llm_settings=None, shared_llm_url=None,
     except Exception as e:
         logger.warning(f"COM-конвертация DOCX не удалась, резерв через python-docx: {e}")
         import docx as _docx
-        nodes.append(TextNode(text="\n".join([p.text for p in _docx.Document(file_path).paragraphs]),
-                               metadata={"file_name": file_name}))
+
+        nodes.append(
+            TextNode(
+                text="\n".join([p.text for p in _docx.Document(file_path).paragraphs]),
+                metadata={"file_name": file_name},
+            )
+        )
     finally:
         if doc is not None:
             try:

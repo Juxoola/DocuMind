@@ -1,5 +1,4 @@
-"""Асинхронный стриминг чат-ответов через llama-server API.
-"""
+"""Асинхронный стриминг чат-ответов через llama-server API."""
 
 # Файл: streaming.py — асинхронный генератор для получения ответов
 # от llama-server через SSE (Server-Sent Events). Разбирает поток
@@ -39,16 +38,12 @@ async def stream_gguf_chat(
     }
 
     OPEN_TAG, CLOSE_TAG = (
-        ("<|channel|>", "<channel|>")
-        if model_family == "gemma4"
-        else ("<think>", "</think>")
+        ("<|channel|>", "<channel|>") if model_family == "gemma4" else ("<think>", "</think>")
     )
 
     try:
         async with httpx.AsyncClient(timeout=60.0) as client:
-            async with client.stream(
-                "POST", f"{llm_url}/v1/chat/completions", json=payload
-            ) as r:
+            async with client.stream("POST", f"{llm_url}/v1/chat/completions", json=payload) as r:
                 r.raise_for_status()
                 is_thinking = False
 

@@ -1,8 +1,8 @@
 """Ingestion subsystem: file parsing, audio/video processing, OCR, chunking."""
 
 from src.ingestion.audio_video import (
-    _whisper_model_cache,
     _whisper_lock,
+    _whisper_model_cache,
     get_or_load_whisper,
     process_audio_video,
     save_high_res_frame,

@@ -21,7 +21,6 @@ import requests
 import torch
 
 import config
-from src.gguf.models import detect_model_family
 from src.gguf.state import (
     CACHE_TYPE_MAP,
     SERVER_EXE,
@@ -42,6 +41,7 @@ logger = logging.getLogger(__name__)
 # Используется в цикле ожидания после запуска серверного процесса.
 # ---------------------------------------------------------------------------
 
+
 def is_server_ready(port: int) -> bool:
 
     try:
@@ -59,6 +59,7 @@ def is_server_ready(port: int) -> bool:
 # 4. При падении — чтение stderr для диагностики.
 # ---------------------------------------------------------------------------
 
+
 def _start_llm_server_sync(gguf_path: str, mmproj_path: str, current_config: dict) -> str:
 
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -72,18 +73,28 @@ def _start_llm_server_sync(gguf_path: str, mmproj_path: str, current_config: dic
 
     cmd = [
         SERVER_EXE,
-        "-m", gguf_path,
-        "--port", str(port),
-        "-c", str(total_ctx),
-        "-ngl", str(current_config["gpu_layers"]),
-        "-b", str(current_config["n_batch"]),
-        "-ub", str(current_config["n_ubatch"]),
-        "--parallel", str(current_config["n_parallel"]),
+        "-m",
+        gguf_path,
+        "--port",
+        str(port),
+        "-c",
+        str(total_ctx),
+        "-ngl",
+        str(current_config["gpu_layers"]),
+        "-b",
+        str(current_config["n_batch"]),
+        "-ub",
+        str(current_config["n_ubatch"]),
+        "--parallel",
+        str(current_config["n_parallel"]),
         "--cont-batching",
         "--jinja",
-        "--cache-type-k", type_k_str,
-        "--cache-type-v", type_v_str,
-        "-n", str(current_config["max_tokens"]),
+        "--cache-type-k",
+        type_k_str,
+        "--cache-type-v",
+        type_v_str,
+        "-n",
+        str(current_config["max_tokens"]),
     ]
 
     if current_config["mtp_enabled"]:
@@ -92,7 +103,9 @@ def _start_llm_server_sync(gguf_path: str, mmproj_path: str, current_config: dic
     if not current_config["enable_thinking"]:
         cmd.extend(["--reasoning", "off", "--reasoning-format", "none", "--reasoning-budget", "0"])
     else:
-        cmd.extend(["--reasoning", "on", "--reasoning-budget", str(current_config["thinking_budget"])])
+        cmd.extend(
+            ["--reasoning", "on", "--reasoning-budget", str(current_config["thinking_budget"])]
+        )
 
     if current_config["flash_attn"]:
         if not any(
@@ -106,7 +119,9 @@ def _start_llm_server_sync(gguf_path: str, mmproj_path: str, current_config: dic
 
     if current_config.get("mmproj") and os.path.exists(current_config["mmproj"]):
         cmd.extend(["--mmproj", os.path.normpath(current_config["mmproj"])])
-        logger.info(f"[GGUF Server] С поддержкой Vision: {os.path.basename(current_config['mmproj'])}")
+        logger.info(
+            f"[GGUF Server] С поддержкой Vision: {os.path.basename(current_config['mmproj'])}"
+        )
 
     if current_config.get("custom_args"):
         cmd.extend(current_config["custom_args"])
@@ -115,7 +130,9 @@ def _start_llm_server_sync(gguf_path: str, mmproj_path: str, current_config: dic
     logger.info(f"[GGUF Server]   cmd: {' '.join(cmd)}")
 
     creationflags = 0x08000000
-    process = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=creationflags)
+    process = subprocess.Popen(
+        cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=creationflags
+    )
     _assign_to_job(process)
 
     # Цикл ожидания с exponential backoff: 0.05 → 0.1 → 0.2 → 0.4 → 0.8 → 1.0 с.
@@ -150,7 +167,9 @@ def _start_llm_server_sync(gguf_path: str, mmproj_path: str, current_config: dic
 
     try:
         if sys.platform == "win32":
-            subprocess.run(["taskkill", "/F", "/T", "/PID", str(process.pid)], capture_output=True, timeout=5)
+            subprocess.run(
+                ["taskkill", "/F", "/T", "/PID", str(process.pid)], capture_output=True, timeout=5
+            )
         else:
             process.kill()
     except Exception as e:
@@ -169,6 +188,7 @@ def unload_rag_models_safe():
 
     try:
         from src.rag_pipeline import unload_rag_models
+
         unload_rag_models(hard=False)
     except Exception:
         pass
@@ -180,6 +200,7 @@ def unload_rag_models_safe():
 # Проверяет кеш процессов; если конфиг совпадает — возвращает готовый URL.
 # Иначе выгружает старые модели и запускает новую.
 # ---------------------------------------------------------------------------
+
 
 def get_gguf_llm(
     gguf_path: str,
@@ -229,19 +250,32 @@ def get_gguf_llm(
                 _server_processes[gguf_path].poll() is None
                 and _server_configs.get(gguf_path) == current_config
             ):
-                _llm_load_state.update({
-                    "state": "ready", "model": gguf_path,
-                    "port": _server_ports[gguf_path], "error": None,
-                })
+                _llm_load_state.update(
+                    {
+                        "state": "ready",
+                        "model": gguf_path,
+                        "port": _server_ports[gguf_path],
+                        "error": None,
+                    }
+                )
                 return f"http://127.0.0.1:{_server_ports[gguf_path]}"
             else:
-                logger.info(f"[GGUF Server] Настройки изменились или сервер упал. Перезапуск {os.path.basename(gguf_path)}...")
+                logger.info(
+                    f"[GGUF Server] Настройки изменились или сервер упал. Перезапуск {os.path.basename(gguf_path)}..."
+                )
 
-        _llm_load_state.update({
-            "state": "loading", "model": gguf_path, "port": None,
-            "task_id": None, "started_at": time.time(), "ready_at": None,
-            "error": None, "phase": "starting",
-        })
+        _llm_load_state.update(
+            {
+                "state": "loading",
+                "model": gguf_path,
+                "port": None,
+                "task_id": None,
+                "started_at": time.time(),
+                "ready_at": None,
+                "error": None,
+                "phase": "starting",
+            }
+        )
         unload_rag_models_safe()
         unload_all_models(role="llm")
 
@@ -253,18 +287,21 @@ def get_gguf_llm(
         url = _start_llm_server_sync(gguf_path, mmproj_path, current_config)
         elapsed = time.time() - (_llm_load_state.get("started_at") or time.time())
         with _lock:
-            _llm_load_state.update({
-                "state": "ready", "port": _server_ports.get(gguf_path),
-                "ready_at": time.time(), "last_load_seconds": elapsed,
-                "phase": "ready", "error": None,
-            })
+            _llm_load_state.update(
+                {
+                    "state": "ready",
+                    "port": _server_ports.get(gguf_path),
+                    "ready_at": time.time(),
+                    "last_load_seconds": elapsed,
+                    "phase": "ready",
+                    "error": None,
+                }
+            )
         return url
     except Exception as e:
         with _lock:
             _llm_load_state.update({"state": "error", "error": str(e)[:300], "phase": None})
         raise
-
-
 
 
 def preload_gguf_llm(
@@ -318,19 +355,32 @@ def preload_gguf_llm(
                 _server_processes[gguf_path].poll() is None
                 and _server_configs.get(gguf_path) == current_config
             ):
-                _llm_load_state.update({
-                    "state": "ready", "model": gguf_path,
-                    "port": _server_ports[gguf_path], "task_id": task_id,
-                    "started_at": time.time(), "ready_at": time.time(),
-                    "phase": "ready", "error": None,
-                })
+                _llm_load_state.update(
+                    {
+                        "state": "ready",
+                        "model": gguf_path,
+                        "port": _server_ports[gguf_path],
+                        "task_id": task_id,
+                        "started_at": time.time(),
+                        "ready_at": time.time(),
+                        "phase": "ready",
+                        "error": None,
+                    }
+                )
                 return {"status": "ready", "port": _server_ports[gguf_path], "task_id": task_id}
 
-    _llm_load_state.update({
-        "state": "loading", "model": gguf_path, "port": None,
-        "task_id": task_id, "started_at": time.time(), "ready_at": None,
-        "error": None, "phase": "freeing",
-    })
+    _llm_load_state.update(
+        {
+            "state": "loading",
+            "model": gguf_path,
+            "port": None,
+            "task_id": task_id,
+            "started_at": time.time(),
+            "ready_at": None,
+            "error": None,
+            "phase": "freeing",
+        }
+    )
 
     def _worker():
         try:
@@ -342,11 +392,16 @@ def preload_gguf_llm(
             _llm_load_state["phase"] = "loading_model"
             url = _start_llm_server_sync(gguf_path, mmproj_path, current_config)
             elapsed = time.time() - _llm_load_state["started_at"]
-            _llm_load_state.update({
-                "state": "ready", "port": _server_ports.get(gguf_path),
-                "ready_at": time.time(), "last_load_seconds": elapsed,
-                "phase": "ready", "error": None,
-            })
+            _llm_load_state.update(
+                {
+                    "state": "ready",
+                    "port": _server_ports.get(gguf_path),
+                    "ready_at": time.time(),
+                    "last_load_seconds": elapsed,
+                    "phase": "ready",
+                    "error": None,
+                }
+            )
             logger.info(f"[preload] OK: loaded in {elapsed:.1f}s")
         except Exception as e:
             _llm_load_state.update({"state": "error", "error": str(e)[:300], "phase": None})
@@ -355,8 +410,6 @@ def preload_gguf_llm(
     thread = threading.Thread(target=_worker, daemon=True, name=f"preload-llm-{task_id}")
     thread.start()
     return {"status": "loading", "task_id": task_id, "model": os.path.basename(gguf_path)}
-
-
 
 
 def get_llm_status() -> dict:
@@ -371,7 +424,9 @@ def get_llm_status() -> dict:
             state["eta"] = round(max(0, last - elapsed), 1)
         else:
             try:
-                size_mb = os.path.getsize(state["model"]) / (1024 * 1024) if state.get("model") else 0
+                size_mb = (
+                    os.path.getsize(state["model"]) / (1024 * 1024) if state.get("model") else 0
+                )
                 state["eta"] = round(max(5, size_mb / 100), 1)
             except Exception:
                 state["eta"] = None
@@ -388,6 +443,7 @@ def get_llm_status() -> dict:
 # Отличается от LLM: флаг --embedding/--reranking, меньший контекст,
 # отсутствие MTP/thinking. Роль определяет набор параметров.
 # ---------------------------------------------------------------------------
+
 
 def get_gguf_embedding_url(
     gguf_path: str, n_threads: int = None, is_reranker: bool = False, n_parallel: int = 1
@@ -449,11 +505,15 @@ def get_gguf_embedding_url(
         if n_threads and n_threads > 0:
             cmd.extend(["-t", str(n_threads)])
 
-        logger.info(f"[GGUF Server] Запуск {role}: {os.path.basename(gguf_path)} на порту {port} (parallel={n_parallel})...")
+        logger.info(
+            f"[GGUF Server] Запуск {role}: {os.path.basename(gguf_path)} на порту {port} (parallel={n_parallel})..."
+        )
         logger.info(f"[GGUF Server]   cmd: {' '.join(cmd)}")
 
         creationflags = 0x08000000
-        process = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=creationflags)
+        process = subprocess.Popen(
+            cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=creationflags
+        )
         _assign_to_job(process)
 
         start_wait = time.time()
@@ -496,6 +556,7 @@ def get_active_embedding_parallel(gguf_path: str = None) -> int:
 # llama-server вне нашего управления. Вызывается при перезагрузке.
 # ---------------------------------------------------------------------------
 
+
 def kill_stray_servers():
 
     logger.info("[GGUF Server] Поиск и завершение сторонних процессов llama-server...")
@@ -512,7 +573,9 @@ def count_running_servers() -> int:
 
     try:
         if os.name == "nt":
-            output = subprocess.check_output(["tasklist", "/FI", "IMAGENAME eq llama-server.exe", "/NH"], text=True)
+            output = subprocess.check_output(
+                ["tasklist", "/FI", "IMAGENAME eq llama-server.exe", "/NH"], text=True
+            )
             return output.count("llama-server.exe")
         else:
             output = subprocess.check_output(["pgrep", "-c", "llama-server"], text=True)
@@ -528,6 +591,7 @@ def count_running_servers() -> int:
 # В конце — gc.collect() + torch.cuda.empty_cache().
 # ---------------------------------------------------------------------------
 
+
 def unload_all_models(role: str = None):
 
     if not _server_processes:
@@ -538,7 +602,9 @@ def unload_all_models(role: str = None):
         if role is not None and _server_roles.get(path) != role:
             continue
 
-        logger.info(f"[GGUF Server] Выгрузка модели ({_server_roles.get(path, 'unknown')}): {os.path.basename(path)}")
+        logger.info(
+            f"[GGUF Server] Выгрузка модели ({_server_roles.get(path, 'unknown')}): {os.path.basename(path)}"
+        )
         to_remove.append(path)
 
         if process.poll() is None:
@@ -553,7 +619,11 @@ def unload_all_models(role: str = None):
                 pass
             try:
                 if sys.platform == "win32":
-                    subprocess.run(["taskkill", "/F", "/T", "/PID", str(process.pid)], capture_output=True, timeout=5)
+                    subprocess.run(
+                        ["taskkill", "/F", "/T", "/PID", str(process.pid)],
+                        capture_output=True,
+                        timeout=5,
+                    )
                 else:
                     process.kill()
                 try:

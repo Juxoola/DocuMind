@@ -5,11 +5,8 @@ import inspect as _inspect_module
 import logging
 import os
 import sys
-import threading
 import warnings
 
-import requests
-import requests.adapters
 import torch
 
 import config
@@ -81,9 +78,7 @@ def kill_subprocesses(notebook_id):
 
 
 class IngestionCancelled(Exception):
-
     pass
-
 
 
 def _safe_print(msg):
@@ -103,6 +98,7 @@ def cleanup_gpu():
 
     try:
         from src.rag_pipeline import unload_rag_models
+
         unload_rag_models(hard=False)
         gc.collect()
         if torch.cuda.is_available():

@@ -13,7 +13,6 @@
 
 import logging
 import os
-import threading
 
 import config
 from src.gguf.scanner import (
@@ -25,8 +24,6 @@ from src.gguf.scanner import (
 )
 from src.gguf.state import (
     SERVER_EXE,
-    _GGUF_CACHE_FILE,
-    _GGUF_CACHE_TTL_SEC,
     _gguf_cache_lock,
 )
 
@@ -75,13 +72,26 @@ def start_gguf_server(
 
     cmd = [
         SERVER_EXE,
-        "-m", os.path.normpath(gguf_path),
-        "--port", str(port),
-        "-c", str(ctx_size or config.GGUF_CTX_SIZE),
-        "-ngl", str(gpu_layers if gpu_layers is not None else config.GGUF_GPU_LAYERS),
-        "-b", "512", "-ub", "256",
-        "--parallel", "1", "--no-context-shift", "--jinja",
-        "-n", "2048", "--flash-attn", "on",
+        "-m",
+        os.path.normpath(gguf_path),
+        "--port",
+        str(port),
+        "-c",
+        str(ctx_size or config.GGUF_CTX_SIZE),
+        "-ngl",
+        str(gpu_layers if gpu_layers is not None else config.GGUF_GPU_LAYERS),
+        "-b",
+        "512",
+        "-ub",
+        "256",
+        "--parallel",
+        "1",
+        "--no-context-shift",
+        "--jinja",
+        "-n",
+        "2048",
+        "--flash-attn",
+        "on",
     ]
     if mtp_enabled:
         cmd.extend(["--spec-type", "draft-mtp", "--spec-draft-n-max", "2"])
@@ -90,16 +100,29 @@ def start_gguf_server(
 
     logger.info(f"[GGUF Manager] Запуск сервера: {' '.join(cmd)}")
     _server_process = _subprocess.Popen(
-        cmd, stdout=_subprocess.PIPE, stderr=_subprocess.PIPE,
-        text=True, creationflags=0x08000000,
+        cmd,
+        stdout=_subprocess.PIPE,
+        stderr=_subprocess.PIPE,
+        text=True,
+        creationflags=0x08000000,
     )
-    _server_info = {"port": port, "url": f"http://127.0.0.1:{port}", "model": os.path.basename(gguf_path)}
+    _server_info = {
+        "port": port,
+        "url": f"http://127.0.0.1:{port}",
+        "model": os.path.basename(gguf_path),
+    }
 
     for _ in range(config.GGUF_SERVER_STARTUP_TIMEOUT):
         __import__("time").sleep(1)
         try:
             import requests
-            if requests.get(f"http://127.0.0.1:{port}/health", timeout=config.GGUF_HEALTH_CHECK_TIMEOUT).status_code == 200:
+
+            if (
+                requests.get(
+                    f"http://127.0.0.1:{port}/health", timeout=config.GGUF_HEALTH_CHECK_TIMEOUT
+                ).status_code
+                == 200
+            ):
                 logger.info(f"[GGUF Manager] Сервер готов на порту {port}")
                 return {"status": "ok", "url": f"http://127.0.0.1:{port}/v1", "info": _server_info}
         except Exception:

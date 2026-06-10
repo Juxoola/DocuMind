@@ -10,7 +10,6 @@
 import json
 import logging
 import os
-import threading
 import time
 
 import config
@@ -88,9 +87,9 @@ def scan_gguf_dirs() -> list[dict]:
                 age = time.time() - saved_at
                 cached_mtimes = cached.get("dir_mtimes", {}) or {}
                 roots = [d.strip() for d in config.GGUF_SEARCH_DIRS.split(";") if d.strip()]
-                roots_valid = all(
-                    cached_mtimes.get(r) == _dir_mtime(r) for r in roots
-                ) and len(cached_mtimes) == len(roots)
+                roots_valid = all(cached_mtimes.get(r) == _dir_mtime(r) for r in roots) and len(
+                    cached_mtimes
+                ) == len(roots)
                 if age < _GGUF_CACHE_TTL_SEC and roots_valid:
                     return cached.get("results", [])
             except Exception:

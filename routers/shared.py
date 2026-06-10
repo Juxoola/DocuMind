@@ -23,12 +23,11 @@ import config
 
 logger = logging.getLogger(__name__)
 
+
 # Фабрика HTTP-сессии с настраиваемым пулом соединений.
 def make_http_session(pool_size: int = 10) -> requests.Session:
     s = requests.Session()
-    adapter = requests.adapters.HTTPAdapter(
-        pool_connections=pool_size, pool_maxsize=pool_size
-    )
+    adapter = requests.adapters.HTTPAdapter(pool_connections=pool_size, pool_maxsize=pool_size)
     s.mount("http://", adapter)
     s.mount("https://", adapter)
     return s

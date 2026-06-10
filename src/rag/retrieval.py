@@ -259,9 +259,13 @@ def retrieve_nodes(query: str, notebook_id: str, allowed_files=None, max_tokens=
                                 if sim >= 0.6:
                                     valid.append(q)
                                 else:
-                                    logger.debug(f"[QE] Запрос отфильтрован по cos-sim={sim:.3f}: {q}")
+                                    logger.debug(
+                                        f"[QE] Запрос отфильтрован по cos-sim={sim:.3f}: {q}"
+                                    )
                             if valid:
-                                logger.info(f"  [RAG] QE валидация: {len(queries)}→{len(valid)} запросов (порог 0.6)")
+                                logger.info(
+                                    f"  [RAG] QE валидация: {len(queries)}→{len(valid)} запросов (порог 0.6)"
+                                )
                             queries = valid
 
                         return [QueryBundle(q) for q in queries[: fusion_retriever.num_queries - 1]]
@@ -375,9 +379,7 @@ def retrieve_nodes(query: str, notebook_id: str, allowed_files=None, max_tokens=
             from src.gguf_direct import get_gguf_embedding_url
 
             model_path = config.resolve_model_path(reranker_name)
-            url = get_gguf_embedding_url(
-                model_path, is_reranker=True, n_parallel=1
-            )
+            url = get_gguf_embedding_url(model_path, is_reranker=True, n_parallel=1)
             _model_cache["reranker"] = url
 
         url = _model_cache["reranker"]

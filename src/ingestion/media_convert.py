@@ -10,7 +10,6 @@ import subprocess
 from src.ingestion.utils import (
     IngestionCancelled,
     _safe_print,
-    format_seconds,
     register_subprocess,
     unregister_subprocess,
 )
@@ -41,7 +40,9 @@ def ensure_720p_video(file_path, prog_cb=None, cancel_check=None, notebook_id=No
                     h, m, s = time_str.split(":")
                     return float(h) * 3600 + float(m) * 60 + float(s)
         except subprocess.TimeoutExpired:
-            _safe_print(f"[ensure_720p_video] WARNING get_duration timeout для {os.path.basename(path)} (30с)")
+            _safe_print(
+                f"[ensure_720p_video] WARNING get_duration timeout для {os.path.basename(path)} (30с)"
+            )
         except Exception:
             pass
         return 0
@@ -56,10 +57,38 @@ def ensure_720p_video(file_path, prog_cb=None, cancel_check=None, notebook_id=No
             raise IngestionCancelled("Cancelled before 720p encode")
         if prog_cb:
             prog_cb(5, "Оптимизация видео (GPU)...")
-        cmd = [ffmpeg, "-y", "-hide_banner", "-hwaccel", "cuda", "-hwaccel_output_format", "cuda",
-               "-i", file_path, "-vf", "scale_cuda=1280:720:format=yuv420p", "-c:v", "hevc_nvenc",
-               "-preset", "p1", "-rc", "constqp", "-qp", "30", "-pix_fmt", "yuv420p",
-               "-tag:v", "hvc1", "-c:a", "aac", "-b:a", "128k", "-movflags", "+faststart", temp_final]
+        cmd = [
+            ffmpeg,
+            "-y",
+            "-hide_banner",
+            "-hwaccel",
+            "cuda",
+            "-hwaccel_output_format",
+            "cuda",
+            "-i",
+            file_path,
+            "-vf",
+            "scale_cuda=1280:720:format=yuv420p",
+            "-c:v",
+            "hevc_nvenc",
+            "-preset",
+            "p1",
+            "-rc",
+            "constqp",
+            "-qp",
+            "30",
+            "-pix_fmt",
+            "yuv420p",
+            "-tag:v",
+            "hvc1",
+            "-c:a",
+            "aac",
+            "-b:a",
+            "128k",
+            "-movflags",
+            "+faststart",
+            temp_final,
+        ]
         proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         if notebook_id is not None:
             register_subprocess(notebook_id, proc)
@@ -88,11 +117,38 @@ def ensure_720p_video(file_path, prog_cb=None, cancel_check=None, notebook_id=No
             if _is_cancelled():
                 return None
             out_part = os.path.join(temp_dir, f"part_{idx}.mp4")
-            cmd = [ffmpeg, "-y", "-hide_banner", "-hwaccel", "cuda", "-hwaccel_output_format", "cuda",
-                   "-ss", str(idx * seg_len), "-t", str(seg_len), "-i", file_path,
-                   "-vf", "scale_cuda=1280:720:format=yuv420p", "-c:v", "hevc_nvenc",
-                   "-preset", "p1", "-rc", "constqp", "-qp", "30", "-progress", "pipe:1", "-an", out_part]
-            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, bufsize=1)
+            cmd = [
+                ffmpeg,
+                "-y",
+                "-hide_banner",
+                "-hwaccel",
+                "cuda",
+                "-hwaccel_output_format",
+                "cuda",
+                "-ss",
+                str(idx * seg_len),
+                "-t",
+                str(seg_len),
+                "-i",
+                file_path,
+                "-vf",
+                "scale_cuda=1280:720:format=yuv420p",
+                "-c:v",
+                "hevc_nvenc",
+                "-preset",
+                "p1",
+                "-rc",
+                "constqp",
+                "-qp",
+                "30",
+                "-progress",
+                "pipe:1",
+                "-an",
+                out_part,
+            ]
+            proc = subprocess.Popen(
+                cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, bufsize=1
+            )
             if notebook_id is not None:
                 register_subprocess(notebook_id, proc)
             try:
@@ -110,7 +166,7 @@ def ensure_720p_video(file_path, prog_cb=None, cancel_check=None, notebook_id=No
                                 last_pct = pct
                                 if prog_cb:
                                     overall = 5 + ((idx + pct / 100.0) / num_workers) * 3
-                                    prog_cb(overall, f"Сегмент {idx+1}/{num_workers}: {pct}%")
+                                    prog_cb(overall, f"Сегмент {idx + 1}/{num_workers}: {pct}%")
                         except (ValueError, ZeroDivisionError):
                             pass
                 proc.wait()
@@ -123,7 +179,7 @@ def ensure_720p_video(file_path, prog_cb=None, cancel_check=None, notebook_id=No
             parts = []
             for p in ex.map(encode_seg, range(num_workers)):
                 if _is_cancelled():
-                    _safe_print(f"[Ingestion] Отмена во время турбо-кодирования")
+                    _safe_print("[Ingestion] Отмена во время турбо-кодирования")
                     ex.shutdown(wait=False, cancel_futures=True)
                     raise IngestionCancelled("Cancelled during turbo encode")
                 parts.append(p)
@@ -136,9 +192,31 @@ def ensure_720p_video(file_path, prog_cb=None, cancel_check=None, notebook_id=No
         with open(list_path, "w") as f:
             for p in parts:
                 f.write(f"file '{os.path.abspath(p)}'\n")
-        merge_cmd = [ffmpeg, "-y", "-hide_banner", "-f", "concat", "-safe", "0", "-i", list_path,
-                     "-i", file_path, "-map", "0:v", "-map", "1:a?", "-c", "copy", "-movflags", "+faststart", temp_final]
-        merge_proc = subprocess.Popen(merge_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        merge_cmd = [
+            ffmpeg,
+            "-y",
+            "-hide_banner",
+            "-f",
+            "concat",
+            "-safe",
+            "0",
+            "-i",
+            list_path,
+            "-i",
+            file_path,
+            "-map",
+            "0:v",
+            "-map",
+            "1:a?",
+            "-c",
+            "copy",
+            "-movflags",
+            "+faststart",
+            temp_final,
+        ]
+        merge_proc = subprocess.Popen(
+            merge_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+        )
         if notebook_id is not None:
             register_subprocess(notebook_id, merge_proc)
         try:
@@ -175,7 +253,17 @@ def ensure_mp3_audio(file_path, prog_cb=None):
     temp_path = file_path.rsplit(".", 1)[0] + ".mp3"
     from imageio_ffmpeg import get_ffmpeg_exe
 
-    cmd = [get_ffmpeg_exe(), "-y", "-i", file_path, "-acodec", "libmp3lame", "-ab", "128k", temp_path]
+    cmd = [
+        get_ffmpeg_exe(),
+        "-y",
+        "-i",
+        file_path,
+        "-acodec",
+        "libmp3lame",
+        "-ab",
+        "128k",
+        temp_path,
+    ]
     subprocess.run(cmd, capture_output=True)
     if os.path.exists(temp_path):
         os.remove(file_path)
