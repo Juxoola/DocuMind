@@ -432,11 +432,11 @@ def get_gguf_embedding_url(
         else:
             cmd.extend(["--reranking"])
 
+        min_ctx_per_slot = 2048
+        ctx = str(max(4096, n_parallel * min_ctx_per_slot))
         if is_reranker:
-            ctx, b_size, ub_size = "4096", "2048", "2048"
+            b_size, ub_size = "2048", "2048"
         else:
-            min_ctx_per_slot = 2048
-            ctx = str(max(4096, n_parallel * min_ctx_per_slot))
             b_size, ub_size = "512", "512"
         cmd.extend(["-c", ctx, "-b", b_size, "-ub", ub_size])
 

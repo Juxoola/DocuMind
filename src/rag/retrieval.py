@@ -376,7 +376,7 @@ def retrieve_nodes(query: str, notebook_id: str, allowed_files=None, max_tokens=
 
             model_path = config.resolve_model_path(reranker_name)
             url = get_gguf_embedding_url(
-                model_path, is_reranker=True, n_parallel=config.EMBEDDING_N_PARALLEL
+                model_path, is_reranker=True, n_parallel=1
             )
             _model_cache["reranker"] = url
 
