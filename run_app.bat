@@ -71,16 +71,7 @@ echo   Backend:  http://localhost:8000
 echo   Frontend: http://localhost:5173
 echo   API docs: http://localhost:8000/docs
 echo.
-echo   Close this window to stop the server.
+echo   This window will close automatically.
 echo.
-pause >nul
-
-:: Graceful shutdown
-echo.
-echo Shutting down...
-powershell -Command "try { Invoke-WebRequest -Uri 'http://127.0.0.1:8000/api/gguf-kill-all' -Method POST -TimeoutSec 5 -UseBasicParsing } catch {}" >nul 2>&1
-taskkill /F /FI "WINDOWTITLE eq NB-Backend" >nul 2>&1
-taskkill /F /FI "WINDOWTITLE eq NB-Frontend" >nul 2>&1
-taskkill /F /IM llama-server.exe >nul 2>&1
-echo Server stopped.
-timeout /t 2 >nul
+timeout /t 5 >nul
+exit /b
