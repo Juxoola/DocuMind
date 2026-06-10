@@ -17,6 +17,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 import config
+from src.rag.prompts import get_system_prompt
 
 from .shared import _http_session, safe_extract_llm_response
 
@@ -197,8 +198,7 @@ async def chat(request: ChatRequest):
                 from src.gguf_direct import detect_model_family, stream_gguf_chat
 
                 sys_prompt = (
-                    config.get_system_prompt(request.answer_mode)
-                    + f"\n\nДоступные источники:\n{context}"
+                    get_system_prompt(request.answer_mode) + f"\n\nДоступные источники:\n{context}"
                 )
                 if request.image_base64:
                     user_content = [

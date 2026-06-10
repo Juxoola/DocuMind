@@ -7,6 +7,7 @@ import logging
 import os
 
 import config
+from src.rag.prompts import get_system_prompt
 from src.rag.state import _model_cache
 
 logger = logging.getLogger(__name__)
@@ -64,7 +65,7 @@ def make_prompt(
     answer_mode: str = None,
 ) -> str:
     return (
-        config.get_system_prompt(answer_mode)
+        get_system_prompt(answer_mode)
         + "\n"
         + f"Доступные источники:\n{context_str}\n\n"
         + f"Вопрос пользователя: {query}\n\n"
