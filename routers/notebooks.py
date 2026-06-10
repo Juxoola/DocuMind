@@ -6,7 +6,7 @@
 # а также миграция данных из старой плоской структуры в именованные блокноты.
 #
 
-import gc
+import asyncio
 import json
 import logging
 import os
@@ -120,15 +120,15 @@ async def delete_notebook(nb_id: str):
     except Exception as e:
         logger.debug(f"[delete_notebook] cancel_bm25_rebuild: {e}")
 
-    gc.collect()
+    def _do_delete(path: str) -> None:
+        success, err_msg = robust_rmtree(path)
+        if not success:
+            raise RuntimeError(err_msg or f"Не удалось удалить {path}")
 
-    success, err_msg = robust_rmtree(base_path)
-    if not success:
-        logger.error(f"[delete_notebook] Не удалось удалить {base_path}: {err_msg}")
-        raise HTTPException(
-            status_code=503,
-            detail=err_msg or "Не удалось удалить блокнот. Попробуйте позже.",
-        )
+    try:
+        await asyncio.to_thread(_do_delete, base_path)
+    except RuntimeError as e:
+        raise HTTPException(status_code=503, detail=str(e))
 
     logger.info(f"Блокнот {nb_id} удалён.")
     return {"status": "ok"}

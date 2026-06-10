@@ -117,7 +117,7 @@ def robust_rmtree(path: str, max_retries: int = 3, delay: float = 0.5) -> tuple:
                 ["cmd.exe", "/c", "rmdir", "/s", "/q", path],
                 capture_output=True,
                 text=True,
-                timeout=30,
+                timeout=5,
             )
             if not os.path.exists(path):
                 return True, None
