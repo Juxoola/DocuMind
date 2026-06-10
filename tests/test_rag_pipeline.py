@@ -1,7 +1,10 @@
 """
-Тесты src/rag_pipeline.py.
+Тесты src/rag_pipeline.py (чистые функции RAG).
 
-Тестируем чистые функции с подменой llama_index на sys.modules уровне.
+Тестируем _rrf_fuse, _rrf_fuse_across_files и API отложенной пересборки BM25.
+Внешние пакеты (llama_index, torch, chromadb) мокаются через patch.dict(sys.modules, ...)
+— это единственный способ перехватить top-level импорты в src.rag.retrieval
+до загрузки тестируемого модуля.
 """
 
 import os
@@ -13,25 +16,31 @@ import pytest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 
+class FakeTextNode:
+    """Замена TextNode для тестов — без зависимостей от llama_index."""
+
+    def __init__(self, text="", id_=None, metadata=None):
+        self.text = text
+        self.node_id = id_ or hash(text)
+        self.metadata = metadata or {}
+
+
+class FakeNodeWithScore:
+    """Замена NodeWithScore для тестов."""
+
+    def __init__(self, node=None, score=0.0):
+        self.node = node if node else FakeTextNode()
+        self.score = score
+
+
 @pytest.fixture(autouse=True)
 def mock_llama_index():
     """
-    Мокаем llama_index для всех тестов в этом файле.
-    _rrf_fuse и _rrf_fuse_across_files импортируют TextNode и NodeWithScore
-    из llama_index.core.schema — даём им работоспособные заменители.
+    Мокаем llama_index + torch + chromadb через sys.modules.
+
+    Создаём иерархию моков так, чтобы `from llama_index.core.schema import NodeWithScore`
+    возвращал FakeNodeWithScore, а не MagicMock — тесты создают инстансы через конструктор.
     """
-
-    class FakeTextNode:
-        def __init__(self, text="", id_=None, metadata=None):
-            self.text = text
-            self.node_id = id_ or hash(text)
-            self.metadata = metadata or {}
-
-    class FakeNodeWithScore:
-        def __init__(self, node=None, score=0.0):
-            self.node = node if node else FakeTextNode()
-            self.score = score
-
     mock_schema = MagicMock()
     mock_schema.TextNode = FakeTextNode
     mock_schema.NodeWithScore = FakeNodeWithScore
@@ -39,11 +48,8 @@ def mock_llama_index():
     mock_core = MagicMock()
     mock_core.schema = mock_schema
 
-    mock_llama = MagicMock()
-    mock_llama.core = mock_core
-
     mocks = {
-        "llama_index": mock_llama,
+        "llama_index": MagicMock(),
         "llama_index.core": mock_core,
         "llama_index.core.schema": mock_schema,
         "llama_index.core.settings": MagicMock(),

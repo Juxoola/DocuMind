@@ -1,8 +1,11 @@
 """
 Тесты main.py (FastAPI).
 
-Используем TestClient + моки на уровне sys.modules,
-чтобы не требовать llama_index, torch, chromadb, GPU.
+Используем TestClient + комбинацию подходов:
+- Внешние пакеты (torch, chromadb, llama_index) — patch.dict(sys.modules, ...),
+  т.к. они импортируются на уровне модулей src.* до того, как @patch может вмешаться.
+- Проектные модули (src.rag_pipeline, src.gguf_direct, etc.) — импортируем и
+  назначаем атрибуты напрямую, без sys.modules.
 """
 
 import os
@@ -14,97 +17,106 @@ from fastapi.testclient import TestClient
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
+# Внешние пакеты, которые импортируются на top-level уровне в src.*.
+# Их нельзя перехватить через @patch — только через sys.modules.
+_HEAVY_PACKAGES = {
+    "llama_index": MagicMock(),
+    "llama_index.core": MagicMock(),
+    "llama_index.core.schema": MagicMock(),
+    "llama_index.core.settings": MagicMock(),
+    "llama_index.core.storage": MagicMock(),
+    "llama_index.core.storage.storage_context": MagicMock(),
+    "llama_index.core.vector_stores": MagicMock(),
+    "llama_index.core.vector_stores.types": MagicMock(),
+    "llama_index.core.node_parser": MagicMock(),
+    "llama_index.core.retrievers": MagicMock(),
+    "llama_index.llms.openai": MagicMock(),
+    "llama_index.embeddings.openai": MagicMock(),
+    "llama_index.vector_stores.chroma": MagicMock(),
+    "llama_index.readers.file": MagicMock(),
+    "llama_index.retrievers.bm25": MagicMock(),
+    "torch": MagicMock(),
+    "chromadb": MagicMock(),
+    "cv2": MagicMock(),
+    "whisperx": MagicMock(),
+}
+
 
 @pytest.fixture(scope="module")
 def client():
     """
-    TestClient с полным моком зависимостей.
+    TestClient с моками зависимостей.
 
     Стратегия:
-    1. Удаляем из sys.modules ВСЕ src. и main модули (чтобы не было кеша).
-    2. Подменяем sys.modules для всех тяжёлых зависимостей (llama_index, torch, chromadb).
-    3. Импортируем main — его импорты получат замоканные модули.
+    1. Удаляем из sys.modules кеш проекта (чтобы не было stale-ссылок).
+    2. Мокаем внешние тяжёлые пакеты через patch.dict(sys.modules, ...).
+    3. Импортируем проектные модули и назначаем их атрибуты напрямую.
+    4. Импортируем main.
     """
     # ── 1. Чистим кеш модулей проекта ──
     for mod_name in list(sys.modules.keys()):
         if mod_name.startswith("main") or mod_name.startswith("src."):
             sys.modules.pop(mod_name, None)
 
-    # ── 2. Создаём моки ──
-    mock_rag = MagicMock()
-    mock_rag.build_index = MagicMock()
-    mock_rag.retrieve_nodes = MagicMock(return_value=[])
-    mock_rag.build_file_context = MagicMock(return_value=([], ""))
-    mock_rag.make_prompt = MagicMock(return_value="prompt")
-    mock_rag.close_all_clients = MagicMock()
-    mock_rag.preload_all_models = MagicMock()
-    mock_rag.unload_rag_models = MagicMock()
+    # ── 2. Внешние пакеты — только sys.modules ──
+    with patch.dict(sys.modules, _HEAVY_PACKAGES, clear=False):
+        # ── 3. Проектные модули — импортируем и назначаем атрибуты ──
+        import src.rag_pipeline
 
-    mock_gguf = MagicMock()
-    mock_gguf.get_gguf_llm = MagicMock(return_value="http://127.0.0.1:49152")
-    mock_gguf.get_gguf_embedding_url = MagicMock(return_value="http://127.0.0.1:49153")
-    mock_gguf.preload_gguf_llm = MagicMock(return_value={"status": "ready", "port": 49152})
-    mock_gguf.get_llm_status = MagicMock(return_value={"state": "idle", "port": None})
-    mock_gguf.unload_all_models = MagicMock()
-    mock_gguf.kill_stray_servers = MagicMock()
-    mock_gguf.count_running_servers = MagicMock(return_value=0)
-    mock_gguf.get_loaded_models = MagicMock(return_value=[])
-    mock_gguf.detect_model_family = MagicMock(return_value="qwen")
-    mock_gguf.stream_gguf_chat = MagicMock()
+        src.rag_pipeline.retrieve_nodes = MagicMock(return_value=[])
+        src.rag_pipeline.build_file_context = MagicMock(return_value=([], ""))
+        src.rag_pipeline.make_prompt = MagicMock(return_value="prompt")
+        src.rag_pipeline.build_index = MagicMock()
+        src.rag_pipeline.close_all_clients = MagicMock()
+        src.rag_pipeline.preload_all_models = MagicMock()
+        src.rag_pipeline.unload_rag_models = MagicMock()
+        src.rag_pipeline.get_vector_store = MagicMock()
+        src.rag_pipeline.get_embedding_url = MagicMock()
+        src.rag_pipeline.flush_bm25_rebuild = MagicMock()
 
-    mock_manager = MagicMock()
-    mock_manager.scan_gguf_dirs = MagicMock(return_value=[])
+        import src.gguf_direct
 
-    mock_ingest = MagicMock()
-    mock_ingest.ingest_file = MagicMock(return_value=[])
+        src.gguf_direct.get_gguf_llm = MagicMock(return_value="http://127.0.0.1:49152")
+        src.gguf_direct.get_gguf_embedding_url = MagicMock(
+            return_value="http://127.0.0.1:49153"
+        )
+        src.gguf_direct.preload_gguf_llm = MagicMock(
+            return_value={"status": "ready", "port": 49152}
+        )
+        src.gguf_direct.get_llm_status = MagicMock(
+            return_value={"state": "idle", "port": None}
+        )
+        src.gguf_direct.unload_all_models = MagicMock()
+        src.gguf_direct.kill_stray_servers = MagicMock()
+        src.gguf_direct.count_running_servers = MagicMock(return_value=0)
+        src.gguf_direct.get_loaded_models = MagicMock(return_value=[])
+        src.gguf_direct.detect_model_family = MagicMock(return_value="qwen")
+        src.gguf_direct.stream_gguf_chat = MagicMock()
 
-    mock_bookmarks = MagicMock()
-    mock_bookmarks.list_bookmarks = MagicMock(return_value=[])
-    mock_bookmarks.get_bookmark = MagicMock(return_value=None)
-    mock_bookmarks.create_bookmark = MagicMock(return_value={"id": "test"})
-    mock_bookmarks.update_bookmark = MagicMock(return_value={"id": "test"})
-    mock_bookmarks.delete_bookmark = MagicMock(return_value=True)
-    mock_bookmarks.mark_stale_for_file = MagicMock(return_value=0)
+        import src.gguf_manager
 
-    # ── 3. Все моки в словарь ──
-    mocks = {
-        "src.rag_pipeline": mock_rag,
-        "src.gguf_direct": mock_gguf,
-        "src.gguf_manager": mock_manager,
-        "src.ingestion": mock_ingest,
-        "src.bookmarks": mock_bookmarks,
-        # llama_index — полностью мокаем, каждый подмодуль отдельно
-        "llama_index": MagicMock(),
-        "llama_index.core": MagicMock(),
-        "llama_index.core.schema": MagicMock(),
-        "llama_index.core.settings": MagicMock(),
-        "llama_index.core.storage": MagicMock(),
-        "llama_index.core.storage.storage_context": MagicMock(),
-        "llama_index.core.vector_stores": MagicMock(),
-        "llama_index.core.vector_stores.types": MagicMock(),
-        "llama_index.core.node_parser": MagicMock(),
-        "llama_index.core.retrievers": MagicMock(),
-        "llama_index.llms.openai": MagicMock(),
-        "llama_index.embeddings.openai": MagicMock(),
-        "llama_index.vector_stores.chroma": MagicMock(),
-        "llama_index.readers.file": MagicMock(),
-        "llama_index.retrievers.bm25": MagicMock(),
-        # Тяжёлые ML-библиотеки
-        "torch": MagicMock(),
-        "chromadb": MagicMock(),
-        "cv2": MagicMock(),
-        "whisperx": MagicMock(),
-    }
+        src.gguf_manager.scan_gguf_dirs = MagicMock(return_value=[])
 
-    # ── 4. Применяем подмену ──
-    with patch.dict(sys.modules, mocks, clear=False):
-        # Теперь импортируем main — все его зависимости уже замоканы
+        import src.ingestion
+
+        src.ingestion.ingest_file = MagicMock(return_value=[])
+        src.ingestion.unload_whisper_model = MagicMock()
+        src.ingestion.kill_subprocesses = MagicMock(return_value=0)
+        src.ingestion.IngestionCancelled = RuntimeError
+
+        import src.bookmarks
+
+        src.bookmarks.list_bookmarks = MagicMock(return_value=[])
+        src.bookmarks.get_bookmark = MagicMock(return_value=None)
+        src.bookmarks.create_bookmark = MagicMock(return_value={"id": "test"})
+        src.bookmarks.update_bookmark = MagicMock(return_value={"id": "test"})
+        src.bookmarks.delete_bookmark = MagicMock(return_value=True)
+        src.bookmarks.mark_stale_for_file = MagicMock(return_value=0)
+
+        # ── 4. Импортируем main ──
         import main as app_module
 
-        app = app_module.app
-        client = TestClient(app)
-        yield client
-    # Восстановление sys.modules происходит автоматически при выходе из patch.dict
+        yield TestClient(app_module.app)
 
 
 # ── Тесты ────────────────────────────────────────────────────────────

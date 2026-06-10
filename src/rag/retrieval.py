@@ -354,6 +354,10 @@ def retrieve_nodes(query: str, notebook_id: str, allowed_files=None, max_tokens=
     # Загружает реранкер, отправляет все найденные чанки на переранжировку,
     # обновляет node.score ответом сервера.
     if all_nodes and config.USE_RERANKER:
+        # Сохраняем оригинальные RRF scores до реранкинга —
+        # при падении реранкера вернём их вместо эвристики.
+        _original_scores = [n.score if hasattr(n, "score") else 0.0 for n in all_nodes]
+
         if len(all_nodes) > config.RAG_RERANK_POOL:
             all_nodes.sort(
                 key=lambda x: x.score if hasattr(x, "score") and x.score else 0,
@@ -436,9 +440,9 @@ def retrieve_nodes(query: str, notebook_id: str, allowed_files=None, max_tokens=
         if scores and max(scores) < 1e-6:
             logger.warning(
                 f"  [RAG] ⚠️ GGUF реранкер выдал слишком низкие оценки "
-                f"(max: {max(scores)}). Используется оригинальный порядок поиска."
+                f"(max: {max(scores)}). Используются оригинальные RRF scores."
             )
-            scores = [1.0 - (i * 0.01) for i in range(len(all_nodes))]
+            scores = _original_scores
 
         for node, score in zip(all_nodes, scores):
             node.score = float(score)

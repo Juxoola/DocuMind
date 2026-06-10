@@ -552,21 +552,39 @@ def get_active_embedding_parallel(gguf_path: str = None) -> int:
 
 
 # ---------------------------------------------------------------------------
-# kill_stray_servers — принудительное завершение ВСЕХ процессов
-# llama-server вне нашего управления. Вызывается при перезагрузке.
+# kill_stray_servers — завершает ТОЛЬКО отслеживаемые процессы llama-server
+# (из _server_processes). В отличие от старой реализации, не убивает чужие
+# процессы по имени. Вызывается при перезагрузке как safety net.
 # ---------------------------------------------------------------------------
 
 
 def kill_stray_servers():
 
-    logger.info("[GGUF Server] Поиск и завершение сторонних процессов llama-server...")
-    try:
-        if os.name == "nt":
-            subprocess.run(["taskkill", "/F", "/IM", "llama-server.exe", "/T"], capture_output=True)
-        else:
-            subprocess.run(["pkill", "-9", "llama-server"], capture_output=True)
-    except Exception as e:
-        logger.error(f"[GGUF Server] Ошибка при очистке процессов: {e}")
+    if not _server_processes:
+        logger.debug("[GGUF Server] Нет отслеживаемых процессов для завершения.")
+        return
+
+    logger.info("[GGUF Server] Завершение отслеживаемых процессов llama-server...")
+    for path, process in list(_server_processes.items()):
+        try:
+            if process.poll() is None:
+                if os.name == "nt":
+                    subprocess.run(
+                        ["taskkill", "/F", "/T", "/PID", str(process.pid)],
+                        capture_output=True,
+                        timeout=5,
+                    )
+                else:
+                    process.kill()
+                process.wait(timeout=5)
+            logger.debug(f"[GGUF Server] Остановлен: {os.path.basename(path)} (PID {process.pid})")
+        except Exception as e:
+            logger.debug(f"[GGUF Server] Не удалось остановить {os.path.basename(path)}: {e}")
+
+    _server_processes.clear()
+    _server_ports.clear()
+    _server_configs.clear()
+    _server_roles.clear()
 
 
 def count_running_servers() -> int:
