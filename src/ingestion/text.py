@@ -57,6 +57,22 @@ def _analyze_page_for_vision(page):
     return text, has_real_graphics
 
 
+def _analyze_and_build_page(page_num, doc, images_dir, file_name, splitter):
+
+    page = doc.load_page(page_num)
+    text, has_real_graphics = _analyze_page_for_vision(page)
+    local_nodes = []
+    image_path = None
+    if text and text.strip():
+        local_nodes = splitter.get_nodes_from_documents(
+            [TextNode(text=text, metadata={"file_name": file_name, "page": page_num + 1})]
+        )
+    if has_real_graphics and page is not None:
+        image_path = os.path.join(images_dir, f"p_{page_num + 1}_{uuid.uuid4().hex[:6]}.png")
+        page.get_pixmap(dpi=150).save(image_path)
+    return page_num, local_nodes, image_path
+
+
 def process_pdf(file_path, images_dir, llm_settings=None, shared_llm_url=None,
                 original_filename=None, progress_cb=None, cancel_check=None,
                 keep_vision_alive=False):
@@ -72,67 +88,35 @@ def process_pdf(file_path, images_dir, llm_settings=None, shared_llm_url=None,
     splitter = _get_splitter()
     total_pages = len(doc)
     n_workers = min(8, (os.cpu_count() or 4), total_pages)
-    page_results = [None] * total_pages
 
+    # Один проход: анализ страницы + построение узлов + рендер pixmap
+    # в одном ThreadPoolExecutor — вместо двух последовательных пулов.
     if n_workers <= 1:
         for page_num in range(total_pages):
             if _is_cancelled():
                 raise IngestionCancelled(f"Cancelled at page {page_num + 1}")
-            page = doc.load_page(page_num)
-            text, has_real_graphics = _analyze_page_for_vision(page)
-            page_results[page_num] = (text, has_real_graphics, page)
-    else:
-        with ThreadPoolExecutor(max_workers=n_workers) as ex:
-            cancel_check_every = max(1, total_pages // (n_workers * 4))
-            submitted = 0
-            future_to_pn = {}
-            for page_num in range(total_pages):
-                if submitted % cancel_check_every == 0 and _is_cancelled():
-                    ex.shutdown(wait=False, cancel_futures=True)
-                    raise IngestionCancelled(f"Cancelled at page {submitted}")
-                page = doc.load_page(page_num)
-                future_to_pn[ex.submit(_analyze_page_for_vision, page)] = page_num
-                submitted += 1
-            for fut in as_completed(future_to_pn):
-                pn = future_to_pn[fut]
-                try:
-                    text, has_real_graphics = fut.result()
-                    page_results[pn] = (text, has_real_graphics, doc.load_page(pn))
-                except Exception as e:
-                    logger.warning(f"Ошибка разбора страницы {pn + 1}: {e}")
-                    page_results[pn] = ("", False, None)
-
-    def _build_page_artifacts(page_num: int):
-        result = page_results[page_num]
-        text, has_real_graphics = result[0], result[1]
-        page = result[2] if len(result) > 2 else doc.load_page(page_num)
-        local_nodes = []
-        image_path = None
-        if text and text.strip():
-            local_nodes = splitter.get_nodes_from_documents(
-                [TextNode(text=text, metadata={"file_name": file_name, "page": page_num + 1})]
+            pn, local_nodes, image_path = _analyze_and_build_page(
+                page_num, doc, images_dir, file_name, splitter
             )
-        if has_real_graphics and page is not None:
-            image_path = os.path.join(images_dir, f"p_{page_num + 1}_{uuid.uuid4().hex[:6]}.png")
-            page.get_pixmap(dpi=150).save(image_path)
-        return page_num, local_nodes, image_path
-
-    if total_pages <= 1 or n_workers <= 1:
-        for page_num in range(total_pages):
-            if _is_cancelled():
-                raise IngestionCancelled(f"Cancelled at page {page_num + 1}")
-            pn, local_nodes, image_path = _build_page_artifacts(page_num)
             nodes.extend(local_nodes)
             if image_path:
                 frame_list.append({"page": pn + 1, "path": image_path})
     else:
         with ThreadPoolExecutor(max_workers=n_workers) as ex:
-            futures = [ex.submit(_build_page_artifacts, pn) for pn in range(total_pages)]
+            cancel_check_every = max(1, total_pages // (n_workers * 4))
+            futures = []
+            for page_num in range(total_pages):
+                if page_num % cancel_check_every == 0 and _is_cancelled():
+                    ex.shutdown(wait=False, cancel_futures=True)
+                    raise IngestionCancelled(f"Cancelled at page {page_num + 1}")
+                futures.append(
+                    ex.submit(_analyze_and_build_page, page_num, doc, images_dir, file_name, splitter)
+                )
             artifacts = [None] * total_pages
             for fut in as_completed(futures):
                 if _is_cancelled():
                     ex.shutdown(wait=False, cancel_futures=True)
-                    raise IngestionCancelled("Cancelled during artifacts build")
+                    raise IngestionCancelled("Cancelled during page processing")
                 pn, local_nodes, image_path = fut.result()
                 artifacts[pn] = (local_nodes, image_path)
             for pn, (local_nodes, image_path) in enumerate(artifacts):

@@ -350,9 +350,11 @@ async def delete_file(filename: str, notebook_id: str):
                 time.sleep(0.5)
     from src.rag_pipeline import get_vector_store
 
-    vector_store = get_vector_store(notebook_id)
-    collection = vector_store._collection
-    collection.delete(where={"file_name": filename})
+    def _delete_chromadb_entries():
+        vs = get_vector_store(notebook_id)
+        vs._collection.delete(where={"file_name": filename})
+
+    await asyncio.to_thread(_delete_chromadb_entries)
     try:
         from src.bookmarks import mark_stale_for_file
 
@@ -405,15 +407,18 @@ async def get_video_metadata(filename: str, notebook_id: str):
 @router.delete("/api/clear")
 async def clear_notebook(notebook_id: str):
     # Полная очистка блокнота: закрывает все клиенты ChromaDB, удаляет data/chroma_db/images.
-    from src.rag_pipeline import close_all_clients
+    from src.rag_pipeline import close_all_clients as _close_all
 
-    close_all_clients()
-    paths = config.get_notebook_paths(notebook_id)
-    for d in ("data", "chroma_db", "images"):
-        p = paths[d]
-        if os.path.exists(p):
-            robust_rmtree(p)
-        os.makedirs(p, exist_ok=True)
+    def _clear_data():
+        _close_all()
+        paths = config.get_notebook_paths(notebook_id)
+        for d in ("data", "chroma_db", "images"):
+            p = paths[d]
+            if os.path.exists(p):
+                robust_rmtree(p)
+            os.makedirs(p, exist_ok=True)
+
+    await asyncio.to_thread(_clear_data)
     return {"status": "ok"}
 
 
