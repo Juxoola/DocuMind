@@ -5,12 +5,7 @@
   from src.ingestion import ...
 продолжали работать без изменений.
 """
-#
-# Файл: ingestion.py — trampoline (заглушка совместимости).
-# Все функции ингеста живут в src/ingestion/ (orchestrator, text, vision, audio_video, utils).
-#
 
-# Импорт всех подмодулей ingestion: аудио/видео, конвертация медиа, оркестратор, сплиттер, текст, утилиты, vision.
 from src.ingestion.audio_video import (
     _whisper_model_cache,
     _whisper_lock,
@@ -44,34 +39,3 @@ from src.ingestion.vision import (
     get_image_base64,
     get_vision_url,
 )
-
-# Полный список публичного API для удобства импорта и рефакторинга.
-__all__ = [
-    "_SEMANTIC_SPLITTER_CACHE",
-    "_active_subprocesses",
-    "_analyze_page_for_vision",
-    "_get_splitter",
-    "_http_session",
-    "_safe_print",
-    "_whisper_lock",
-    "_whisper_model_cache",
-    "cleanup_gpu",
-    "describe_image_with_lmstudio",
-    "ensure_720p_video",
-    "ensure_mp3_audio",
-    "format_seconds",
-    "get_image_base64",
-    "get_or_load_whisper",
-    "get_vision_url",
-    "ingest_file",
-    "kill_subprocesses",
-    "process_audio_video",
-    "process_docx",
-    "process_pdf",
-    "process_pptx",
-    "register_subprocess",
-    "save_high_res_frame",
-    "unload_whisper_model",
-    "unregister_subprocess",
-    "IngestionCancelled",
-]
