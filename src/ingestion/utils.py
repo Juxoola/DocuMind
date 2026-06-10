@@ -4,7 +4,6 @@ import gc
 import inspect as _inspect_module
 import logging
 import os
-import sys
 import warnings
 
 import torch
@@ -79,18 +78,6 @@ def kill_subprocesses(notebook_id):
 
 class IngestionCancelled(Exception):
     pass
-
-
-def _safe_print(msg):
-
-    try:
-        logger.info(msg)
-    except UnicodeEncodeError:
-        try:
-            sys.stdout.buffer.write((str(msg) + "\n").encode("utf-8", errors="replace"))
-            sys.stdout.buffer.flush()
-        except Exception:
-            logger.error(msg.encode("ascii", errors="replace").decode("ascii"))
 
 
 # Очистка видеопамяти перед тяжёлыми задачами (выгрузка RAG-моделей)

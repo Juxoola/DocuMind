@@ -100,7 +100,6 @@ def robust_rmtree(path: str, max_retries: int = 3, delay: float = 0.5) -> tuple:
     for i in range(max_retries):
         try:
             gc.collect()
-            gc.collect()
             shutil.rmtree(path)
             return True, None
         except PermissionError as e:

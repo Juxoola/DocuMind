@@ -9,7 +9,6 @@ import subprocess
 
 from src.ingestion.utils import (
     IngestionCancelled,
-    _safe_print,
     register_subprocess,
     unregister_subprocess,
 )
@@ -40,14 +39,14 @@ def ensure_720p_video(file_path, prog_cb=None, cancel_check=None, notebook_id=No
                     h, m, s = time_str.split(":")
                     return float(h) * 3600 + float(m) * 60 + float(s)
         except subprocess.TimeoutExpired:
-            _safe_print(
+            logger.warning(
                 f"[ensure_720p_video] WARNING get_duration timeout для {os.path.basename(path)} (30с)"
             )
         except Exception:
             pass
         return 0
 
-    _safe_print(f"[ensure_720p_video] Начало: {os.path.basename(file_path)}")
+    logger.info(f"[ensure_720p_video] Начало: {os.path.basename(file_path)}")
     duration = get_duration(file_path)
     temp_final = file_path + ".720p.mp4"
     use_turbo = True if duration == 0 else duration >= 120
@@ -179,7 +178,7 @@ def ensure_720p_video(file_path, prog_cb=None, cancel_check=None, notebook_id=No
             parts = []
             for p in ex.map(encode_seg, range(num_workers)):
                 if _is_cancelled():
-                    _safe_print("[Ingestion] Отмена во время турбо-кодирования")
+                    logger.info("[Ingestion] Отмена во время турбо-кодирования")
                     ex.shutdown(wait=False, cancel_futures=True)
                     raise IngestionCancelled("Cancelled during turbo encode")
                 parts.append(p)

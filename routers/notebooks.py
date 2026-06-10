@@ -121,7 +121,6 @@ async def delete_notebook(nb_id: str):
         logger.debug(f"[delete_notebook] cancel_bm25_rebuild: {e}")
 
     gc.collect()
-    gc.collect()
 
     success, err_msg = robust_rmtree(base_path)
     if not success:

@@ -18,7 +18,6 @@ import threading
 import time
 
 import requests
-import torch
 
 import config
 from src.gguf.state import (

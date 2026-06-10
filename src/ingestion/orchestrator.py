@@ -62,46 +62,43 @@ def ingest_file(
         )
 
     shared_llm_url = None
-    try:
-        if ext == ".pdf":
-            nodes = process_pdf(
-                file_path,
-                images_dir,
-                llm_settings,
-                shared_llm_url,
-                progress_cb=progress_cb,
-                cancel_check=cancel_check,
-                keep_vision_alive=keep_vision_alive,
-            )
-        elif ext == ".pptx":
-            nodes = process_pptx(
-                file_path,
-                images_dir,
-                llm_settings,
-                shared_llm_url,
-                progress_cb=progress_cb,
-                cancel_check=cancel_check,
-                keep_vision_alive=keep_vision_alive,
-            )
-        elif ext == ".docx":
-            nodes = process_docx(
-                file_path,
-                images_dir,
-                llm_settings,
-                shared_llm_url,
-                progress_cb=progress_cb,
-                cancel_check=cancel_check,
-                keep_vision_alive=keep_vision_alive,
-            )
-        else:
-            try:
-                with open(file_path, encoding="utf-8") as f:
-                    text = f.read()
-            except UnicodeDecodeError:
-                with open(file_path, encoding="cp1251") as f:
-                    text = f.read()
-            doc = TextNode(text=text, metadata={"file_name": os.path.basename(file_path)})
-            nodes = _get_splitter().get_nodes_from_documents([doc])
-    finally:
-        pass
+    if ext == ".pdf":
+        nodes = process_pdf(
+            file_path,
+            images_dir,
+            llm_settings,
+            shared_llm_url,
+            progress_cb=progress_cb,
+            cancel_check=cancel_check,
+            keep_vision_alive=keep_vision_alive,
+        )
+    elif ext == ".pptx":
+        nodes = process_pptx(
+            file_path,
+            images_dir,
+            llm_settings,
+            shared_llm_url,
+            progress_cb=progress_cb,
+            cancel_check=cancel_check,
+            keep_vision_alive=keep_vision_alive,
+        )
+    elif ext == ".docx":
+        nodes = process_docx(
+            file_path,
+            images_dir,
+            llm_settings,
+            shared_llm_url,
+            progress_cb=progress_cb,
+            cancel_check=cancel_check,
+            keep_vision_alive=keep_vision_alive,
+        )
+    else:
+        try:
+            with open(file_path, encoding="utf-8") as f:
+                text = f.read()
+        except UnicodeDecodeError:
+            with open(file_path, encoding="cp1251") as f:
+                text = f.read()
+        doc = TextNode(text=text, metadata={"file_name": os.path.basename(file_path)})
+        nodes = _get_splitter().get_nodes_from_documents([doc])
     return nodes
