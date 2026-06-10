@@ -35,9 +35,8 @@ $env:PYTHONPATH = $ScriptDir
 
 Color "Cyan" "Запуск backend (FastAPI)..."
 $backend = Start-Process -WindowStyle Hidden -PassThru `
-    -FilePath "python" -ArgumentList "main.py" `
-    -WorkingDirectory $ScriptDir `
-    -RedirectStandardOutput $logFile -RedirectStandardError $logFile
+    -FilePath "cmd" -ArgumentList "/c python main.py >> `"$logFile`" 2>&1" `
+    -WorkingDirectory $ScriptDir
 
 # ── Healthcheck ──
 $backendReady = $false
@@ -74,9 +73,8 @@ if (-not $NoFrontend) {
         $frontendLog = Join-Path $LogDir "frontend.log"
         Color "Cyan" "Запуск frontend (Vite)..."
         $frontend = Start-Process -WindowStyle Hidden -PassThru `
-            -FilePath "node" -ArgumentList "run dev" `
-            -WorkingDirectory $fDir `
-            -RedirectStandardOutput $frontendLog -RedirectStandardError $frontendLog
+            -FilePath "cmd" -ArgumentList "/c npm run dev >> `"$frontendLog`" 2>&1" `
+            -WorkingDirectory $fDir
         Start-Sleep -Seconds 3
         Color "Green" "Frontend: http://localhost:5173"
     } else {
@@ -98,8 +96,8 @@ while ($true) {
 } finally {
     Color "Cyan" "Остановка сервера..."
     try { Invoke-WebRequest -Uri "http://127.0.0.1:8000/api/gguf-kill-all" -Method POST -TimeoutSec 5 -UseBasicParsing -ErrorAction SilentlyContinue } catch {}
-    if ($backend -and !$backend.HasExited) { $backend.Kill() }
-    if ($frontend -and !$frontend.HasExited) { $frontend.Kill() }
+    if ($backend -and !$backend.HasExited) { taskkill /F /T /PID $backend.Id 2>$null }
+    if ($frontend -and !$frontend.HasExited) { taskkill /F /T /PID $frontend.Id 2>$null }
     Get-Process "llama-server" -ErrorAction SilentlyContinue | Stop-Process -Force
     Color "Cyan" "Сервер остановлен."
 }
