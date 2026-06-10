@@ -69,10 +69,10 @@ _QUERY_GEN_PROMPT = (
 
 
 # Создание LLM-клиента для Query Expansion. Проверяет доступность
-# GGUF-сервера (через gguf_direct) или падает на LM Studio.
+# GGUF-сервера (из src.gguf.server) или падает на LM Studio.
 # Возвращает None, если LLM-сервер недоступен — QE отключается.
 def _get_qe_llm():
-    from src.gguf_direct import get_active_llm_url
+    from src.gguf.server import get_active_llm_url
 
     url = get_active_llm_url()
     if url:
@@ -381,7 +381,7 @@ def retrieve_nodes(query: str, notebook_id: str, allowed_files=None, max_tokens=
 
         if "reranker" not in _model_cache:
             logger.info(f"  [RAG] Загрузка GGUF реранкера: {reranker_name}")
-            from src.gguf_direct import get_gguf_embedding_url
+            from src.gguf.server import get_gguf_embedding_url
 
             model_path = config.resolve_model_path(reranker_name)
             url = get_gguf_embedding_url(model_path, is_reranker=True, n_parallel=1)

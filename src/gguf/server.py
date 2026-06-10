@@ -1,14 +1,10 @@
-"""Жизненный цикл GGUF-серверов (запуск, остановка, получение URL).
-
-Вынесено из gguf_direct.py при рефакторинге.
-"""
+"""Жизненный цикл GGUF-серверов (запуск, остановка, получение URL)."""
 
 # Файл: server.py — запуск/остановка серверов llama-server для LLM,
 # эмбеддингов и реранкеров. Содержит логику выбора порта, сборки
 # аргументов командной строки, ожидания готовности (health check)
 # и корректной выгрузки моделей.
 
-import gc
 import logging
 import os
 import socket
@@ -194,6 +190,49 @@ def unload_rag_models_safe():
 
 
 # ---------------------------------------------------------------------------
+# _build_llm_config — вспомогательная функция для сборки словаря конфигурации LLM.
+# ---------------------------------------------------------------------------
+
+
+def _build_llm_config(
+    gguf_path: str,
+    mmproj_path: str = None,
+    temperature: float = 0.1,
+    ctx_size: int = None,
+    gpu_layers: int = -1,
+    n_threads: int = None,
+    n_batch: int = 512,
+    flash_attn: bool = True,
+    max_tokens: int = 4096,
+    type_k: int = 2,
+    type_v: int = 2,
+    enable_thinking: bool = True,
+    thinking_budget: int = 1024,
+    n_parallel: int = 1,
+    custom_args: list[str] | None = None,
+    mtp_enabled: bool = False,
+    n_ubatch: int = 256,
+) -> dict:
+    return {
+        "mmproj": mmproj_path or None,
+        "ctx_size": int(ctx_size or config.GGUF_CTX_SIZE),
+        "gpu_layers": int(gpu_layers if gpu_layers is not None else -1),
+        "n_batch": int(n_batch or 512),
+        "flash_attn": bool(flash_attn),
+        "max_tokens": int(max_tokens or 4096),
+        "type_k": int(type_k or 2),
+        "type_v": int(type_v or 2),
+        "enable_thinking": bool(enable_thinking),
+        "thinking_budget": int(thinking_budget if thinking_budget is not None else 1024),
+        "n_parallel": int(n_parallel or 1),
+        "custom_args": custom_args if custom_args is not None else [],
+        "mtp_enabled": bool(mtp_enabled),
+        "n_ubatch": int(n_ubatch or 256),
+        "_n_threads": n_threads,
+    }
+
+
+# ---------------------------------------------------------------------------
 # get_gguf_llm — основная точка входа для загрузки LLM.
 # Синхронная: возвращает URL сервера или выбрасывает исключение.
 # Проверяет кеш процессов; если конфиг совпадает — возвращает готовый URL.
@@ -225,23 +264,25 @@ def get_gguf_llm(
     if mmproj_path:
         mmproj_path = os.path.normpath(config.resolve_model_path(mmproj_path)).lower()
 
-    current_config = {
-        "mmproj": mmproj_path or None,
-        "ctx_size": int(ctx_size or config.GGUF_CTX_SIZE),
-        "gpu_layers": int(gpu_layers if gpu_layers is not None else -1),
-        "n_batch": int(n_batch or 512),
-        "flash_attn": bool(flash_attn),
-        "max_tokens": int(max_tokens or 4096),
-        "type_k": int(type_k or 2),
-        "type_v": int(type_v or 2),
-        "enable_thinking": bool(enable_thinking),
-        "thinking_budget": int(thinking_budget if thinking_budget is not None else 1024),
-        "n_parallel": int(n_parallel or 1),
-        "custom_args": custom_args if custom_args is not None else [],
-        "mtp_enabled": bool(mtp_enabled),
-        "n_ubatch": int(n_ubatch or 256),
-        "_n_threads": n_threads,
-    }
+    current_config = _build_llm_config(
+        gguf_path,
+        mmproj_path,
+        temperature=temperature,
+        ctx_size=ctx_size,
+        gpu_layers=gpu_layers,
+        n_threads=n_threads,
+        n_batch=n_batch,
+        flash_attn=flash_attn,
+        max_tokens=max_tokens,
+        type_k=type_k,
+        type_v=type_v,
+        enable_thinking=enable_thinking,
+        thinking_budget=thinking_budget,
+        n_parallel=n_parallel,
+        custom_args=custom_args,
+        mtp_enabled=mtp_enabled,
+        n_ubatch=n_ubatch,
+    )
 
     with _lock:
         if gguf_path in _server_processes:
@@ -328,23 +369,24 @@ def preload_gguf_llm(
     if mmproj_path:
         mmproj_path = os.path.normpath(config.resolve_model_path(mmproj_path)).lower()
 
-    current_config = {
-        "mmproj": mmproj_path or None,
-        "ctx_size": int(ctx_size or config.GGUF_CTX_SIZE),
-        "gpu_layers": int(gpu_layers if gpu_layers is not None else -1),
-        "n_batch": int(n_batch or 512),
-        "flash_attn": bool(flash_attn),
-        "max_tokens": int(max_tokens or 4096),
-        "type_k": int(type_k or 2),
-        "type_v": int(type_v or 2),
-        "enable_thinking": bool(enable_thinking),
-        "thinking_budget": int(thinking_budget if thinking_budget is not None else 1024),
-        "n_parallel": int(n_parallel or 1),
-        "custom_args": custom_args if custom_args is not None else [],
-        "mtp_enabled": bool(mtp_enabled),
-        "n_ubatch": int(n_ubatch or 256),
-        "_n_threads": n_threads,
-    }
+    current_config = _build_llm_config(
+        gguf_path,
+        mmproj_path,
+        ctx_size=ctx_size,
+        gpu_layers=gpu_layers,
+        n_threads=n_threads,
+        n_batch=n_batch,
+        flash_attn=flash_attn,
+        max_tokens=max_tokens,
+        type_k=type_k,
+        type_v=type_v,
+        enable_thinking=enable_thinking,
+        thinking_budget=thinking_budget,
+        n_parallel=n_parallel,
+        custom_args=custom_args,
+        mtp_enabled=mtp_enabled,
+        n_ubatch=n_ubatch,
+    )
 
     task_id = str(uuid.uuid4())[:8]
 
@@ -599,7 +641,7 @@ def count_running_servers() -> int:
 # ---------------------------------------------------------------------------
 # unload_all_models — выгрузка одной или всех моделей.
 # Останавливает процесс (через taskkill/pkill), чистит словари.
-# В конце — gc.collect() + torch.cuda.empty_cache().
+# В конце — cleanup_gpu() + torch.cuda.ipc_collect().
 # ---------------------------------------------------------------------------
 
 
@@ -650,10 +692,11 @@ def unload_all_models(role: str = None):
         _server_configs.pop(path, None)
         _server_roles.pop(path, None)
 
-    gc.collect()
+    from src.ingestion.utils import cleanup_gpu
+
+    cleanup_gpu()
     if torch.cuda.is_available():
         try:
-            torch.cuda.empty_cache()
             torch.cuda.ipc_collect()
         except Exception:
             pass

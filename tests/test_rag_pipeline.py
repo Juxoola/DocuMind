@@ -76,7 +76,7 @@ class TestRrfFuse:
 
     def _get_funcs(self):
         """Импортируем после установки моков."""
-        from src.rag_pipeline import _rrf_fuse
+        from src.rag.retrieval import _rrf_fuse
 
         return _rrf_fuse
 
@@ -87,7 +87,7 @@ class TestRrfFuse:
     def test_empty_vector(self, mock_llama_index):
         from llama_index.core.schema import NodeWithScore, TextNode
 
-        from src.rag_pipeline import _rrf_fuse
+        from src.rag.retrieval import _rrf_fuse
 
         bm25 = [
             NodeWithScore(node=TextNode(text="A", id_="a"), score=0.9),
@@ -101,7 +101,7 @@ class TestRrfFuse:
     def test_empty_bm25(self, mock_llama_index):
         from llama_index.core.schema import NodeWithScore, TextNode
 
-        from src.rag_pipeline import _rrf_fuse
+        from src.rag.retrieval import _rrf_fuse
 
         vec = [NodeWithScore(node=TextNode(text="X", id_="x"), score=0.5)]
         result = _rrf_fuse(vec, [])
@@ -111,7 +111,7 @@ class TestRrfFuse:
     def test_deduplicates(self, mock_llama_index):
         from llama_index.core.schema import NodeWithScore, TextNode
 
-        from src.rag_pipeline import _rrf_fuse
+        from src.rag.retrieval import _rrf_fuse
 
         common = TextNode(text="Common", id_="same_id")
         vec = [NodeWithScore(node=common, score=0.9)]
@@ -168,23 +168,23 @@ class TestBm25RebuildApi:
     """API отложенной пересборки BM25 (таймеры, отмена, флаш)."""
 
     def test_schedule_cancel(self, mock_llama_index):
-        from src.rag_pipeline import _schedule_bm25_rebuild, cancel_bm25_rebuild
+        from src.rag.bm25 import _schedule_bm25_rebuild, cancel_bm25_rebuild
 
         _schedule_bm25_rebuild("test_nb", "/tmp/fake_db")
         cancel_bm25_rebuild("test_nb")
 
     def test_cancel_nonexistent(self, mock_llama_index):
-        from src.rag_pipeline import cancel_bm25_rebuild
+        from src.rag.bm25 import cancel_bm25_rebuild
 
         cancel_bm25_rebuild("never_scheduled")
 
     def test_flush_without_wait(self, mock_llama_index):
-        from src.rag_pipeline import flush_bm25_rebuild
+        from src.rag.bm25 import flush_bm25_rebuild
 
-        with patch("src.rag_pipeline._rebuild_bm25_bg"):
+        with patch("src.rag.bm25._rebuild_bm25_bg"):
             flush_bm25_rebuild("test_nb", db_path="/tmp/fake", wait=False)
 
     def test_is_bm25_ready_no_index(self, mock_llama_index):
-        from src.rag_pipeline import is_bm25_ready
+        from src.rag.bm25 import is_bm25_ready
 
         assert is_bm25_ready("nonexistent") is False

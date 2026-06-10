@@ -4,7 +4,7 @@
 Используем TestClient + комбинацию подходов:
 - Внешние пакеты (torch, chromadb, llama_index) — patch.dict(sys.modules, ...),
   т.к. они импортируются на уровне модулей src.* до того, как @patch может вмешаться.
-- Проектные модули (src.rag_pipeline, src.gguf_direct, etc.) — импортируем и
+- Проектные модули (src.rag_pipeline, src.gguf.*, etc.) — импортируем и
   назначаем атрибуты напрямую, без sys.modules.
 """
 
@@ -74,20 +74,22 @@ def client():
         src.rag_pipeline.get_embedding_url = MagicMock()
         src.rag_pipeline.flush_bm25_rebuild = MagicMock()
 
-        import src.gguf_direct
+        import src.gguf.server
 
-        src.gguf_direct.get_gguf_llm = MagicMock(return_value="http://127.0.0.1:49152")
-        src.gguf_direct.get_gguf_embedding_url = MagicMock(return_value="http://127.0.0.1:49153")
-        src.gguf_direct.preload_gguf_llm = MagicMock(
+        src.gguf.server.get_gguf_llm = MagicMock(return_value="http://127.0.0.1:49152")
+        src.gguf.server.get_gguf_embedding_url = MagicMock(return_value="http://127.0.0.1:49153")
+        src.gguf.server.preload_gguf_llm = MagicMock(
             return_value={"status": "ready", "port": 49152}
         )
-        src.gguf_direct.get_llm_status = MagicMock(return_value={"state": "idle", "port": None})
-        src.gguf_direct.unload_all_models = MagicMock()
-        src.gguf_direct.kill_stray_servers = MagicMock()
-        src.gguf_direct.count_running_servers = MagicMock(return_value=0)
-        src.gguf_direct.get_loaded_models = MagicMock(return_value=[])
-        src.gguf_direct.detect_model_family = MagicMock(return_value="qwen")
-        src.gguf_direct.stream_gguf_chat = MagicMock()
+        src.gguf.server.get_llm_status = MagicMock(return_value={"state": "idle", "port": None})
+        src.gguf.server.unload_all_models = MagicMock()
+        src.gguf.server.kill_stray_servers = MagicMock()
+        src.gguf.server.count_running_servers = MagicMock(return_value=0)
+        src.gguf.server.get_loaded_models = MagicMock(return_value=[])
+        src.gguf.models = MagicMock()
+        src.gguf.models.detect_model_family = MagicMock(return_value="qwen")
+        src.gguf.streaming = MagicMock()
+        src.gguf.streaming.stream_gguf_chat = MagicMock()
 
         import src.gguf_manager
 

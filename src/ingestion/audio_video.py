@@ -1,7 +1,6 @@
 """Обработка аудио/видео: транскрибация WhisperX, анализ кадров, Vision."""
 # Пайплайн: WhisperX → детекция смены слайдов (cv2) → Vision-описание ключевых кадров
 
-import gc
 import json
 import logging
 import os
@@ -15,10 +14,11 @@ import torch
 from llama_index.core.schema import TextNode
 
 import config
-from src.gguf_direct import unload_all_models
+from src.gguf.server import unload_all_models
 from src.ingestion.splitter import _get_splitter
 from src.ingestion.utils import (
     IngestionCancelled,
+    cleanup_gpu,
     format_seconds,
     register_subprocess,
     unregister_subprocess,
@@ -54,9 +54,7 @@ def unload_whisper_model():
             return
         logger.info(f"[WhisperX] Выгрузка {len(_whisper_model_cache)} кешированных моделей...")
         _whisper_model_cache.clear()
-        gc.collect()
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
+        cleanup_gpu()
 
 
 def save_high_res_frame(video_path, time_sec, output_path):

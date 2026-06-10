@@ -97,7 +97,7 @@ async def chat(request: ChatRequest):
     use_direct_gguf = False
     if request.use_gguf == "true" and request.gguf_model_path:
         use_direct_gguf = True
-        from src.gguf_direct import get_gguf_llm
+        from src.gguf.server import get_gguf_llm
 
         try:
             active_llm = await asyncio.to_thread(
@@ -195,7 +195,8 @@ async def chat(request: ChatRequest):
 
             # Ветка GGUF: стриминг через локальный llama-server с детекцией <think>-тегов для chain-of-thought.
             if use_direct_gguf:
-                from src.gguf_direct import detect_model_family, stream_gguf_chat
+                from src.gguf.models import detect_model_family
+                from src.gguf.streaming import stream_gguf_chat
 
                 sys_prompt = (
                     get_system_prompt(request.answer_mode) + f"\n\nДоступные источники:\n{context}"

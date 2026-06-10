@@ -8,7 +8,7 @@ import time
 
 import config
 from routers.shared import safe_extract_llm_response
-from src.gguf_direct import get_gguf_llm
+from src.gguf.server import get_gguf_llm
 from src.ingestion.utils import _http_session, cleanup_gpu
 
 logger = logging.getLogger(__name__)
@@ -17,6 +17,18 @@ logger = logging.getLogger(__name__)
 def get_image_base64(image_path):
     with open(image_path, "rb") as image_file:
         return base64.b64encode(image_file.read()).decode("utf-8")
+
+
+def make_vision_message(base64_data: str, text: str = "") -> list:
+    """Build the content list for a vision user message."""
+    msg = [{"type": "text", "text": text}] if text else []
+    msg.append(
+        {
+            "type": "image_url",
+            "image_url": {"url": f"data:image/jpeg;base64,{base64_data}"},
+        }
+    )
+    return msg
 
 
 def get_vision_url(llm_settings, progress_cb=None):
@@ -116,15 +128,7 @@ def describe_image_with_lmstudio(image_path, llm_settings=None, existing_llm_url
                     "messages": [
                         {
                             "role": "user",
-                            "content": [
-                                {"type": "text", "text": prompt},
-                                {
-                                    "type": "image_url",
-                                    "image_url": {
-                                        "url": f"data:image/jpeg;base64,{get_image_base64(image_path)}"
-                                    },
-                                },
-                            ],
+                            "content": make_vision_message(get_image_base64(image_path), prompt),
                         }
                     ],
                     "temperature": v_temp,

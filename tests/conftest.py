@@ -5,7 +5,7 @@
 - Тесты модульные: не трогаем GGUF-сервера, ChromaDB, внешние API.
 - test_config.py — изолированные тесты конфига (чистые функции + парсинг).
 - test_rag_pipeline.py — _rrf_fuse, _rrf_fuse_across_files (чистые функции).
-- test_gguf_direct.py — detect_model_family, CACHE_TYPE_MAP (чистые функции).
+- test_gguf_direct.py — detect_model_family, CACHE_TYPE_MAP, server state (чистые функции).
 - test_main.py — FastAPI TestClient (монтируем только нужные эндпоинты).
 """
 

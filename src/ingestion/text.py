@@ -12,7 +12,7 @@ from llama_index.core.schema import TextNode
 from pptx import Presentation
 
 import config
-from src.gguf_direct import unload_all_models
+from src.gguf.server import unload_all_models
 from src.ingestion.splitter import _get_splitter
 from src.ingestion.utils import IngestionCancelled
 from src.ingestion.vision import describe_image_with_lmstudio, get_vision_url

@@ -153,7 +153,6 @@ async def upload_file(
     q.put({"type": "started", "task_id": task_id, "filename": file.filename})
 
     def process_task():
-        import torch
 
         start_time = time.time()
         cancel_event = upload_cancel_flags.setdefault(task_id, threading.Event())
@@ -203,7 +202,7 @@ async def upload_file(
             if is_last_in_batch:
                 logger.info(f"[INGESTION] Пачка завершена. {total_count} файлов обработано.")
                 try:
-                    from src.gguf_direct import unload_all_models
+                    from src.gguf.server import unload_all_models
 
                     unload_all_models(role="llm")
                 except Exception as llm_err:
@@ -281,9 +280,9 @@ async def upload_file(
             q.put({"type": "error", "msg": str(e)})
         finally:
             upload_cancel_flags.pop(task_id, None)
-            gc.collect()
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
+            from src.ingestion import cleanup_gpu
+
+            cleanup_gpu()
 
     _task = asyncio.create_task(asyncio.to_thread(process_task))
     _background_tasks.add(_task)

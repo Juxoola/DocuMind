@@ -1,9 +1,8 @@
 """Инициализация, предзагрузка и выгрузка RAG-моделей (embedding, reranker, LLM)."""
 
-# Загрузка GGUF-моделей эмбеддингов и реранкера через
-# локальный сервер (gguf_direct), настройка llama_index Settings.
+# Загрузка GGUF-моделей эмбеддингов и реранкера через локальный сервер,
+# настройка llama_index Settings.
 
-import gc
 import logging
 
 import torch
@@ -22,7 +21,7 @@ def init_settings(max_tokens=1024):
 
     with _init_lock:
         # Инициализация эмбеддингов однократно: проверяем формат GGUF,
-        # запускаем локальный сервер через gguf_direct и создаём OpenAIEmbedding-клиент
+        # запускаем локальный сервер и создаём OpenAIEmbedding-клиент
         if "embed_model" not in _model_cache:
             model_name = config.EMBEDDING_MODEL_NAME
 
@@ -35,12 +34,12 @@ def init_settings(max_tokens=1024):
             logger.info(f"Инициализация GGUF эмбеддингов: {model_name}")
             from llama_index.embeddings.openai import OpenAIEmbedding
 
-            from src.gguf_direct import get_gguf_embedding_url
+            from src.gguf.server import get_gguf_embedding_url
 
             model_path = config.resolve_model_path(model_name)
             url = get_gguf_embedding_url(model_path, n_parallel=config.EMBEDDING_N_PARALLEL)
             try:
-                from src.gguf_direct import get_active_embedding_parallel
+                from src.gguf.server import get_active_embedding_parallel
 
                 n_parallel = get_active_embedding_parallel(model_path)
             except Exception:
@@ -91,7 +90,7 @@ def preload_all_models():
                 )
             else:
                 logger.info(f"  [RAG] Предзагрузка GGUF реранкера: {config.RERANKER_MODEL_NAME}")
-                from src.gguf_direct import get_gguf_embedding_url
+                from src.gguf.server import get_gguf_embedding_url
 
                 model_path = config.resolve_model_path(config.RERANKER_MODEL_NAME)
                 get_gguf_embedding_url(model_path, is_reranker=True)
@@ -115,7 +114,7 @@ def unload_rag_models(hard=True):
         else:
             logger.info("[RAG] Мягкая очистка (Эмбеддинги и Реранкер остаются в памяти)...")
 
-    gc.collect()
-    if torch.cuda.is_available():
-        torch.cuda.empty_cache()
+    from src.ingestion.utils import cleanup_gpu
+
+    cleanup_gpu()
     logger.info("[RAG] Память очищена.")

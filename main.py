@@ -39,13 +39,10 @@ logging.getLogger("llama_index").setLevel(logging.WARNING)
 
 logger = logging.getLogger(__name__)
 
-_lifespan_cleanup_done = False
-
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Lifespan-менеджер: cleanup pending_delete, миграция старых данных, фоновая предзагрузка моделей.
-    global _lifespan_cleanup_done
 
     logger.info("Запуск сервера...")
 
@@ -70,10 +67,10 @@ async def lifespan(app: FastAPI):
 
     yield
 
-    if not _lifespan_cleanup_done:
-        _lifespan_cleanup_done = True
+    if not getattr(app.state, "cleanup_done", False):
+        app.state.cleanup_done = True
         logger.info("Остановка системы...")
-        from src.gguf_direct import kill_stray_servers, unload_all_models
+        from src.gguf.server import kill_stray_servers, unload_all_models
 
         unload_all_models()
         kill_stray_servers()
@@ -92,7 +89,7 @@ def preload_all_models():
 # Выгрузка моделей при получении сигнала закрытия консоли.
 def _shutdown_models():
     try:
-        from src.gguf_direct import kill_stray_servers, unload_all_models
+        from src.gguf.server import kill_stray_servers, unload_all_models
 
         unload_all_models()
         kill_stray_servers()

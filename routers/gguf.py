@@ -16,7 +16,7 @@ from fastapi import APIRouter
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from src.gguf_direct import (
+from src.gguf.server import (
     count_running_servers,
     get_llm_status,
     get_loaded_models,
@@ -57,7 +57,7 @@ async def api_gguf_status():
 def _get_gguf_servers_info() -> list:
     servers = []
     try:
-        from src.gguf_direct import _server_ports, _server_processes, _server_roles
+        from src.gguf.state import _server_ports, _server_processes, _server_roles
 
         for path, proc in _server_processes.items():
             servers.append(
