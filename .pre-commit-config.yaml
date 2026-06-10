@@ -19,7 +19,7 @@ repos:
 
       - id: pytest-backend
         name: pytest (backend)
-        entry: python -m pytest tests/ -q
+        entry: C:/Users/Burger/AppData/Local/Programs/Python/Python313/python.exe -m pytest tests/ -q
         language: system
         pass_filenames: false
         stages: [pre-commit]
