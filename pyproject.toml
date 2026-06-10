@@ -3,9 +3,9 @@ requires = ["setuptools>=68.0"]
 build-backend = "setuptools.backends._legacy:_Backend"
 
 [project]
-name = "notebooklm-local-clone"
+name = "documind"
 version = "0.1.0"
-description = "Локальный клон NotebookLM с RAG, GGUF-моделями и мультимодальным ингестом"
+description = "DocuMind — локальный RAG для документов"
 requires-python = ">=3.11"
 
 dependencies = [

@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    NotebookLM Local Clone — установка в 1 клик
+    DocuMind — установка в 1 клик
 .DESCRIPTION
     Проверяет и устанавливает все зависимости для работы проекта:
     - Python виртуальное окружение + pip install
@@ -23,7 +23,7 @@ function Write-Color($Color, $Text) {
     Write-Host $Text -ForegroundColor $Color
 }
 
-Write-Color $Colors.Info "=== NotebookLM Local Clone — Установка ==="
+Write-Color $Colors.Info "=== DocuMind — Установка ==="
 Write-Color $Colors.Info "Директория: $ScriptDir"
 
 # ── 1. Проверка Python ──

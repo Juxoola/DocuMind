@@ -1,5 +1,4 @@
-"""
-NotebookLM Local Clone — основной модуль.
+"""DocuMind — основной модуль.
 
 Запуск: python main.py
 """
@@ -117,7 +116,7 @@ if os.name == "nt":
     except Exception as e:
         logger.debug(f"SetConsoleCtrlHandler не удался (не критично): {e}")
 
-app = FastAPI(title="NotebookLM Local Clone", lifespan=lifespan)
+app = FastAPI(title="DocuMind", lifespan=lifespan)
 
 
 # Middleware: проверяет Content-Length для /api/upload до передачи в роутер — отклоняет файлы больше лимита.
@@ -150,7 +149,7 @@ app.add_middleware(
 # Health-check — используется Docker/monitoring для проверки живости приложения.
 @app.get("/health")
 async def health():
-    return {"status": "ok", "app": "NotebookLM Local Clone"}
+    return {"status": "ok", "app": "DocuMind"}
 
 
 os.makedirs(os.path.join(config.BASE_DIR, "static"), exist_ok=True)

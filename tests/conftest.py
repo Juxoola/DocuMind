@@ -1,5 +1,5 @@
 """
-Общие фикстуры pytest для проекта NotebookLM Local Clone.
+Общие фикстуры pytest для проекта DocuMind.
 
 Стратегия:
 - Тесты модульные: не трогаем GGUF-сервера, ChromaDB, внешние API.

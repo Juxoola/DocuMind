@@ -77,7 +77,7 @@ export default function NotebookSelector({ onSelect }) {
           transition={{ delay: 0.2 }}
           className="text-6xl font-bold tracking-tighter mb-4"
         >
-          NotebookLM <span className="text-primary">Local</span>
+          DocuMind <span className="text-primary">Local</span>
         </motion.h1>
         <p className="text-muted-foreground text-lg max-w-md mx-auto">
           Ваши персональные ИИ-блокноты. Вся мощь анализа документов в полной приватности.

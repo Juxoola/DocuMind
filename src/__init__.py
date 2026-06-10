@@ -1,1 +1,1 @@
-"""NotebookLM Local Clone — core logic."""
+"""DocuMind — core logic."""

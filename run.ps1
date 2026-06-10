@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    NotebookLM Local Clone — запуск сервера
+    DocuMind — запуск сервера
 .DESCRIPTION
     Запускает backend (FastAPI) и frontend (Vite) с цветным выводом,
     healthcheck и graceful shutdown.
@@ -32,7 +32,7 @@ function Write-Color($Color, $Text) {
 }
 
 # ── Проверка зависимостей ──
-Write-Color $Colors.Info "=== NotebookLM Local Clone ==="
+Write-Color $Colors.Info "=== DocuMind ==="
 
 # Python
 try {
