@@ -235,6 +235,53 @@ def process_pdf(
     return nodes
 
 
+def _convert_via_com(file_path, app_name, format_code):
+    """Конвертирует Office-документ в PDF через COM.
+
+    Возвращает путь к PDF или выбрасывает исключение.
+    Используется как fallback для PPTX (PowerPoint) и DOCX (Word).
+    """
+    import pythoncom
+    import win32com.client
+
+    pdf_path = os.path.splitext(file_path)[0] + ".pdf"
+    app = None
+    doc = None
+    try:
+        pythoncom.CoInitialize()
+        app = win32com.client.Dispatch(app_name)
+        if app_name == "Powerpoint.Application":
+            doc = app.Presentations.Open(os.path.abspath(file_path), WithWindow=False)
+        else:
+            doc = app.Documents.Open(os.path.abspath(file_path))
+        doc.SaveAs(os.path.abspath(pdf_path), format_code)
+        if not os.path.exists(pdf_path):
+            raise RuntimeError(f"COM {app_name} не создал PDF: {pdf_path}")
+        if os.path.exists(file_path):
+            os.remove(file_path)
+        return pdf_path
+    except IngestionCancelled:
+        raise
+    except Exception as e:
+        logger.warning(f"COM-конвертация через {app_name} не удалась: {e}")
+        raise
+    finally:
+        if doc is not None:
+            try:
+                doc.Close()
+            except Exception:
+                pass
+        if app is not None:
+            try:
+                app.Quit()
+            except Exception:
+                pass
+        try:
+            pythoncom.CoUninitialize()
+        except Exception:
+            pass
+
+
 def process_pptx(
     file_path,
     images_dir,
@@ -266,52 +313,20 @@ def process_pptx(
         logger.info(f"python-pptx не справился ({e}), пробую COM-конвертацию в PDF...")
 
     # Медленный путь: COM (PowerPoint) → PDF → process_pdf с Vision
-    pdf_path = os.path.splitext(file_path)[0] + ".pdf"
-    import pythoncom
-    import win32com.client
-
-    app = None
-    deck = None
     try:
-        pythoncom.CoInitialize()
-        app = win32com.client.Dispatch("Powerpoint.Application")
-        deck = app.Presentations.Open(os.path.abspath(file_path), WithWindow=False)
-        deck.SaveAs(os.path.abspath(pdf_path), 32)
-        if os.path.exists(pdf_path):
-            if os.path.exists(file_path):
-                os.remove(file_path)
-            nodes = process_pdf(
-                pdf_path,
-                images_dir,
-                llm_settings,
-                shared_llm_url,
-                original_filename=os.path.basename(pdf_path),
-                progress_cb=progress_cb,
-                cancel_check=cancel_check,
-                keep_vision_alive=keep_vision_alive,
-            )
-        else:
-            raise Exception("PDF conversion failed")
+        pdf_path = _convert_via_com(file_path, "Powerpoint.Application", 32)
+        nodes = process_pdf(
+            pdf_path,
+            images_dir,
+            llm_settings,
+            shared_llm_url,
+            original_filename=os.path.basename(pdf_path),
+            progress_cb=progress_cb,
+            cancel_check=cancel_check,
+            keep_vision_alive=keep_vision_alive,
+        )
     except IngestionCancelled:
         raise
-    except Exception as e:
-        logger.warning(f"COM-конвертация PPTX не удалась: {e}")
-        raise
-    finally:
-        if deck is not None:
-            try:
-                deck.Close()
-            except Exception:
-                pass
-        if app is not None:
-            try:
-                app.Quit()
-            except Exception:
-                pass
-        try:
-            pythoncom.CoUninitialize()
-        except Exception:
-            pass
     return nodes
 
 
@@ -346,50 +361,18 @@ def process_docx(
         logger.info(f"python-docx не справился ({e}), пробую COM-конвертацию в PDF...")
 
     # Медленный путь: COM (Word) → PDF → process_pdf с Vision
-    pdf_path = os.path.splitext(file_path)[0] + ".pdf"
-    import pythoncom
-    import win32com.client
-
-    app = None
-    doc = None
     try:
-        pythoncom.CoInitialize()
-        app = win32com.client.Dispatch("Word.Application")
-        doc = app.Documents.Open(os.path.abspath(file_path))
-        doc.SaveAs(os.path.abspath(pdf_path), 17)
-        if os.path.exists(pdf_path):
-            if os.path.exists(file_path):
-                os.remove(file_path)
-            nodes = process_pdf(
-                pdf_path,
-                images_dir,
-                llm_settings,
-                shared_llm_url,
-                original_filename=os.path.basename(pdf_path),
-                progress_cb=progress_cb,
-                cancel_check=cancel_check,
-                keep_vision_alive=keep_vision_alive,
-            )
-        else:
-            raise Exception("PDF conversion failed")
+        pdf_path = _convert_via_com(file_path, "Word.Application", 17)
+        nodes = process_pdf(
+            pdf_path,
+            images_dir,
+            llm_settings,
+            shared_llm_url,
+            original_filename=os.path.basename(pdf_path),
+            progress_cb=progress_cb,
+            cancel_check=cancel_check,
+            keep_vision_alive=keep_vision_alive,
+        )
     except IngestionCancelled:
         raise
-    except Exception as e:
-        logger.warning(f"COM-конвертация DOCX не удалась: {e}")
-        raise
-    finally:
-        if doc is not None:
-            try:
-                doc.Close()
-            except Exception:
-                pass
-        if app is not None:
-            try:
-                app.Quit()
-            except Exception:
-                pass
-        try:
-            pythoncom.CoUninitialize()
-        except Exception:
-            pass
     return nodes
