@@ -6,6 +6,8 @@
 
 import logging
 import os
+import re
+import statistics as _stats
 import time as _time
 
 from llama_index.core import QueryBundle, Settings, VectorStoreIndex
@@ -23,7 +25,7 @@ import config
 from src.rag.bm25 import flush_bm25_rebuild, is_bm25_ready
 from src.rag.indexing import get_vector_store
 from src.rag.models import init_settings
-from src.rag.state import _model_cache, _get_rerank_session
+from src.rag.state import _get_rerank_session, _model_cache
 
 logger = logging.getLogger(__name__)
 
@@ -234,7 +236,6 @@ def retrieve_nodes(query: str, notebook_id: str, allowed_files=None, max_tokens=
 
                         lines = text.strip("`").split("\n")
                         queries = []
-                        import re
 
                         for line in lines:
                             line = line.strip()
@@ -453,7 +454,6 @@ def retrieve_nodes(query: str, notebook_id: str, allowed_files=None, max_tokens=
         # === Адаптивная фильтрация по скорам ===
         # Отсекает чанки со скорами значительно ниже медианы (median - 2*MAD),
         # а затем по top-k ratio от максимального скора.
-        import statistics as _stats
 
         if len(all_nodes) >= 4:
             score_vals = [n.score for n in all_nodes]

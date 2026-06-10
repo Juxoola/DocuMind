@@ -13,6 +13,11 @@
 
 import logging
 import os
+import socket
+import subprocess
+import time
+
+import requests
 
 import config
 from src.gguf.scanner import (
@@ -39,8 +44,6 @@ def get_server_status() -> dict:
     if _server_process is None or _server_process.poll() is not None:
         return {"running": False, "info": {}}
     try:
-        import requests
-
         url = f"http://127.0.0.1:{_server_info['port']}/health"
         r = requests.get(url, timeout=1)
         if r.status_code == 200:
@@ -62,10 +65,8 @@ def start_gguf_server(
     global _server_process, _server_info
     if _server_process:
         stop_gguf_server()
-    import socket as _socket
-    import subprocess as _subprocess
 
-    s = _socket.socket(_socket.AF_INET, _socket.SOCK_STREAM)
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     s.bind(("", 0))
     port = s.getsockname()[1]
     s.close()
@@ -99,10 +100,10 @@ def start_gguf_server(
         cmd.extend(["--mmproj", os.path.normpath(mmproj_path)])
 
     logger.info(f"[GGUF Manager] Запуск сервера: {' '.join(cmd)}")
-    _server_process = _subprocess.Popen(
+    _server_process = subprocess.Popen(
         cmd,
-        stdout=_subprocess.PIPE,
-        stderr=_subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
         text=True,
         creationflags=0x08000000,
     )
@@ -113,10 +114,8 @@ def start_gguf_server(
     }
 
     for _ in range(config.GGUF_SERVER_STARTUP_TIMEOUT):
-        __import__("time").sleep(1)
+        time.sleep(1)
         try:
-            import requests
-
             if (
                 requests.get(
                     f"http://127.0.0.1:{port}/health", timeout=config.GGUF_HEALTH_CHECK_TIMEOUT

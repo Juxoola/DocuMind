@@ -338,7 +338,7 @@ def process_docx(
                 metadata={"file_name": file_name},
             )
         )
-        logger.info(f"[DOCX] Обработано через python-docx: 1 узел")
+        logger.info("[DOCX] Обработано через python-docx: 1 узел")
         return nodes
     except IngestionCancelled:
         raise

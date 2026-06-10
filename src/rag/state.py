@@ -35,6 +35,7 @@ def _get_rerank_session() -> requests.Session:
                 _rerank_session = make_http_session(config.HTTP_POOL_SIZE_RERANK)
     return _rerank_session
 
+
 # Debounce-механизм для BM25: несколько вызовов _schedule_bm25_rebuild
 # подряд сбрасывают таймер, чтобы пересборка запускалась только после
 # последнего изменения индекса (по умолчанию 30 секунд покоя)
