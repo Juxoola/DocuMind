@@ -29,7 +29,7 @@ def build_index(nodes, notebook_id: str):
 
     paths = config.get_notebook_paths(notebook_id)
     db_path = paths["chroma_db"]
-    _schedule_bm25_rebuild(notebook_id, db_path)
+    _schedule_bm25_rebuild(notebook_id, db_path, new_nodes=nodes)
     return index
 
 

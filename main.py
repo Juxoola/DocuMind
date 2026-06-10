@@ -8,10 +8,8 @@ NotebookLM Local Clone — основной модуль.
 # статику, lifespan (миграция + предзагрузка моделей), middleware контроля размера загрузок.
 #
 
-import atexit
 import logging
 import os
-import signal
 import sys
 import threading
 from contextlib import asynccontextmanager
@@ -91,12 +89,7 @@ def preload_all_models():
         logger.warning(f"Предзагрузка моделей не удалась: {e}")
 
 
-def _graceful_shutdown(signum=None, frame=None):
-    logger.info(f"Получен сигнал {signum}, завершение работы...")
-    _shutdown_models()
-    sys.exit(0)
-
-
+# Выгрузка моделей при получении сигнала закрытия консоли.
 def _shutdown_models():
     try:
         from src.gguf_direct import kill_stray_servers, unload_all_models
@@ -126,17 +119,6 @@ if os.name == "nt":
         logger.debug("Windows Console Control Handler установлен.")
     except Exception as e:
         logger.debug(f"SetConsoleCtrlHandler не удался (не критично): {e}")
-
-try:
-    signal.signal(signal.SIGTERM, _graceful_shutdown)
-    signal.signal(signal.SIGINT, _graceful_shutdown)
-except Exception as e:
-    logger.debug(f"Не удалось зарегистрировать signal handlers (не Windows?): {e}")
-
-from src.gguf_direct import kill_stray_servers, unload_all_models
-
-atexit.register(unload_all_models)
-atexit.register(kill_stray_servers)
 
 app = FastAPI(title="NotebookLM Local Clone", lifespan=lifespan)
 

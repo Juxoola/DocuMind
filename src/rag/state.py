@@ -30,6 +30,10 @@ _bm25_pending_timers: dict = {}
 _bm25_pending_dbpath: dict = {}
 _bm25_pending_lock = threading.Lock()
 _bm25_rebuilding: set = set()
+# Кеш узлов BM25 в памяти: при debounce новые узлы аккумулируются здесь,
+# при срабатывании таймера пересборка идёт из кеша + новых узлов → без чтения ChromaDB.
+_bm25_node_cache: dict[str, list] = {}
+_bm25_pending_nodes: dict[str, list] = {}
 
 # ВНИМАНИЕ: _model_cache и _client_cache не защищены RWLock — все
 # обращения идут через однопоточный ASGI-цикл или защищены _init_lock.
