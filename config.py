@@ -91,6 +91,7 @@ USE_RERANKER = os.getenv("USE_RERANKER", "true").lower() == "true"
 RAG_QUERY_EXPANSION = os.getenv("RAG_QUERY_EXPANSION", "true").lower() == "true"
 RERANK_SCORE_THRESHOLD = float(os.getenv("RERANK_SCORE_THRESHOLD", "0.1"))
 MIN_FINAL_CHUNKS = int(os.getenv("MIN_FINAL_CHUNKS", "5"))
+RAG_RRF_K = int(os.getenv("RAG_RRF_K", 60))
 RAG_TOP_K_RATIO = float(os.getenv("RAG_TOP_K_RATIO", "0.1"))
 
 # Настройки GGUF-сервера: порт, пути поиска моделей, параметры
@@ -206,3 +207,8 @@ def resolve_model_path(path_or_filename: str) -> str:
 # RLock для потокобезопасного обновления runtime-настроек.
 # Защищает update_rag_config и другие операции, меняющие глобальные переменные.
 _config_lock = threading.RLock()
+
+
+def validate_gguf_path(name: str) -> bool:
+    """Проверяет, что имя или путь модели — .gguf файл."""
+    return bool(name.lower().endswith(".gguf") or (os.path.isabs(name) and os.path.exists(name)))

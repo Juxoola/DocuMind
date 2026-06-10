@@ -5,7 +5,6 @@
 
 import gc
 import logging
-import os
 
 import torch
 from llama_index.core import Settings
@@ -27,10 +26,7 @@ def init_settings(max_tokens=1024):
         if "embed_model" not in _model_cache:
             model_name = config.EMBEDDING_MODEL_NAME
 
-            if not (
-                model_name.lower().endswith(".gguf")
-                or (os.path.isabs(model_name) and os.path.exists(model_name))
-            ):
+            if not config.validate_gguf_path(model_name):
                 raise RuntimeError(
                     "Поддерживаются только GGUF-модели эмбеддингов. "
                     "Укажите путь к .gguf файлу в config.EMBEDDING_MODEL_NAME.\n"
@@ -89,13 +85,7 @@ def preload_all_models():
         logger.warning(f"  [RAG] ⚠ Эмбеддинги не загружены (будут загружены lazily): {e}")
     if config.RERANKER_MODEL_NAME:
         try:
-            if not (
-                config.RERANKER_MODEL_NAME.lower().endswith(".gguf")
-                or (
-                    os.path.isabs(config.RERANKER_MODEL_NAME)
-                    and os.path.exists(config.RERANKER_MODEL_NAME)
-                )
-            ):
+            if not config.validate_gguf_path(config.RERANKER_MODEL_NAME):
                 logger.warning(
                     f"  [RAG] ⚠ Реранкер пропущен: неверный формат ({config.RERANKER_MODEL_NAME})"
                 )

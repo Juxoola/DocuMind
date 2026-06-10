@@ -29,6 +29,32 @@ from src.rag.state import _get_rerank_session, _model_cache
 
 logger = logging.getLogger(__name__)
 
+
+# Хелпер: создаёт MetadataFilters для фильтрации по именам файлов.
+def _file_filter(file_names: str | list[str]):
+    if isinstance(file_names, str):
+        file_names = [file_names]
+    if len(file_names) == 1:
+        return MetadataFilters(
+            filters=[
+                MetadataFilter(
+                    key="file_name",
+                    value=file_names[0],
+                    operator=FilterOperator.EQ,
+                )
+            ]
+        )
+    return MetadataFilters(
+        filters=[
+            MetadataFilter(
+                key="file_name",
+                value=file_names,
+                operator=FilterOperator.IN,
+            )
+        ]
+    )
+
+
 # Промпт для генерации альтернативных поисковых запросов (Query Expansion).
 # Просит LLM составить несколько коротких, конкретных запросов из терминов задания.
 _QUERY_GEN_PROMPT = (
@@ -82,9 +108,10 @@ def _get_qe_llm():
 
 # Reciprocal Rank Fusion: объединяет результаты векторного и BM25 поиска,
 # присваивая каждому документу вес 1/(k + rank) из каждого списка.
-def _rrf_fuse(vector_results, bm25_results, k: int = 60):
+def _rrf_fuse(vector_results, bm25_results, k: int = None):
     scores: dict = {}
     nodes_by_id: dict = {}
+    k = k or config.RAG_RRF_K
 
     for rank, nws in enumerate(vector_results, start=1):
         nid = nws.node.node_id
@@ -102,9 +129,10 @@ def _rrf_fuse(vector_results, bm25_results, k: int = 60):
 
 # RRF для случая нескольких файлов: сначала фузия внутри каждого файла,
 # затем межфайловая фузия объединённых списков.
-def _rrf_fuse_across_files(file_results, k: int = 60):
+def _rrf_fuse_across_files(file_results, k: int = None):
     scores: dict = {}
     nodes_by_id: dict = {}
+    k = k or config.RAG_RRF_K
 
     for _fname, per_file_nodes in file_results:
         for rank, nws in enumerate(per_file_nodes, start=1):
@@ -162,25 +190,9 @@ def retrieve_nodes(query: str, notebook_id: str, allowed_files=None, max_tokens=
             logger.info("  [RAG] Query Expansion отключён (нет доступного LLM-сервера)")
 
     if len(allowed_files) == 1:
-        file_filter = MetadataFilters(
-            filters=[
-                MetadataFilter(
-                    key="file_name",
-                    value=allowed_files[0],
-                    operator=FilterOperator.EQ,
-                )
-            ]
-        )
+        file_filter = _file_filter(allowed_files[0])
     else:
-        file_filter = MetadataFilters(
-            filters=[
-                MetadataFilter(
-                    key="file_name",
-                    value=allowed_files,
-                    operator=FilterOperator.IN,
-                )
-            ]
-        )
+        file_filter = _file_filter(allowed_files)
 
     top_k_per_file = config.RAG_TOP_K_PER_FILE
     vector_retriever = index.as_retriever(similarity_top_k=top_k_per_file, filters=file_filter)
@@ -193,17 +205,8 @@ def retrieve_nodes(query: str, notebook_id: str, allowed_files=None, max_tokens=
         if use_qe:
             per_file_retrievers = []
             for fname in allowed_files:
-                ff = MetadataFilters(
-                    filters=[
-                        MetadataFilter(
-                            key="file_name",
-                            value=fname,
-                            operator=FilterOperator.EQ,
-                        )
-                    ]
-                )
                 per_file_retrievers.append(
-                    index.as_retriever(similarity_top_k=top_k_per_file, filters=ff)
+                    index.as_retriever(similarity_top_k=top_k_per_file, filters=_file_filter(fname))
                 )
             if bm25_retriever:
                 per_file_retrievers.append(bm25_retriever)
@@ -369,10 +372,7 @@ def retrieve_nodes(query: str, notebook_id: str, allowed_files=None, max_tokens=
         logger.info(f"  [RAG] Чанков для реранкинга: {len(all_nodes)}")
 
         reranker_name = config.RERANKER_MODEL_NAME
-        if not (
-            reranker_name.lower().endswith(".gguf")
-            or (os.path.isabs(reranker_name) and os.path.exists(reranker_name))
-        ):
+        if not config.validate_gguf_path(reranker_name):
             raise RuntimeError(
                 "Поддерживаются только GGUF-модели реранкера. "
                 "Укажите путь к .gguf файлу в config.RERANKER_MODEL_NAME.\n"
