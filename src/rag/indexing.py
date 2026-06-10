@@ -69,10 +69,19 @@ def close_notebook_client(notebook_id: str):
     client = _client_cache.pop(db_path, None)
     if client is not None:
         try:
-            client.close()
+            # Принудительно очищаем коллекцию, чтобы снять DuckDB/SQLite блокировку
+            try:
+                col = client.get_collection("multimodal_rag")
+                col.delete()
+                client.delete_collection("multimodal_rag")
+            except Exception:
+                pass
+            try:
+                client.close()
+            except Exception:
+                pass
             logger.debug(f"ChromaDB клиент закрыт для {notebook_id} ({db_path})")
         except Exception as e:
             logger.debug(f"Ошибка закрытия ChromaDB клиента {db_path}: {e}")
-            _client_cache[db_path] = client
     else:
         logger.debug(f"Нет открытого ChromaDB клиента для {notebook_id}")
