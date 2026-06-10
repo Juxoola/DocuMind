@@ -10,6 +10,7 @@ import time
 import config
 from src.gguf_direct import get_gguf_llm, unload_all_models
 from src.ingestion.utils import _http_session, cleanup_gpu
+from routers.shared import safe_extract_llm_response
 
 logger = logging.getLogger(__name__)
 
@@ -136,8 +137,8 @@ def describe_image_with_lmstudio(image_path, llm_settings=None, existing_llm_url
                 if r.status_code == 200:
                     res = r.json()
                     if "choices" in res:
-                        ans = res["choices"][0]["message"]["content"]
-                        reason = res["choices"][0].get("finish_reason")
+                        ans = safe_extract_llm_response(res) or "Ошибка извлечения ответа"
+                        reason = res.get("choices", [{}])[0].get("finish_reason")
                         ans = _clean_think_tags(ans)
                         logger.info(f"[Ingestion] Описание получено ({len(ans)} симв.). Причина завершения: {reason}")
                         return ans
@@ -176,7 +177,7 @@ def describe_image_with_lmstudio(image_path, llm_settings=None, existing_llm_url
             json=payload,
             timeout=30,
         )
-        ans = r.json()["choices"][0]["message"]["content"]
+        ans = safe_extract_llm_response(r.json()) or "Ошибка извлечения ответа"
         return _clean_think_tags(ans)
     except Exception as e:
         logger.warning(f"Ошибка резервного Vision через LM Studio: {e}")

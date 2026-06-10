@@ -23,22 +23,19 @@ import config
 
 logger = logging.getLogger(__name__)
 
+# Фабрика HTTP-сессии с настраиваемым пулом соединений.
+def make_http_session(pool_size: int = 10) -> requests.Session:
+    s = requests.Session()
+    adapter = requests.adapters.HTTPAdapter(
+        pool_connections=pool_size, pool_maxsize=pool_size
+    )
+    s.mount("http://", adapter)
+    s.mount("https://", adapter)
+    return s
+
+
 # HTTP-сессия с пулом соединений — используется всеми роутерами для внешних API-вызовов (LLM, эмбеддинги).
-_http_session = requests.Session()
-_http_session.mount(
-    "http://",
-    requests.adapters.HTTPAdapter(
-        pool_connections=config.HTTP_POOL_SIZE_MAIN,
-        pool_maxsize=config.HTTP_POOL_SIZE_MAIN,
-    ),
-)
-_http_session.mount(
-    "https://",
-    requests.adapters.HTTPAdapter(
-        pool_connections=config.HTTP_POOL_SIZE_MAIN,
-        pool_maxsize=config.HTTP_POOL_SIZE_MAIN,
-    ),
-)
+_http_session = make_http_session(config.HTTP_POOL_SIZE_MAIN)
 
 # Глобальное состояние: статус ингеста, флаги отмены, реестр фоновых asyncio-задач.
 ingestion_status: dict = {}
@@ -160,3 +157,12 @@ def robust_rmtree(path: str, max_retries: int = 10, delay: float = 1.0) -> tuple
             f"Вероятно, процесс (ChromaDB/HNSW) держит mmap-дескриптор."
         )
         return False, err_msg
+
+
+# Безопасное извлечение текста из ответа LLM API — защита от KeyError при ошибках сервера.
+def safe_extract_llm_response(data: dict) -> str | None:
+    try:
+        return data["choices"][0]["message"]["content"]
+    except (KeyError, IndexError, TypeError):
+        logger.warning("LLM API вернул неожиданный формат: %s", str(data)[:200])
+        return None

@@ -28,7 +28,6 @@ from .shared import (
     safe_filename,
     upload_cancel_flags,
 )
-
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["files"])
 
@@ -291,10 +290,9 @@ async def upload_file(
 
     # SSE-генератор событий: читает из Queue и отправляет клиенту прогресс/ошибку/завершение.
     async def event_generator():
+        loop = asyncio.get_running_loop()
         while True:
-            while q.empty():
-                await asyncio.sleep(0.1)
-            msg = q.get()
+            msg = await loop.run_in_executor(None, q.get)
             yield f"data: {json.dumps(msg, ensure_ascii=False)}\n\n"
             if msg["type"] in ("done", "error", "cancelled"):
                 break

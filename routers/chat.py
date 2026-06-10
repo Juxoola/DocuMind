@@ -17,7 +17,7 @@ from pydantic import BaseModel
 
 import config
 
-from .shared import _http_session
+from .shared import _http_session, safe_extract_llm_response
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["chat"])
@@ -169,7 +169,7 @@ async def chat(request: ChatRequest):
                         json=v_payload,
                         timeout=60,
                     )
-                    extracted = r_vision.json()["choices"][0]["message"]["content"].strip()
+                    extracted = safe_extract_llm_response(r_vision.json()) or ""
                     if request.query.strip():
                         search_query = f"{request.query.strip()} {extracted}"
                         query_for_rag = (

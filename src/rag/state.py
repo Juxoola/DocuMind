@@ -6,10 +6,8 @@
 import logging
 import threading
 
-import requests
-import requests.adapters
-
 import config
+from routers.shared import make_http_session
 
 logger = logging.getLogger(__name__)
 
@@ -22,21 +20,7 @@ _client_cache: dict = {}
 
 # HTTP-сессия для реранкера: отдельный connection pool,
 # чтобы не конкурировать с основными запросами приложения
-_rerank_session = requests.Session()
-_rerank_session.mount(
-    "http://",
-    requests.adapters.HTTPAdapter(
-        pool_connections=config.HTTP_POOL_SIZE_RERANK,
-        pool_maxsize=config.HTTP_POOL_SIZE_RERANK,
-    ),
-)
-_rerank_session.mount(
-    "https://",
-    requests.adapters.HTTPAdapter(
-        pool_connections=config.HTTP_POOL_SIZE_RERANK,
-        pool_maxsize=config.HTTP_POOL_SIZE_RERANK,
-    ),
-)
+_rerank_session = make_http_session(config.HTTP_POOL_SIZE_RERANK)
 
 # Debounce-механизм для BM25: несколько вызовов _schedule_bm25_rebuild
 # подряд сбрасывают таймер, чтобы пересборка запускалась только после

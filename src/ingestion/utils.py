@@ -46,21 +46,9 @@
 45|except Exception:
 46|    pass
 47|
-48|_http_session = requests.Session()
-49|_http_session.mount(
-50|    "http://",
-51|    requests.adapters.HTTPAdapter(
-52|        pool_connections=config.HTTP_POOL_SIZE_INGEST,
-53|        pool_maxsize=config.HTTP_POOL_SIZE_INGEST,
-54|    ),
-55|)
-56|_http_session.mount(
-57|    "https://",
-58|    requests.adapters.HTTPAdapter(
-59|        pool_connections=config.HTTP_POOL_SIZE_INGEST,
-60|        pool_maxsize=config.HTTP_POOL_SIZE_INGEST,
-61|    ),
-62|)
+from routers.shared import make_http_session
+
+_http_session = make_http_session(config.HTTP_POOL_SIZE_INGEST)
 63|
 64|_active_subprocesses: dict = {}
 65|

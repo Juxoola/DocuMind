@@ -167,6 +167,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+# Health-check — используется Docker/monitoring для проверки живости приложения.
+@app.get("/health")
+async def health():
+    return {"status": "ok", "app": "NotebookLM Local Clone"}
+
+
 os.makedirs(os.path.join(config.BASE_DIR, "static"), exist_ok=True)
 app.mount("/static", StaticFiles(directory=os.path.join(config.BASE_DIR, "static")), name="static")
 app.mount("/files", StaticFiles(directory=config.NOTEBOOKS_DIR), name="notebooks")
