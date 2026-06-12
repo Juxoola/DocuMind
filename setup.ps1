@@ -27,7 +27,7 @@ Write-Color $Colors.Info "=== DocuMind — Установка ==="
 Write-Color $Colors.Info "Директория: $ScriptDir"
 
 # ── 1. Проверка Python ──
-Write-Color $Colors.Info "[1/5] Проверка Python..."
+Write-Color $Colors.Info "[1/6] Проверка Python..."
 try {
     $pyVersion = python --version 2>&1
     Write-Color $Colors.Ok "  $pyVersion"
@@ -53,7 +53,7 @@ if (-not (Test-Path $pip)) {
     $pip = Join-Path $venvDir "Scripts" "python.exe"
 }
 
-Write-Color $Colors.Info "[3/5] Установка Python-зависимостей..."
+Write-Color $Colors.Info "[3/6] Установка Python-зависимостей..."
 try {
     if (Test-Path (Join-Path $ScriptDir "pyproject.toml")) {
         & "$(Join-Path $venvDir 'Scripts' 'python.exe')" -m pip install -e "$ScriptDir" --quiet 2>&1 | Out-Null
@@ -67,7 +67,7 @@ try {
 }
 
 # ── 3. Node.js и frontend ──
-Write-Color $Colors.Info "[4/5] Проверка Node.js..."
+Write-Color $Colors.Info "[4/6] Проверка Node.js..."
 try {
     $nodeVersion = node --version 2>&1
     Write-Color $Colors.Ok "  $nodeVersion"
@@ -111,16 +111,63 @@ UPLOAD_MAX_SIZE_MB=500
     Write-Color $Colors.Ok "  .env уже существует"
 }
 
-# ── 5. Проверка llama-server.exe ──
-$serverExe = Join-Path $ScriptDir "bin" "llama-server.exe"
+# ── 5. Проверка / скачивание llama-server.exe ──
+$binDir = Join-Path $ScriptDir "bin"
+$serverExe = Join-Path $binDir "llama-server.exe"
+
 if (-not (Test-Path $serverExe)) {
-    Write-Color $Colors.Warn ""
-    Write-Color $Colors.Warn "⚠  llama-server.exe не найден в bin/"
-    Write-Color $Colors.Warn "   Скачайте последний релиз llama.cpp:"
-    Write-Color $Colors.Warn "   https://github.com/ggml-org/llama.cpp/releases"
-    Write-Color $Colors.Warn "   Распакуйте llama-server.exe + .dll файлы в: $ScriptDir\bin"
+    Write-Color $Colors.Info "[5/6] llama-server.exe не найден — скачиваю с GitHub..."
+
+    try {
+        # Получаем последний релиз из GitHub API
+        $release = Invoke-RestMethod -Uri "https://api.github.com/repos/ggml-org/llama.cpp/releases/latest" -UseBasicParsing
+
+        # Ищем CUDA-сборку для Windows x64 (приоритет: CUDA 12, потом любая CUDA)
+        $cudaAsset = $release.assets | Where-Object { $_.name -match "cuda.*win.*x64" -and $_.name -match "\.zip$" } |
+            Sort-Object { $_.name } -Descending | Select-Object -First 1
+
+        if (-not $cudaAsset) {
+            Write-Color $Colors.Warn "  CUDA-сборка не найдена в релизе $($release.tag_name)"
+            Write-Color $Colors.Warn "  Скачайте вручную: https://github.com/ggml-org/llama.cpp/releases"
+            Write-Color $Colors.Warn "  Распакуйте llama-server.exe + .dll файлы в: $binDir"
+        } else {
+            Write-Color $Colors.Info "  Релиз: $($release.tag_name)"
+            Write-Color $Colors.Info "  Файл: $($cudaAsset.name) ($([math]::Round($cudaAsset.size / 1MB, 1)) MB)"
+
+            $zipPath = Join-Path $env:TEMP "llama-cpp-cuda.zip"
+            Write-Color $Colors.Info "  Скачивание..."
+            Invoke-WebRequest -Uri $cudaAsset.browser_download_url -OutFile $zipPath -UseBasicParsing
+
+            if (-not (Test-Path $binDir)) { New-Item -ItemType Directory -Path $binDir -Force | Out-Null }
+
+            Write-Color $Colors.Info "  Распаковка в bin/..."
+            Expand-Archive -Path $zipPath -DestinationPath $binDir -Force
+
+            # Если архив содержит подпапду — перемещаем содержимое в корень bin/
+            $subDirs = Get-ChildItem -Path $binDir -Directory
+            if ($subDirs) {
+                foreach ($sd in $subDirs) {
+                    Get-ChildItem -Path $sd.FullName | Move-Item -Destination $binDir -Force
+                    Remove-Item $sd.FullName -Recurse -Force
+                }
+            }
+
+            Remove-Item $zipPath -Force -ErrorAction SilentlyContinue
+
+            if (Test-Path $serverExe) {
+                Write-Color $Colors.Ok "  llama-server.exe установлен!"
+            } else {
+                Write-Color $Colors.Warn "  Архив распакован, но llama-server.exe не найден в bin/"
+                Write-Color $Colors.Warn "  Проверьте содержимое: $binDir"
+            }
+        }
+    } catch {
+        Write-Color $Colors.Err "  Ошибка скачивания: $_"
+        Write-Color $Colors.Warn "  Скачайте вручную: https://github.com/ggml-org/llama.cpp/releases"
+        Write-Color $Colors.Warn "  Нужна CUDA-сборка, распакуйте в: $binDir"
+    }
 } else {
-    Write-Color $Colors.Ok "  llama-server.exe найден"
+    Write-Color $Colors.Ok "[5/6] llama-server.exe найден"
 }
 
 # ── Итог ──
