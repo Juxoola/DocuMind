@@ -1,0 +1,35 @@
+notebooks/
+models/
+scratch/
+_gguf_scan_cache.json
+# Локальные кеши пользовательских настроек — утекает структура ФС в репо
+last_models.json
+rag_config.json
+# Сгенерированные JSON-кеши (можно пересоздать)
+!frontend/package.json
+!frontend/package-lock.json
+!frontend/eslint.config.js
+!frontend/vite.config.js
+*.mp4
+temp/
+logs/
+__pycache__/
+*.py[cod]
+*$py.class
+.env
+.venv
+venv/
+ENV/
+build/
+dist/
+*.egg-info/
+.chroma/
+notebooks/*/chroma_db/
+notebooks/*/images/
+# Инструментальные кеши
+.pytest_cache/
+.ruff_cache/
+node_modules/
+.DS_Store
+AGENTS.md
+bin/

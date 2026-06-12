@@ -728,7 +728,8 @@ export default function SettingsModal({ isOpen, onClose, settings, onSave }) {
                                     </div>
                                 )}
 
-                                {/* Параметры генерации (общие для обоих режимов) */}
+                                {/* Параметры генерации — только для API-режима (GGUF настраивается внутри карточки модели) */}
+                                {isApiMode && (
                                 <div className="rounded-2xl border border-border/30 p-4 space-y-3">
                                     <p className="text-[9px] font-bold text-muted-foreground uppercase tracking-widest flex items-center gap-1.5">
                                         <Cpu size={10} /> Параметры генерации
@@ -736,7 +737,7 @@ export default function SettingsModal({ isOpen, onClose, settings, onSave }) {
                                     <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                                         <label className="flex flex-col gap-1 text-[10px] text-muted-foreground" title="Температура (0.0 - 2.0). Чем выше, тем более креативный ответ.">
                                             Temperature ℹ️
-                                            <input type="number" step="0.1" value={localSettings.temperature ?? (isApiMode ? 0.1 : localSettings.gguf_temperature ?? 0.1)} onChange={e => setLocalSettings({...localSettings, temperature: parseFloat(e.target.value)})} className="bg-background border border-border rounded px-2 py-1 text-foreground" />
+                                            <input type="number" step="0.1" value={localSettings.temperature ?? 0.1} onChange={e => setLocalSettings({...localSettings, temperature: parseFloat(e.target.value)})} className="bg-background border border-border rounded px-2 py-1 text-foreground" />
                                         </label>
                                         <label className="flex flex-col gap-1 text-[10px] text-muted-foreground" title="Top-P (Nucleus sampling). 0.9 - стандарт.">
                                             Top-P ℹ️
@@ -779,6 +780,7 @@ export default function SettingsModal({ isOpen, onClose, settings, onSave }) {
                                         </div>
                                     ) : null}
                                 </div>
+                                )}
                             </div>
                         )}
 

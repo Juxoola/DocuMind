@@ -80,7 +80,7 @@ ALLOWED_UPLOAD_EXTENSIONS = frozenset(
 
 EMBEDDING_MODEL_NAME = os.getenv("EMBEDDING_MODEL_NAME", "Qwen3-Embedding-0.6B-v2.Q8_0.gguf")
 RERANKER_MODEL_NAME = os.getenv("RERANKER_MODEL_NAME", "Qwen3-Reranker-0.6B-v2.Q8_0.gguf")
-EMBEDDING_N_PARALLEL = int(os.getenv("EMBEDDING_N_PARALLEL", "4"))
+EMBEDDING_N_PARALLEL = int(os.getenv("EMBEDDING_N_PARALLEL", "2"))
 
 # Параметры RAG-пайплайна: сколько чанков искать на файл (top_k),
 # пул для реранкера, итоговое число, пороговые фильтры.
