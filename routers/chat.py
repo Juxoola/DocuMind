@@ -312,9 +312,6 @@ async def chat(request: ChatRequest):
             yield "data: [DONE]\n\n"
         finally:
             if use_direct_gguf and active_llm:
-                try:
-                    _http_session.post(f"{active_llm}/slots/0/clear", timeout=1)
-                except Exception:
-                    logger.debug("chat: не удалось очистить слот GGUF")
+                pass
 
     return StreamingResponse(generate(), media_type="text/event-stream")
