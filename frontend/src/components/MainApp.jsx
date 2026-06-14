@@ -40,6 +40,7 @@ export default function MainApp({ notebook, onExit }) {
 			use_gguf: '',
 			gguf_model_path: '',
 			gguf_mmproj_path: '',
+			gguf_ctx_size: 32768,
 			mtp_enabled: false,
 			gguf_batch_size: 512,
 			gguf_ubatch_size: 256,

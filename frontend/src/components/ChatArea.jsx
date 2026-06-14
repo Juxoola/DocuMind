@@ -1082,22 +1082,26 @@ export default function ChatArea({ notebook, selectedSources, onOpenSource, llmS
   }, []);
 
   // ── Context Usage Indicator ──
+  const calcContextUsage = React.useCallback(() => {
+    const ctxSize = llmSettings.use_gguf === 'true'
+      ? parseInt(llmSettings.gguf_ctx_size) || 32768
+      : 8192;
+    const totalChars = messages.reduce((sum, m) => sum + (m.content?.length || 0) + (m.thinkingContent?.length || 0), 0);
+    const estimatedTokens = Math.round(totalChars * 0.25) + 500;
+    setContextUsage({
+      used: Math.min(estimatedTokens, ctxSize),
+      total: ctxSize,
+      pct: Math.round(Math.min(estimatedTokens, ctxSize) / ctxSize * 100),
+    });
+  }, [messages, llmSettings]);
+
   useEffect(() => {
-    const poll = async () => {
-      try {
-        const res = await fetch('/api/context-usage');
-        if (res.ok) {
-          const data = await res.json();
-          setContextUsage(data);
-        }
-      } catch { /* ignore */ }
-    };
-    poll();
-    contextIntervalRef.current = setInterval(poll, 5000);
+    calcContextUsage();
+    contextIntervalRef.current = setInterval(calcContextUsage, 5000);
     return () => {
       if (contextIntervalRef.current) clearInterval(contextIntervalRef.current);
     };
-  }, []);
+  }, [calcContextUsage]);
 
   const handleImageChange = (e) => {
     const file = e.target.files[0];
