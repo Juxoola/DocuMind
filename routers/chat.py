@@ -298,6 +298,10 @@ async def chat(request: ChatRequest):
                     if h_msg.get("role") in ("user", "assistant"):
                         chat_messages.append({"role": h_msg["role"], "content": h_msg["content"]})
                 chat_messages.append({"role": "user", "content": request.query})
+                if active_llm is None:
+                    yield f"data: {json.dumps({'type': 'error', 'text': 'LLM не инициализирован. Настройте URL API-модели или загрузите GGUF-модель.'}, ensure_ascii=False)}\n\n"
+                    yield "data: [DONE]\n\n"
+                    return
                 for chunk in active_llm.stream_chat(chat_messages):
                     if chunk.delta:
                         token_count += 1
