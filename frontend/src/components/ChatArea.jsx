@@ -1085,7 +1085,7 @@ export default function ChatArea({ notebook, selectedSources, onOpenSource, llmS
   const calcContextUsage = React.useCallback(() => {
     const ctxSize = llmSettings.use_gguf === 'true'
       ? parseInt(llmSettings.gguf_ctx_size) || 32768
-      : 8192;
+      : parseInt(llmSettings.llm_ctx_size) || 8192;
     const totalChars = messages.reduce((sum, m) => sum + (m.content?.length || 0) + (m.thinkingContent?.length || 0), 0);
     const estimatedTokens = Math.round(totalChars * 0.25) + 500;
     setContextUsage({

@@ -341,6 +341,20 @@ export default function SettingsModal({ isOpen, onClose, settings, onSave }) {
                                                 className="w-full bg-muted/30 border border-border/50 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all"
                                             />
                                         </div>
+
+                                        <div className="space-y-2">
+                                            <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest flex items-center gap-2">
+                                                <Cpu size={12} /> Context Window
+                                            </label>
+                                            <input
+                                                type="number"
+                                                step="1024"
+                                                value={localSettings.llm_ctx_size || 8192}
+                                                onChange={(e) => setLocalSettings({...localSettings, llm_ctx_size: parseInt(e.target.value) || 8192})}
+                                                className="w-full bg-muted/30 border border-border/50 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all"
+                                            />
+                                            <p className="text-[10px] text-muted-foreground/60 italic">Максимальный размер контекстного окна модели в токенах</p>
+                                        </div>
                                     </div>
                                 )}
 

@@ -40,6 +40,7 @@ export default function MainApp({ notebook, onExit }) {
 			llm_url: 'http://localhost:1234/v1',
 			llm_api_key: apiKey,
 			llm_model: 'gpt-4o',
+			llm_ctx_size: 8192,
 			use_gguf: '',
 			gguf_model_path: '',
 			gguf_mmproj_path: '',
