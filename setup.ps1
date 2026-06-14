@@ -84,6 +84,12 @@ try {
     } else {
         Write-Color $Colors.Ok "  Frontend-зависимости уже установлены"
     }
+
+    Write-Color $Colors.Info "  Сборка frontend (npm run build)..."
+    Push-Location $frontendDir
+    npm run build 2>&1 | Out-Null
+    Pop-Location
+    Write-Color $Colors.Ok "  Frontend собран (dist/)"
 } catch {
     Write-Color $Colors.Warn "  Node.js не найден. Frontend не будет работать без Node.js 18+"
 }

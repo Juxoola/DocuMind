@@ -147,6 +147,8 @@ if (-not $NoFrontend) {
             npm run dev 2>&1
         } -ArgumentList $frontendDir
         Write-Color $C.Ok "Frontend running: http://localhost:5173"
+        Start-Sleep -Seconds 3
+        Start-Process "http://localhost:5173"
     } else {
         Write-Color $C.Warn "node_modules not found. Run setup.ps1 first."
     }
