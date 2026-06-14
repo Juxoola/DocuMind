@@ -1366,7 +1366,7 @@ export default function ChatArea({ notebook, selectedSources, onOpenSource, llmS
       </AnimatePresence>
 
       {/* Шапка */}
-      <div className="flex items-center justify-end gap-3 p-4 border-b bg-background/80 backdrop-blur-md sticky top-0 z-10 flex-wrap">
+      <div className="flex items-center justify-center gap-3 p-4 border-b bg-background/80 backdrop-blur-md sticky top-0 z-10 flex-wrap">
         <div className="flex items-center gap-2 flex-wrap justify-end">
           <div className="flex items-center gap-3 bg-muted/30 p-1.5 rounded-xl border border-white/5 px-2">
             <button
