@@ -274,7 +274,7 @@ export default function MainApp({ notebook, onExit }) {
   const chatAvailWidth = isSidebarOpen
     ? window.innerWidth - sidebarWidth * 2
     : window.innerWidth;
-  const chatRenderWidth = Math.max(765, Math.min(chatMaxWidth, chatAvailWidth));
+  const chatRenderWidth = Math.max(771, Math.min(chatMaxWidth, chatAvailWidth));
 
   const sidebarMax = Math.floor((window.innerWidth - chatRenderWidth) / 2);
 
@@ -350,7 +350,7 @@ export default function MainApp({ notebook, onExit }) {
               const startX = e.clientX;
               const startRendered = chatRenderWidth;
               const onMouseMove = (ev) => {
-                const newVal = Math.max(765, startRendered + (ev.clientX - startX));
+                const newVal = Math.max(771, startRendered + (ev.clientX - startX));
                 setChatMaxWidth(newVal);
               };
               const onMouseUp = () => {
