@@ -1344,7 +1344,7 @@ export default function ChatArea({ notebook, selectedSources, onOpenSource, llmS
 
   return (
     <div
-      className="flex flex-col h-full w-full max-w-[1400px] mx-auto relative"
+      className="flex flex-col h-full w-full relative"
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
@@ -1452,7 +1452,7 @@ export default function ChatArea({ notebook, selectedSources, onOpenSource, llmS
             transition={{ type: 'spring', damping: 25, stiffness: 220 }}
             className="border-b border-border bg-card/25 backdrop-blur-md overflow-hidden z-10"
           >
-            <div className="p-5 max-w-[1400px] mx-auto flex flex-col gap-5">
+            <div className="p-5 flex flex-col gap-5">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                 {/* 1. Response length slider */}
                 <SleekSlider
