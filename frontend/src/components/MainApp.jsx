@@ -329,10 +329,14 @@ export default function MainApp({ notebook, onExit }) {
       )}
 
       {/* Основная зона чата */}
-      <main ref={mainRef} className="flex-1 flex flex-col min-w-0 bg-background relative z-0">
+      <main
+        ref={mainRef}
+        className="flex-1 flex flex-col min-w-0 bg-background relative z-0"
+        style={{ paddingLeft: isSidebarOpen ? sidebarWidth : 0 }}
+      >
         <div
-          className="flex-1 flex flex-col mx-auto w-full relative min-w-[400px]"
-          style={{ maxWidth: chatMaxWidth }}
+          className="flex-1 flex flex-col mx-auto w-full relative"
+          style={{ maxWidth: chatMaxWidth, minWidth: 320 }}
         >
           {/* Ресайзер на правом краю чата */}
           <div
@@ -342,7 +346,7 @@ export default function MainApp({ notebook, onExit }) {
               const startX = e.clientX;
               const startWidth = chatMaxWidth;
               const onMouseMove = (ev) => {
-                const newWidth = Math.max(400, Math.min(window.innerWidth - 60, startWidth + (ev.clientX - startX)));
+                const newWidth = Math.max(320, startWidth + (ev.clientX - startX));
                 setChatMaxWidth(newWidth);
               };
               const onMouseUp = () => {
