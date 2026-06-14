@@ -1,9 +1,5 @@
 """RAG retrieval pipeline: Query Expansion, гибридный поиск (RRF), реранкинг."""
 
-# Основной пайплайн поиска: генерация вариантов запроса (Query Expansion),
-# гибридный поиск по векторному и BM25 индексам с RRF-фузией,
-# реранкинг через GGUF-модель и адаптивная фильтрация по скорам.
-
 import logging
 import os
 import re

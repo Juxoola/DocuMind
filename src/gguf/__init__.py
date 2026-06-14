@@ -1,7 +1,5 @@
 """GGUF subsystem: server lifecycle, scanning, streaming, model detection."""
 
-# Публичное API пакета GGUF. Все функции реэкспортируются,
-# чтобы потребители могли import from src.gguf вместо src.gguf.server / src.gguf.state.
 from src.gguf.models import detect_model_family
 from src.gguf.server import (
     count_running_servers,

@@ -1,7 +1,5 @@
 """Асинхронный стриминг чат-ответов через llama-server API."""
 
-# SSE-генератор: читает chunks из llama-server и стримит клиенту
-
 import json
 import logging
 

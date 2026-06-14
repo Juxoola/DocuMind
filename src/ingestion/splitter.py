@@ -1,5 +1,4 @@
 """Семантический и Sentence-сплиттер для нарезки текста на чанки."""
-# SemanticSplitter режет по смене темы через эмбеддинги, SentenceSplitter — фиксированный размер
 
 import logging
 

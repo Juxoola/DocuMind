@@ -1,7 +1,5 @@
 """Определение семейства модели по имени файла."""
 
-# Определение семейства модели по имени файла: qwen, gemma, deepseek, llama, generic
-
 
 def detect_model_family(gguf_path: str) -> str:
 

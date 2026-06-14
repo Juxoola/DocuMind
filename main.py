@@ -1,7 +1,4 @@
-"""DocuMind — основной модуль.
-
-Запуск: python main.py
-"""
+"""DocuMind — основной модуль."""
 
 import logging
 import os

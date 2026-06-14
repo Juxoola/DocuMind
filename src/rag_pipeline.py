@@ -1,11 +1,4 @@
-"""Trampoline для обратной совместимости.
-
-Весь код RAG переехал в пакет src/rag/. Этот файл реэкспортирует
-все публичные и приватные символы, чтобы старые импорты
-  from src.rag_pipeline import ...
-продолжали работать без изменений.
-"""
-# Предзагрузка embedding/reranker моделей при старте сервера
+"""Trampoline для обратной совместимости (код в src/gguf/ и src/ingestion/)."""
 
 from src.rag.bm25 import (
     _rebuild_bm25_bg,

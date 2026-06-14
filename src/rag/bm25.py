@@ -1,7 +1,5 @@
 """BM25 lifecycle: сборка, debounce, отмена, проверка готовности."""
 
-# Инкрементальная пересборка BM25: debounce 30с, новые узлы аккумулируются в pending, ChromaDB только при cold start
-
 import logging
 import os
 import threading

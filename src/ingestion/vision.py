@@ -1,5 +1,4 @@
 """Vision: описание изображений через llama-server или LM Studio."""
-# Ленивый запуск Vision-сервера — стартует при первом изображении в PDF/видео
 
 import base64
 import logging

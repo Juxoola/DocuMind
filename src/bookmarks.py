@@ -1,32 +1,4 @@
-"""
-Хранилище закладок: вопросы/ответы пользователя по конкретному блокноту.
-
-Формат: notebooks/<notebook_id>/bookmarks.json — массив объектов:
-    {
-        "id": "uuid",
-        "created_at": 1234567890.0,
-        "question": "текст вопроса",
-        "answer": "полный текст ответа",
-        "sources": [
-            {"file_name": "...", "page": 5, "time": null, "snippet": "..."}
-        ],
-        "model": "Qwen3.5-9B-GGUF/...",
-        "answer_mode": "concise" | "detailed",
-        "thinking_mode": false,
-        "title": "опциональный заголовок",
-        "tags": ["tag1", "tag2"],
-        "status": "ok" | "stale"
-    }
-
-API:
-    list_bookmarks(notebook_id) -> list
-    get_bookmark(notebook_id, bookmark_id) -> dict | None
-    create_bookmark(notebook_id, payload) -> dict
-    update_bookmark(notebook_id, bookmark_id, patch) -> dict | None
-    delete_bookmark(notebook_id, bookmark_id) -> bool
-    mark_stale_for_file(notebook_id, file_name) -> int  # кол-во помеченных
-"""
-# Хранение закладок в JSON: CRUD + автоматическая пометка stale
+"""Хранилище закладок (bookmarks.json) для вопросов/ответов по блокноту."""
 
 import json
 import logging
