@@ -1331,9 +1331,9 @@ export default function ChatArea({ notebook, selectedSources, onOpenSource, llmS
   const clearChat = () => {
     if (abortController) abortController.abort();
     abortControllerRef.current = null;
-    setMessages([{ role: 'ai', content: 'Чат очищен. Какой новый вопрос?' }]);
     setStats(null);
     setIsLoading(false);
+    newConversation();
   };
 
 
