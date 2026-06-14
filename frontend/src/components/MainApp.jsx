@@ -331,8 +331,8 @@ export default function MainApp({ notebook, onExit }) {
       {/* Основная зона чата */}
       <main ref={mainRef} className="flex-1 flex flex-col min-w-0 bg-background relative z-0">
         <div
-          className="flex-1 flex flex-col mx-auto w-full relative"
-          style={{ maxWidth: chatMaxWidth < window.innerWidth - sidebarWidth - 80 ? chatMaxWidth : undefined }}
+          className="flex-1 flex flex-col mx-auto w-full relative min-w-[400px]"
+          style={{ maxWidth: chatMaxWidth }}
         >
           {/* Ресайзер на правом краю чата */}
           <div
