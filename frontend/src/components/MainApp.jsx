@@ -271,10 +271,12 @@ export default function MainApp({ notebook, onExit }) {
     localStorage.setItem('chat_max_width', chatMaxWidth);
   }, [chatMaxWidth]);
 
-  const chatAvailWidth = window.innerWidth - (isSidebarOpen ? sidebarWidth : 0);
+  const chatAvailWidth = isSidebarOpen
+    ? window.innerWidth - sidebarWidth * 2
+    : window.innerWidth;
   const chatRenderWidth = Math.max(755, Math.min(chatMaxWidth, chatAvailWidth));
 
-  const sidebarMax = window.innerWidth - chatRenderWidth;
+  const sidebarMax = Math.floor((window.innerWidth - chatRenderWidth) / 2);
 
   const handleExit = () => {
     setIsViewerOpen(false);
