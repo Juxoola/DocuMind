@@ -328,10 +328,10 @@ export default function MainApp({ notebook, onExit }) {
         </motion.button>
       )}
 
-      {/* Ресайзер чата — меняет max-width чата, освобождая место для сайдбара */}
+      {/* Ресайзер чата — на левом краю чата, меняет его max-width */}
       <div
-        className="fixed top-0 bottom-0 w-1 cursor-col-resize z-[99] group/c-resizer hover:bg-primary/30 transition-colors"
-        style={{ left: isSidebarOpen ? sidebarWidth : 0 }}
+        className="fixed top-0 bottom-0 w-4 cursor-col-resize z-[99] group/c-resizer flex items-center justify-center"
+        style={{ left: isSidebarOpen ? sidebarWidth + 4 : 4 }}
         onMouseDown={(e) => {
           e.preventDefault();
           const startX = e.clientX;
@@ -350,7 +350,7 @@ export default function MainApp({ notebook, onExit }) {
           document.addEventListener('mouseup', onMouseUp);
         }}
       >
-        <div className="w-[1.5px] h-full bg-border group-hover/c-resizer:bg-primary/50 mx-auto transition-colors shadow-[0_0_5px_rgba(var(--primary),0.2)]" />
+        <div className="w-[3px] h-12 rounded-full bg-muted-foreground/20 group-hover/c-resizer:bg-primary/40 transition-colors" />
       </div>
 
       {/* Основная зона чата */}
