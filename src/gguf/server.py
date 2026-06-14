@@ -119,6 +119,8 @@ def _start_llm_server_sync(gguf_path: str, mmproj_path: str, current_config: dic
             f"[GGUF Server] С поддержкой Vision: {os.path.basename(current_config['mmproj'])}"
         )
 
+    cmd.extend(["--metrics"])
+
     if current_config.get("custom_args"):
         cmd.extend(current_config["custom_args"])
 

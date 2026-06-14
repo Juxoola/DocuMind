@@ -219,35 +219,60 @@ async def api_llm_status():
     return get_llm_status()
 
 
-# Потребление контекста LLM — опрашивает llama-server /slots.
+# Потребление контекста LLM — парсит /metrics или /slots llama-server.
 @router.get("/api/context-usage")
 async def api_context_usage():
     try:
-        from src.gguf.state import _server_ports, _server_processes, _server_roles
-
-        llm_port = None
-        for path, proc in _server_processes.items():
-            if _server_roles.get(path) == "llm" and proc.poll() is None:
-                llm_port = _server_ports.get(path)
-                break
-        if llm_port is None:
+        st = get_llm_status()
+        port = st.get("port")
+        state = st.get("state")
+        if not port or state not in ("ready", "loading"):
             return {"used": 0, "total": 0, "pct": 0}
         import httpx
 
         async with httpx.AsyncClient(timeout=3) as client:
-            resp = await client.get(f"http://127.0.0.1:{llm_port}/slots")
+            # Сначала пробуем /metrics (даёт kv_cache_usage_ratio)
+            try:
+                resp = await client.get(f"http://127.0.0.1:{port}/metrics")
+                if resp.status_code == 200:
+                    text = resp.text
+                    ratio = None
+                    n_ctx = None
+                    for line in text.splitlines():
+                        if line.startswith("llamacpp:kv_cache_usage_ratio"):
+                            parts = line.split()
+                            if len(parts) >= 2:
+                                ratio = float(parts[1])
+                        elif line.startswith("llamacpp:kv_cache_tokens"):
+                            parts = line.split()
+                            if len(parts) >= 2:
+                                n_used = int(float(parts[1]))
+                        elif line.startswith("llamacpp:kv_cache_size"):
+                            parts = line.split()
+                            if len(parts) >= 2:
+                                n_ctx = int(float(parts[1]))
+                    if ratio is not None and n_ctx:
+                        n_used = round(ratio * n_ctx)
+                        return {"used": n_used, "total": n_ctx, "pct": round(ratio * 100, 1)}
+            except Exception:
+                pass
+
+            # Fallback: /slots
+            resp = await client.get(f"http://127.0.0.1:{port}/slots")
             if resp.status_code == 200:
-                slots = resp.json()
+                data = resp.json()
+                slots = data if isinstance(data, list) else data.get("slots", data.get("data", []))
                 if isinstance(slots, list) and len(slots) > 0:
                     slot = slots[0]
-                    n_past = slot.get("n_past", 0) or 0
-                    n_ctx = slot.get("n_ctx", 0) or 1
-                    return {
-                        "used": n_past,
-                        "total": n_ctx,
-                        "pct": round(n_past / max(n_ctx, 1) * 100, 1),
-                    }
-        return {"used": 0, "total": 0, "pct": 0}
+                    n_past = int(slot.get("n_past", 0) or 0)
+                    n_ctx = int(slot.get("n_ctx", 0) or 1)
+                    if n_past > 0:
+                        return {
+                            "used": n_past,
+                            "total": n_ctx,
+                            "pct": round(n_past / max(n_ctx, 1) * 100, 1),
+                        }
+            return {"used": 0, "total": 0, "pct": 0}
     except Exception:
         return {"used": 0, "total": 0, "pct": 0}
 
