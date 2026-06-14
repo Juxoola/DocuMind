@@ -78,8 +78,8 @@ ALLOWED_UPLOAD_EXTENSIONS = frozenset(
     }
 )
 
-EMBEDDING_MODEL_NAME = os.getenv("EMBEDDING_MODEL_NAME", "Qwen3-Embedding-0.6B-v2.Q8_0.gguf")
-RERANKER_MODEL_NAME = os.getenv("RERANKER_MODEL_NAME", "Qwen3-Reranker-0.6B-v2.Q8_0.gguf")
+EMBEDDING_MODEL_NAME = os.getenv("EMBEDDING_MODEL_NAME", "Qwen3-Embedding-0.6B-Q8_0.gguf")
+RERANKER_MODEL_NAME = os.getenv("RERANKER_MODEL_NAME", "qwen3-reranker-0.6b-q8_0.gguf")
 EMBEDDING_N_PARALLEL = int(os.getenv("EMBEDDING_N_PARALLEL", "2"))
 
 # Параметры RAG-пайплайна: сколько чанков искать на файл (top_k),
@@ -96,7 +96,7 @@ RAG_TOP_K_RATIO = float(os.getenv("RAG_TOP_K_RATIO", "0.1"))
 
 # Настройки GGUF-сервера: порт, пути поиска моделей, параметры
 # инференса (контекст, кол-во потоков, GPU-слои).
-GGUF_SEARCH_DIRS = os.getenv("GGUF_SEARCH_DIRS", "F:/llm;C:/test/models")
+GGUF_SEARCH_DIRS = os.getenv("GGUF_SEARCH_DIRS", "F:/llm;" + os.path.join(BASE_DIR, "models"))
 GGUF_SERVER_PORT = int(os.getenv("GGUF_SERVER_PORT", 8081))
 GGUF_SERVER_HOST = os.getenv("GGUF_SERVER_HOST", "127.0.0.1")
 GGUF_THREADS = int(os.getenv("GGUF_THREADS", 0))

@@ -170,6 +170,65 @@ if (-not (Test-Path $serverExe)) {
     Write-Color $Colors.Ok "[5/6] llama-server.exe найден"
 }
 
+# ── 6. Скачивание моделей ──
+$modelsDir = Join-Path $ScriptDir "models"
+if (-not (Test-Path $modelsDir)) {
+    New-Item -ItemType Directory -Path $modelsDir -Force | Out-Null
+}
+
+$models = @(
+    @{
+        Url = "https://huggingface.co/ggml-org/Qwen3-Reranker-0.6B-Q8_0-GGUF/resolve/main/qwen3-reranker-0.6b-q8_0.gguf?download=true"
+        FileName = "qwen3-reranker-0.6b-q8_0.gguf"
+        Label = "Reranker (0.6B)"
+    }
+    @{
+        Url = "https://huggingface.co/yomir/Qwen3-Embedding-0.6B-GGUF/resolve/main/Qwen3-Embedding-0.6B-Q8_0.gguf?download=true"
+        FileName = "Qwen3-Embedding-0.6B-Q8_0.gguf"
+        Label = "Embedding (0.6B)"
+    }
+    @{
+        Url = "https://huggingface.co/unsloth/Qwen3.5-4B-GGUF/resolve/main/Qwen3.5-4B-UD-Q4_K_XL.gguf?download=true"
+        FileName = "Qwen3.5-4B-UD-Q4_K_XL.gguf"
+        Label = "LLM (4B Q4_K_XL)"
+    }
+)
+
+Write-Color $Colors.Info "[6/6] Проверка моделей GGUF..."
+
+$allPresent = $true
+foreach ($m in $models) {
+    $modelPath = Join-Path $modelsDir $m.FileName
+    if (Test-Path $modelPath) {
+        $size = (Get-Item $modelPath).Length
+        Write-Color $Colors.Ok "  [$($m.Label)] найден ($([math]::Round($size / 1MB, 1)) MB)"
+    } else {
+        $allPresent = $false
+    }
+}
+
+if (-not $allPresent) {
+    Write-Color $Colors.Info "  Некоторые модели отсутствуют — скачиваю..."
+    foreach ($m in $models) {
+        $modelPath = Join-Path $modelsDir $m.FileName
+        if (Test-Path $modelPath) {
+            continue
+        }
+        Write-Color $Colors.Info "  [6/6] Скачиваю $($m.Label)..."
+        try {
+            $tempFile = Join-Path $env:TEMP $m.FileName
+            Invoke-WebRequest -Uri $m.Url -OutFile $tempFile -UseBasicParsing
+            Move-Item $tempFile $modelPath -Force
+            $size = (Get-Item $modelPath).Length
+            Write-Color $Colors.Ok "    Готово ($([math]::Round($size / 1MB, 1)) MB)"
+        } catch {
+            Write-Color $Colors.Err "    Ошибка: $_"
+        }
+    }
+} else {
+    Write-Color $Colors.Ok "  Все модели на месте"
+}
+
 # ── Итог ──
 Write-Color $Colors.Ok ""
 Write-Color $Colors.Ok "=== Установка завершена! ==="
