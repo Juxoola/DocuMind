@@ -328,32 +328,33 @@ export default function MainApp({ notebook, onExit }) {
         </motion.button>
       )}
 
+      {/* Ресайзер чата — меняет max-width чата, освобождая место для сайдбара */}
+      <div
+        className="fixed top-0 bottom-0 w-1 cursor-col-resize z-[99] group/c-resizer hover:bg-primary/30 transition-colors"
+        style={{ left: isSidebarOpen ? sidebarWidth : 0 }}
+        onMouseDown={(e) => {
+          e.preventDefault();
+          const startX = e.clientX;
+          const startWidth = chatMaxWidth;
+          const onMouseMove = (ev) => {
+            const newWidth = Math.max(400, Math.min(window.innerWidth - 60, startWidth + (startX - ev.clientX)));
+            setChatMaxWidth(newWidth);
+          };
+          const onMouseUp = () => {
+            document.removeEventListener('mousemove', onMouseMove);
+            document.removeEventListener('mouseup', onMouseUp);
+            chatResizeCleanupRef.current = null;
+          };
+          chatResizeCleanupRef.current = onMouseUp;
+          document.addEventListener('mousemove', onMouseMove);
+          document.addEventListener('mouseup', onMouseUp);
+        }}
+      >
+        <div className="w-[1.5px] h-full bg-border group-hover/c-resizer:bg-primary/50 mx-auto transition-colors shadow-[0_0_5px_rgba(var(--primary),0.2)]" />
+      </div>
+
       {/* Основная зона чата */}
       <main ref={mainRef} className="flex-1 flex flex-col min-w-0 bg-background relative z-0">
-        {/* Ресайзер чата — меняет max-width чата, освобождая место для сайдбара */}
-        <div
-          className="absolute left-0 top-0 bottom-0 w-1 cursor-col-resize z-[99] group/c-resizer hover:bg-primary/30 transition-colors"
-          onMouseDown={(e) => {
-            e.preventDefault();
-            const startX = e.clientX;
-            const startWidth = chatMaxWidth;
-            const onMouseMove = (ev) => {
-              const newWidth = Math.max(400, Math.min(window.innerWidth - 60, startWidth + (startX - ev.clientX)));
-              setChatMaxWidth(newWidth);
-            };
-            const onMouseUp = () => {
-              document.removeEventListener('mousemove', onMouseMove);
-              document.removeEventListener('mouseup', onMouseUp);
-              chatResizeCleanupRef.current = null;
-            };
-            chatResizeCleanupRef.current = onMouseUp;
-            document.addEventListener('mousemove', onMouseMove);
-            document.addEventListener('mouseup', onMouseUp);
-          }}
-        >
-          <div className="w-[1.5px] h-full bg-border group-hover/c-resizer:bg-primary/50 mx-auto transition-colors shadow-[0_0_5px_rgba(var(--primary),0.2)]" />
-        </div>
-
         <div
           className="flex-1 flex flex-col mx-auto w-full"
           style={{ maxWidth: chatMaxWidth < window.innerWidth - sidebarWidth - 80 ? chatMaxWidth : undefined }}
