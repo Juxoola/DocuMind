@@ -247,7 +247,7 @@ export default function MainApp({ notebook, onExit }) {
   const sidebarDragCleanupRef = useRef(null);
   const chatResizeCleanupRef = useRef(null);
 
-  const sidebarMax = Math.max(600, window.innerWidth - 340);
+  const sidebarMax = Math.max(600, window.innerWidth - 760);
 
   const onSidebarMouseDown = (e) => {
     e.preventDefault();
@@ -334,45 +334,51 @@ export default function MainApp({ notebook, onExit }) {
         className="flex-1 flex flex-col min-w-0 bg-background relative z-0"
         style={{ paddingLeft: isSidebarOpen ? sidebarWidth : 0 }}
       >
-        <div
-          className="flex-1 flex flex-col mx-auto w-full relative"
-          style={{ maxWidth: chatMaxWidth, minWidth: 320 }}
-        >
-          {/* Ресайзер на правом краю чата */}
-          <div
-            className="absolute right-0 top-0 bottom-0 w-4 cursor-col-resize z-[99] group/c-resizer flex items-center justify-center"
-            onMouseDown={(e) => {
-              e.preventDefault();
-              const startX = e.clientX;
-              const startWidth = chatMaxWidth;
-              const onMouseMove = (ev) => {
-                const newWidth = Math.max(320, startWidth + (ev.clientX - startX));
-                setChatMaxWidth(newWidth);
-              };
-              const onMouseUp = () => {
-                document.removeEventListener('mousemove', onMouseMove);
-                document.removeEventListener('mouseup', onMouseUp);
-                chatResizeCleanupRef.current = null;
-              };
-              chatResizeCleanupRef.current = onMouseUp;
-              document.addEventListener('mousemove', onMouseMove);
-              document.addEventListener('mouseup', onMouseUp);
-            }}
-          >
-            <div className="w-[3px] h-12 rounded-full bg-muted-foreground/20 group-hover/c-resizer:bg-primary/40 transition-colors" />
-          </div>
+        {(() => {
+          const availWidth = window.innerWidth - (isSidebarOpen ? sidebarWidth : 0);
+          const renderWidth = Math.max(740, Math.min(chatMaxWidth, availWidth));
+          return (
+            <div
+              className="flex-1 flex flex-col mx-auto w-full relative"
+              style={{ maxWidth: renderWidth }}
+            >
+              {/* Ресайзер на правом краю чата */}
+              <div
+                className="absolute right-0 top-0 bottom-0 w-4 cursor-col-resize z-[99] group/c-resizer flex items-center justify-center"
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  const startX = e.clientX;
+                  const startRendered = renderWidth;
+                  const onMouseMove = (ev) => {
+                    const newVal = Math.max(740, startRendered + (ev.clientX - startX));
+                    setChatMaxWidth(newVal);
+                  };
+                  const onMouseUp = () => {
+                    document.removeEventListener('mousemove', onMouseMove);
+                    document.removeEventListener('mouseup', onMouseUp);
+                    chatResizeCleanupRef.current = null;
+                  };
+                  chatResizeCleanupRef.current = onMouseUp;
+                  document.addEventListener('mousemove', onMouseMove);
+                  document.addEventListener('mouseup', onMouseUp);
+                }}
+              >
+                <div className="w-[3px] h-12 rounded-full bg-muted-foreground/20 group-hover/c-resizer:bg-primary/40 transition-colors" />
+              </div>
 
-          <ChatArea 
-            notebook={notebook}
-            selectedSources={selectedSources}
-            llmSettings={llmSettings}
-            setLlmSettings={setLlmSettings}
-            onOpenSource={(src) => {
-               setViewerFile(src);
-               setIsViewerOpen(true);
-            }}
-          />
-        </div>
+              <ChatArea 
+                notebook={notebook}
+                selectedSources={selectedSources}
+                llmSettings={llmSettings}
+                setLlmSettings={setLlmSettings}
+                onOpenSource={(src) => {
+                   setViewerFile(src);
+                   setIsViewerOpen(true);
+                }}
+              />
+            </div>
+          );
+        })()}
       </main>
 
       {/* Оверлей просмотра документа */}
