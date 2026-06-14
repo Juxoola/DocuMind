@@ -1375,25 +1375,6 @@ export default function ChatArea({ notebook, selectedSources, onOpenSource, llmS
               <HardDrive size={10} /> GGUF
             </span>
           )}
-          {contextUsage && contextUsage.total > 0 && (
-            <div
-              className="flex items-center gap-1.5 px-2 py-1 rounded-full bg-muted/40 border border-border/30"
-              title={`${contextUsage.used.toLocaleString()} / ${contextUsage.total.toLocaleString()} токенов (${contextUsage.pct}%)`}
-            >
-              <div className="w-14 h-1.5 bg-muted rounded-full overflow-hidden">
-                <div
-                  className={cn(
-                    "h-full rounded-full transition-all duration-500",
-                    contextUsage.pct > 80 ? "bg-red-500" : contextUsage.pct > 50 ? "bg-yellow-500" : "bg-primary"
-                  )}
-                  style={{ width: `${Math.min(contextUsage.pct, 100)}%` }}
-                />
-              </div>
-              <span className="text-[9px] font-bold text-muted-foreground">
-                {contextUsage.used >= 1000 ? `${(contextUsage.used / 1000).toFixed(1)}k` : contextUsage.used}
-              </span>
-            </div>
-          )}
         </div>
         <div className="flex items-center gap-2 flex-wrap justify-end">
           <div className="flex items-center gap-3 bg-muted/30 p-1.5 rounded-xl border border-white/5 px-2">
@@ -1741,6 +1722,46 @@ export default function ChatArea({ notebook, selectedSources, onOpenSource, llmS
             </motion.div>
           )}
         </AnimatePresence>
+
+        {/* Контекст */}
+        {contextUsage && contextUsage.total > 0 && (
+          <div className="mt-4 pt-3 border-t border-border/40">
+            <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center gap-2">
+                <div className={cn(
+                  "w-2 h-2 rounded-full animate-pulse",
+                  contextUsage.pct > 80 ? "bg-red-500" : contextUsage.pct > 50 ? "bg-yellow-500" : "bg-primary"
+                )} />
+                <span className="text-[11px] font-black uppercase tracking-wider text-muted-foreground">Контекст</span>
+              </div>
+              <span className="text-[11px] font-bold tabular-nums">
+                <span className={cn(
+                  contextUsage.pct > 80 ? "text-red-400" : contextUsage.pct > 50 ? "text-yellow-400" : "text-primary"
+                )}>
+                  {contextUsage.used >= 1000 ? `${(contextUsage.used / 1000).toFixed(1)}k` : contextUsage.used}
+                </span>
+                <span className="text-muted-foreground/60"> / {contextUsage.total >= 1000 ? `${(contextUsage.total / 1000).toFixed(1)}k` : contextUsage.total}</span>
+              </span>
+            </div>
+            <div className="w-full h-2.5 bg-muted rounded-full overflow-hidden shadow-inner">
+              <motion.div
+                initial={{ width: 0 }}
+                animate={{ width: `${Math.min(contextUsage.pct, 100)}%` }}
+                transition={{ duration: 0.5, ease: 'easeOut' }}
+                className={cn(
+                  "h-full rounded-full transition-colors duration-500 shadow-sm",
+                  contextUsage.pct > 80 ? "bg-gradient-to-r from-red-500 to-red-400" : contextUsage.pct > 50 ? "bg-gradient-to-r from-yellow-500 to-yellow-400" : "bg-gradient-to-r from-primary to-primary/70"
+                )}
+                style={{ width: `${Math.min(contextUsage.pct, 100)}%` }}
+              />
+            </div>
+            <div className="flex justify-between mt-1">
+              <span className="text-[9px] text-muted-foreground/50 font-medium">0</span>
+              <span className="text-[9px] text-muted-foreground/50 font-medium">{contextUsage.pct}%</span>
+              <span className="text-[9px] text-muted-foreground/50 font-medium">{contextUsage.total >= 1000 ? `${(contextUsage.total / 1000).toFixed(1)}k` : contextUsage.total}</span>
+            </div>
+          </div>
+        )}
       </div>
       {/* Модальное окно настроек (lazy: грузится только при первом открытии) */}
       <Suspense fallback={null}>
