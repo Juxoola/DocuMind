@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import Sidebar from './Sidebar';
-import { useDragWidth } from '../lib/useDragWidth';
 import ChatArea from './ChatArea';
 import DocumentViewer from './DocumentViewer';
 import { ChevronLeft, ChevronRight, X } from 'lucide-react';
@@ -14,7 +13,11 @@ export default function MainApp({ notebook, onExit }) {
   const [isViewerOpen, setIsViewerOpen] = useState(false);
   const [viewerWidth, setViewerWidth] = useState(600);
   const [isResizing, setIsResizing] = useState(false);
-  const [sidebarWidth, onSidebarMouseDown] = useDragWidth({ initial: 300, min: 240, max: 600 });
+  const [sidebarWidth, setSidebarWidth] = useState(300);
+  const [chatMaxWidth, setChatMaxWidth] = useState(() => {
+    const saved = localStorage.getItem('chat_max_width');
+    return saved ? parseInt(saved) : 1400;
+  });
   // F-fix #29: для viewer-resizer нужны snapshot-значения (startX/startWidth),
   // поэтому хук useDragWidth не подходит. Делаем cleanup вручную через ref.
   const viewerDragCleanupRef = useRef(null);
@@ -170,6 +173,14 @@ export default function MainApp({ notebook, onExit }) {
         try { viewerDragCleanupRef.current(); } catch { /* ignore */ }
         viewerDragCleanupRef.current = null;
       }
+      if (sidebarDragCleanupRef.current) {
+        try { sidebarDragCleanupRef.current(); } catch { /* ignore */ }
+        sidebarDragCleanupRef.current = null;
+      }
+      if (chatResizeCleanupRef.current) {
+        try { chatResizeCleanupRef.current(); } catch { /* ignore */ }
+        chatResizeCleanupRef.current = null;
+      }
     };
   }, []);
 
@@ -232,6 +243,36 @@ export default function MainApp({ notebook, onExit }) {
     setIsViewerOpen(true);
   };
 
+  const mainRef = useRef(null);
+  const sidebarDragCleanupRef = useRef(null);
+  const chatResizeCleanupRef = useRef(null);
+
+  const sidebarMax = Math.max(600, window.innerWidth - chatMaxWidth - 40);
+
+  const onSidebarMouseDown = (e) => {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startWidth = sidebarWidth;
+    const onMouseMove = (ev) => {
+      const w = ev.clientX;
+      if (w > 240 && w < sidebarMax) {
+        setSidebarWidth(w);
+      }
+    };
+    const onMouseUp = () => {
+      document.removeEventListener('mousemove', onMouseMove);
+      document.removeEventListener('mouseup', onMouseUp);
+      sidebarDragCleanupRef.current = null;
+    };
+    sidebarDragCleanupRef.current = onMouseUp;
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseup', onMouseUp);
+  };
+
+  useEffect(() => {
+    localStorage.setItem('chat_max_width', chatMaxWidth);
+  }, [chatMaxWidth]);
+
   const handleExit = () => {
     setIsViewerOpen(false);
     setViewerFile(null);
@@ -288,17 +329,46 @@ export default function MainApp({ notebook, onExit }) {
       )}
 
       {/* Основная зона чата */}
-      <main className="flex-1 flex flex-col min-w-0 bg-background relative z-0">
-        <ChatArea 
-          notebook={notebook}
-          selectedSources={selectedSources}
-          llmSettings={llmSettings}
-          setLlmSettings={setLlmSettings}
-          onOpenSource={(src) => {
-             setViewerFile(src);
-             setIsViewerOpen(true);
+      <main ref={mainRef} className="flex-1 flex flex-col min-w-0 bg-background relative z-0">
+        {/* Ресайзер чата — меняет max-width чата, освобождая место для сайдбара */}
+        <div
+          className="absolute left-0 top-0 bottom-0 w-1 cursor-col-resize z-[99] group/c-resizer hover:bg-primary/30 transition-colors"
+          onMouseDown={(e) => {
+            e.preventDefault();
+            const startX = e.clientX;
+            const startWidth = chatMaxWidth;
+            const onMouseMove = (ev) => {
+              const newWidth = Math.max(400, Math.min(window.innerWidth - 60, startWidth + (startX - ev.clientX)));
+              setChatMaxWidth(newWidth);
+            };
+            const onMouseUp = () => {
+              document.removeEventListener('mousemove', onMouseMove);
+              document.removeEventListener('mouseup', onMouseUp);
+              chatResizeCleanupRef.current = null;
+            };
+            chatResizeCleanupRef.current = onMouseUp;
+            document.addEventListener('mousemove', onMouseMove);
+            document.addEventListener('mouseup', onMouseUp);
           }}
-        />
+        >
+          <div className="w-[1.5px] h-full bg-border group-hover/c-resizer:bg-primary/50 mx-auto transition-colors shadow-[0_0_5px_rgba(var(--primary),0.2)]" />
+        </div>
+
+        <div
+          className="flex-1 flex flex-col mx-auto w-full"
+          style={{ maxWidth: chatMaxWidth < window.innerWidth - sidebarWidth - 80 ? chatMaxWidth : undefined }}
+        >
+          <ChatArea 
+            notebook={notebook}
+            selectedSources={selectedSources}
+            llmSettings={llmSettings}
+            setLlmSettings={setLlmSettings}
+            onOpenSource={(src) => {
+               setViewerFile(src);
+               setIsViewerOpen(true);
+            }}
+          />
+        </div>
       </main>
 
       {/* Оверлей просмотра документа */}
