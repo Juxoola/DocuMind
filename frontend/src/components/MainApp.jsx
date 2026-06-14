@@ -328,37 +328,36 @@ export default function MainApp({ notebook, onExit }) {
         </motion.button>
       )}
 
-      {/* Ресайзер чата — на левом краю чата, меняет его max-width */}
-      <div
-        className="fixed top-0 bottom-0 w-4 cursor-col-resize z-[99] group/c-resizer flex items-center justify-center"
-        style={{ left: isSidebarOpen ? sidebarWidth + 4 : 4 }}
-        onMouseDown={(e) => {
-          e.preventDefault();
-          const startX = e.clientX;
-          const startWidth = chatMaxWidth;
-          const onMouseMove = (ev) => {
-            const newWidth = Math.max(400, Math.min(window.innerWidth - 60, startWidth + (startX - ev.clientX)));
-            setChatMaxWidth(newWidth);
-          };
-          const onMouseUp = () => {
-            document.removeEventListener('mousemove', onMouseMove);
-            document.removeEventListener('mouseup', onMouseUp);
-            chatResizeCleanupRef.current = null;
-          };
-          chatResizeCleanupRef.current = onMouseUp;
-          document.addEventListener('mousemove', onMouseMove);
-          document.addEventListener('mouseup', onMouseUp);
-        }}
-      >
-        <div className="w-[3px] h-12 rounded-full bg-muted-foreground/20 group-hover/c-resizer:bg-primary/40 transition-colors" />
-      </div>
-
       {/* Основная зона чата */}
       <main ref={mainRef} className="flex-1 flex flex-col min-w-0 bg-background relative z-0">
         <div
-          className="flex-1 flex flex-col mx-auto w-full"
+          className="flex-1 flex flex-col mx-auto w-full relative"
           style={{ maxWidth: chatMaxWidth < window.innerWidth - sidebarWidth - 80 ? chatMaxWidth : undefined }}
         >
+          {/* Ресайзер на правом краю чата */}
+          <div
+            className="absolute right-0 top-0 bottom-0 w-4 cursor-col-resize z-[99] group/c-resizer flex items-center justify-center"
+            onMouseDown={(e) => {
+              e.preventDefault();
+              const startX = e.clientX;
+              const startWidth = chatMaxWidth;
+              const onMouseMove = (ev) => {
+                const newWidth = Math.max(400, Math.min(window.innerWidth - 60, startWidth + (ev.clientX - startX)));
+                setChatMaxWidth(newWidth);
+              };
+              const onMouseUp = () => {
+                document.removeEventListener('mousemove', onMouseMove);
+                document.removeEventListener('mouseup', onMouseUp);
+                chatResizeCleanupRef.current = null;
+              };
+              chatResizeCleanupRef.current = onMouseUp;
+              document.addEventListener('mousemove', onMouseMove);
+              document.addEventListener('mouseup', onMouseUp);
+            }}
+          >
+            <div className="w-[3px] h-12 rounded-full bg-muted-foreground/20 group-hover/c-resizer:bg-primary/40 transition-colors" />
+          </div>
+
           <ChatArea 
             notebook={notebook}
             selectedSources={selectedSources}
