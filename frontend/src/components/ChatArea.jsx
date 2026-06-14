@@ -1614,8 +1614,51 @@ export default function ChatArea({ notebook, selectedSources, onOpenSource, llmS
         </div>
       </div>
 
+      {/* Статистика + Контекст */}
+      <div className="px-6">
+        <div className="flex items-center justify-between gap-3 flex-wrap mb-2">
+          <div className="flex items-center gap-2 flex-wrap">
+            {stats && (
+              <>
+                <span className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-muted/30 border border-border/30 text-[9px] font-bold text-muted-foreground">
+                  <Clock size={9} className="text-blue-400" />
+                  <span className="text-blue-400">{stats.elapsed_sec}с</span>
+                </span>
+                <span className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-muted/30 border border-border/30 text-[9px] font-bold text-muted-foreground">
+                  <FileText size={9} className="text-emerald-400" />
+                  <span className="text-emerald-400">~{stats.total_tokens}</span>
+                  <span className="text-muted-foreground/60">ткн</span>
+                </span>
+                <span className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-muted/30 border border-border/30 text-[9px] font-bold text-muted-foreground">
+                  <Zap size={9} className={stats.tokens_per_sec >= 20 ? "text-yellow-400" : stats.tokens_per_sec >= 10 ? "text-orange-400" : "text-red-400"} />
+                  <span className={stats.tokens_per_sec >= 20 ? "text-yellow-400" : stats.tokens_per_sec >= 10 ? "text-orange-400" : "text-red-400"}>{stats.tokens_per_sec}</span>
+                  <span className="text-muted-foreground/60">т/с</span>
+                </span>
+              </>
+            )}
+          </div>
+          {contextUsage && contextUsage.total > 0 && (
+            <div className="flex items-center gap-2 flex-1 max-w-[200px]">
+              <div className="flex-1 h-1 bg-muted rounded-full overflow-hidden">
+                <div
+                  className={cn(
+                    "h-full rounded-full transition-all duration-500",
+                    contextUsage.pct > 80 ? "bg-red-500" : contextUsage.pct > 50 ? "bg-yellow-500" : "bg-primary"
+                  )}
+                  style={{ width: `${Math.min(contextUsage.pct, 100)}%` }}
+                />
+              </div>
+              <span className="text-[8px] font-bold tabular-nums text-muted-foreground/60 whitespace-nowrap">
+                {contextUsage.used >= 1000 ? `${(contextUsage.used / 1000).toFixed(1)}k` : contextUsage.used}
+                <span className="text-muted-foreground/40"> / {contextUsage.total >= 1000 ? `${(contextUsage.total / 1000).toFixed(1)}k` : contextUsage.total}</span>
+              </span>
+            </div>
+          )}
+        </div>
+      </div>
+
       {/* Область ввода */}
-      <div className="p-6 pt-0">
+      <div className="px-6 pb-6">
         {imagePreview && (
           <motion.div
             initial={{ opacity: 0, y: 10 }}
@@ -1694,48 +1737,7 @@ export default function ChatArea({ notebook, selectedSources, onOpenSource, llmS
           </div>
         </div>
 
-        {/* Статистика + Контекст */}
-        <div className="mt-2 pt-2 border-t border-border/30">
-          <div className="flex items-center justify-between gap-3 flex-wrap">
-            <div className="flex items-center gap-2 flex-wrap">
-              {stats && (
-                <>
-                  <span className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-muted/30 border border-border/30 text-[9px] font-bold text-muted-foreground">
-                    <Clock size={9} className="text-blue-400" />
-                    <span className="text-blue-400">{stats.elapsed_sec}с</span>
-                  </span>
-                  <span className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-muted/30 border border-border/30 text-[9px] font-bold text-muted-foreground">
-                    <FileText size={9} className="text-emerald-400" />
-                    <span className="text-emerald-400">~{stats.total_tokens}</span>
-                    <span className="text-muted-foreground/60">ткн</span>
-                  </span>
-                  <span className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-muted/30 border border-border/30 text-[9px] font-bold text-muted-foreground">
-                    <Zap size={9} className={stats.tokens_per_sec >= 20 ? "text-yellow-400" : stats.tokens_per_sec >= 10 ? "text-orange-400" : "text-red-400"} />
-                    <span className={stats.tokens_per_sec >= 20 ? "text-yellow-400" : stats.tokens_per_sec >= 10 ? "text-orange-400" : "text-red-400"}>{stats.tokens_per_sec}</span>
-                    <span className="text-muted-foreground/60">т/с</span>
-                  </span>
-                </>
-              )}
-            </div>
-            {contextUsage && contextUsage.total > 0 && (
-              <div className="flex items-center gap-2 flex-1 max-w-[200px]">
-                <div className="flex-1 h-1 bg-muted rounded-full overflow-hidden">
-                  <div
-                    className={cn(
-                      "h-full rounded-full transition-all duration-500",
-                      contextUsage.pct > 80 ? "bg-red-500" : contextUsage.pct > 50 ? "bg-yellow-500" : "bg-primary"
-                    )}
-                    style={{ width: `${Math.min(contextUsage.pct, 100)}%` }}
-                  />
-                </div>
-                <span className="text-[8px] font-bold tabular-nums text-muted-foreground/60 whitespace-nowrap">
-                  {contextUsage.used >= 1000 ? `${(contextUsage.used / 1000).toFixed(1)}k` : contextUsage.used}
-                  <span className="text-muted-foreground/40"> / {contextUsage.total >= 1000 ? `${(contextUsage.total / 1000).toFixed(1)}k` : contextUsage.total}</span>
-                </span>
-              </div>
-            )}
-          </div>
-        </div>
+
       </div>
       {/* Модальное окно настроек (lazy: грузится только при первом открытии) */}
       <Suspense fallback={null}>
