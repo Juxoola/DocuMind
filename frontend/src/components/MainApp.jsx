@@ -274,7 +274,7 @@ export default function MainApp({ notebook, onExit }) {
   }, [chatMaxWidth]);
 
   const chatAvailWidth = window.innerWidth - (isSidebarOpen ? sidebarWidth : 0);
-  const chatRenderWidth = Math.max(750, Math.min(chatMaxWidth, chatAvailWidth));
+  const chatRenderWidth = Math.max(755, Math.min(chatMaxWidth, chatAvailWidth));
 
   const handleExit = () => {
     setIsViewerOpen(false);
@@ -338,7 +338,7 @@ export default function MainApp({ notebook, onExit }) {
         style={{ paddingLeft: isSidebarOpen ? sidebarWidth : 0 }}
       >
         <div
-          className="flex-1 flex flex-col mx-auto w-full relative"
+          className={cn("flex-1 flex flex-col w-full relative", !isSidebarOpen && "mx-auto")}
           style={{ maxWidth: chatRenderWidth }}
         >
           {/* Ресайзер на правом краю чата */}
@@ -349,7 +349,7 @@ export default function MainApp({ notebook, onExit }) {
               const startX = e.clientX;
               const startRendered = chatRenderWidth;
               const onMouseMove = (ev) => {
-                const newVal = Math.max(750, startRendered + (ev.clientX - startX));
+                const newVal = Math.max(755, startRendered + (ev.clientX - startX));
                 setChatMaxWidth(newVal);
               };
               const onMouseUp = () => {
