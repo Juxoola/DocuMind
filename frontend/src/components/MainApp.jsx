@@ -338,7 +338,7 @@ export default function MainApp({ notebook, onExit }) {
         style={{ paddingLeft: isSidebarOpen ? sidebarWidth : 0 }}
       >
         <div
-          className={cn("flex-1 flex flex-col w-full relative", !isSidebarOpen && "mx-auto")}
+          className="flex-1 flex flex-col mx-auto w-full relative"
           style={{ maxWidth: chatRenderWidth }}
         >
           {/* Ресайзер на правом краю чата */}
