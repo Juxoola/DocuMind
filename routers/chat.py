@@ -52,6 +52,7 @@ class ChatRequest(BaseModel):
     gguf_ubatch_size: int | None = 256
     gguf_flash_attn: str | None = "true"
     thinking_budget: int | None = 1024
+    history: list[dict] = []
     context_strategy: str | None = "sliding"
     mtp_enabled: bool | None = False
 
@@ -211,10 +212,13 @@ async def chat(request: ChatRequest):
                     ]
                 else:
                     user_content = query_for_rag
-                messages_for_chat = [
-                    {"role": "system", "content": sys_prompt},
-                    {"role": "user", "content": user_content},
-                ]
+                messages_for_chat = [{"role": "system", "content": sys_prompt}]
+                for h_msg in request.history:
+                    if h_msg.get("role") in ("user", "assistant"):
+                        messages_for_chat.append(
+                            {"role": h_msg["role"], "content": h_msg["content"]}
+                        )
+                messages_for_chat.append({"role": "user", "content": user_content})
                 model_family = detect_model_family(request.gguf_model_path)
                 OPEN_TAG, CLOSE_TAG = (
                     ("<|channel|>", "<channel|>")
@@ -286,16 +290,15 @@ async def chat(request: ChatRequest):
                 elif buf and phase == "answer":
                     yield f"data: {json.dumps({'type': 'chunk', 'text': buf}, ensure_ascii=False)}\n\n"
             else:
-                from src.rag_pipeline import make_prompt
-
-                prompt = make_prompt(
-                    request.query,
-                    context,
-                    thinking_mode=request.thinking_mode,
-                    max_tokens=request.max_tokens,
-                    answer_mode=request.answer_mode,
+                sys_prompt = (
+                    get_system_prompt(request.answer_mode) + f"\n\nДоступные источники:\n{context}"
                 )
-                for chunk in active_llm.stream_complete(prompt):
+                chat_messages = [{"role": "system", "content": sys_prompt}]
+                for h_msg in request.history:
+                    if h_msg.get("role") in ("user", "assistant"):
+                        chat_messages.append({"role": h_msg["role"], "content": h_msg["content"]})
+                chat_messages.append({"role": "user", "content": request.query})
+                for chunk in active_llm.stream_chat(chat_messages):
                     if chunk.delta:
                         token_count += 1
                         yield f"data: {json.dumps({'type': 'chunk', 'text': chunk.delta}, ensure_ascii=False)}\n\n"

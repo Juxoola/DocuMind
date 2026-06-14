@@ -1185,6 +1185,7 @@ export default function ChatArea({ notebook, selectedSources, onOpenSource, llmS
           context_strategy: contextStrategy,
           answer_mode: answerMode,
           image_base64: currentImage,
+          history: messages.slice(0, -1).filter(m => m.role === 'user' || m.role === 'assistant').map(m => ({ role: m.role, content: m.content || '' })),
           ...llmSettings
         })
       });
