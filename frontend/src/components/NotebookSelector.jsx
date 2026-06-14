@@ -176,7 +176,6 @@ export default function NotebookSelector({ onSelect }) {
 
       {loading && <div className="mt-12 animate-pulse text-muted-foreground">Загрузка ваших блокнотов...</div>}
 
-      {/* Модальное окно создания блокнота */}
       {isCreateModalOpen && (
         <div className="fixed inset-0 z-[200] flex items-center justify-center p-4">
           <motion.div 

@@ -1,23 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 
-/**
- * useDragWidth — custom hook для горизонтального ресайзера.
- *
- * F-fix #29: оригинальный код в MainApp.jsx добавлял mousemove/mouseup
- * на document в onMouseDown, и cleanup был в onMouseUp. Но если компонент
- * unmount-ился во время drag (смена блокнота, закрытие вкладки), listeners
- * оставались висеть на document. При повторном клике мог сработать stale
- * setSidebarWidth с замыканием на старый компонент.
- *
- * Этот хук использует ref-ы для listeners и гарантированно снимает их
- * при unmount компонента через useEffect cleanup.
- *
- * @param {Object} opts
- * @param {number} opts.initial - начальная ширина в px
- * @param {number} opts.min - минимальная ширина в px
- * @param {number} opts.max - максимальная ширина в px
- * @returns {[number, (e: MouseEvent) => void]} [width, onMouseDownHandler]
- */
+// Хук для горизонтального ресайза с гарантированным cleanup при unmount
+
 export function useDragWidth({ initial = 320, min = 240, max = 600 } = {}) {
     const [width, setWidth] = useState(initial);
     const cleanupRef = useRef(null);

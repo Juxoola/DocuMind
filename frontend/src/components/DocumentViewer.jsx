@@ -16,7 +16,7 @@ export default function DocumentViewer({ file, notebook, onClose }) {
   const itemRefs = useRef({});
   const lastSoughtTime = useRef(null);
 
-  // file может быть строкой (имя файла) или объектом (из чата)
+  // file — строка (имя) или объект {file_name, page, time} из чата
   const filename = typeof file === 'string' ? file : file?.file_name;
   const page = typeof file === 'object' ? file?.page : null;
   const startTime = typeof file === 'object' ? file?.time : null;
@@ -30,7 +30,6 @@ export default function DocumentViewer({ file, notebook, onClose }) {
   
   let fileUrl = filename ? `/files/${notebook.id}/data/${encodeURIComponent(filename)}` : '';
   
-  // Для PDF добавляем навигацию по страницам
   const viewerUrl = isPdf 
     ? `/static/pdfjs/web/viewer.html?file=${encodeURIComponent(fileUrl)}${page ? `#page=${page}` : ''}`
     : fileUrl;
@@ -38,20 +37,17 @@ export default function DocumentViewer({ file, notebook, onClose }) {
   useEffect(() => {
     if (!filename) return;
 
-    // Для медиа и PDF — сразу убираем лоадер, чтобы плеер/iframe
-    // отрисовался мгновенно. Метаданные догружаются в фоне.
+    // Для медиа и PDF — плеер/iframe рендерится мгновенно, метаданные грузятся в фоне
     if (isSpecial) {
       setLoading(false);
     } else {
       setLoading(true);
     }
 
-    // Сбрасываем предыдущие метаданные при смене файла
     setVideoMeta(null);
     setPptxData(null);
     setContent(null);
 
-    // Фоновая загрузка метаданных (транскрипт, кадры, слайды)
     const metaUrl = `/api/video_metadata?filename=${encodeURIComponent(filename)}&notebook_id=${notebook.id}`;
     if (isMedia || isPdf) {
       fetch(metaUrl)
@@ -65,7 +61,6 @@ export default function DocumentViewer({ file, notebook, onClose }) {
         .catch(() => {});
     }
 
-    // Текстовый контент (для вкладки "Текст") — тоже фоново для спецфайлов
     if (!isMedia) {
       fetch(`/api/source_content?filename=${encodeURIComponent(filename)}&notebook_id=${notebook.id}`)
         .then(r => r.json())
@@ -77,7 +72,6 @@ export default function DocumentViewer({ file, notebook, onClose }) {
     }
   }, [filename, notebook.id]);
 
-  // Обработка перехода по времени при клике из чата
   useEffect(() => {
     if (isMedia && startTime !== null && vidRef.current && lastSoughtTime.current !== file) {
       const vid = vidRef.current;
@@ -108,7 +102,7 @@ export default function DocumentViewer({ file, notebook, onClose }) {
     return `${m}:${sec.toString().padStart(2, '0')}`;
   };
 
-  // Объединяем транскрипт и кадры в единую ленту
+  // Объединяем транскрипт и кадры в единую хронологическую ленту для навигации
   const feedItems = useMemo(() => {
     if (!videoMeta) return [];
     const items = [
@@ -118,7 +112,6 @@ export default function DocumentViewer({ file, notebook, onClose }) {
     return items.sort((a, b) => a.time - b.time);
   }, [videoMeta]);
 
-  // Определяем активный элемент
   const activeIndex = useMemo(() => {
     let bestIdx = -1;
     for (let i = 0; i < feedItems.length; i++) {
@@ -131,7 +124,7 @@ export default function DocumentViewer({ file, notebook, onClose }) {
     return bestIdx;
   }, [feedItems, currentTime]);
 
-  // Автопрокрутка к активному элементу (для видео и презентаций)
+  // Автопрокрутка к активному элементу при смене текущего времени воспроизведения
   useEffect(() => {
     if (isMedia && activeIndex !== -1 && itemRefs.current[activeIndex]) {
       itemRefs.current[activeIndex].scrollIntoView({
@@ -149,7 +142,6 @@ export default function DocumentViewer({ file, notebook, onClose }) {
 
   return (
     <div className="flex flex-col h-full overflow-hidden bg-background">
-      {/* Шапка */}
       <div className="p-4 border-b flex items-center justify-between bg-card/50 backdrop-blur-md z-20">
         <div className="flex items-center gap-3">
           <div className="p-2 bg-primary/10 text-primary rounded-xl shadow-inner">
@@ -200,7 +192,6 @@ export default function DocumentViewer({ file, notebook, onClose }) {
         </div>
       </div>
 
-      {/* Тело */}
       <div className="flex-1 overflow-hidden relative flex flex-col">
         {loading ? (
           <div className="h-full flex flex-col items-center justify-center gap-4 text-muted-foreground">
@@ -252,9 +243,7 @@ export default function DocumentViewer({ file, notebook, onClose }) {
           />
         ) : isMedia ? (
           <div className="h-full flex flex-col overflow-hidden">
-            {/* Зона медиаплеера */}
             <div className="relative p-6 pb-0 group">
-              {/* Эффект подложки (Glow) */}
               <div className="absolute inset-0 bg-gradient-to-b from-primary/5 to-transparent pointer-events-none opacity-50" />
               <div className="absolute -top-20 left-1/2 -translate-x-1/2 w-full h-40 bg-primary/10 blur-[100px] rounded-full pointer-events-none" />
               
@@ -291,7 +280,6 @@ export default function DocumentViewer({ file, notebook, onClose }) {
               </div>
             </div>
             
-            {/* Интеллектуальная лента */}
             <div className="flex-1 overflow-hidden flex flex-col mt-6">
                <div className="px-6 mb-3 flex items-center justify-between">
                   <h4 className="text-[10px] font-black uppercase text-primary tracking-[0.2em]">Интеллектуальная лента</h4>
@@ -378,7 +366,6 @@ export default function DocumentViewer({ file, notebook, onClose }) {
         ) : isPpt ? (
           <div className="h-full overflow-y-auto p-6 space-y-8 custom-scrollbar bg-muted/10">
             {!pptxData ? (
-              // Скелетон пока метаданные летят в фоне
               <div className="space-y-6">
                 {[1,2,3].map(i => (
                   <div key={i} className="bg-card border border-border/30 rounded-3xl overflow-hidden animate-pulse">

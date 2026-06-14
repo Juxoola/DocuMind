@@ -28,7 +28,6 @@ import {
   Check,
 } from 'lucide-react';
 
-/** Возвращает иконку и цвет по расширению файла */
 function getFileIcon(filename) {
   const ext = filename.split('.').pop().toLowerCase();
   switch (ext) {
@@ -156,14 +155,14 @@ export default function Sidebar({
     }
   };
 
-  // ── Закладки ──
-  const [activeTab, setActiveTab] = useState('files'); // 'files' | 'bookmarks'
+  // Закладки — полный CRUD с фильтрацией по тегам, поиском и модалами просмотра/редактирования
+  const [activeTab, setActiveTab] = useState('files');
   const [bookmarks, setBookmarks] = useState([]);
   const [bmSearch, setBmSearch] = useState('');
   const [bmTagFilter, setBmTagFilter] = useState(null);
   const [bmLoading, setBmLoading] = useState(false);
   const [viewingBm, setViewingBm] = useState(null);
-  const [editingBm, setEditingBm] = useState(null); // {id, title, tags}
+  const [editingBm, setEditingBm] = useState(null);
   const bmAnswerRef = React.useRef(null);
   const [bmCopied, setBmCopied] = useState(false);
   const bmCopyTimeoutRef = React.useRef(null);
@@ -180,13 +179,11 @@ export default function Sidebar({
     }
   };
 
-  // Загружаем при первом переключении на вкладку и при смене блокнота
   React.useEffect(() => {
     if (activeTab === 'bookmarks') fetchBookmarks();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab, notebook.id]);
 
-  // Слушаем кастомные события от ChatArea, чтобы обновлять список без prop drilling
+  // Обновление списка закладок через кастомные события — избегаем prop drilling между ChatArea и Sidebar
   React.useEffect(() => {
     const onAdded = () => { if (activeTab === 'bookmarks') fetchBookmarks(); };
     const onDeleted = () => { if (activeTab === 'bookmarks') fetchBookmarks(); };
@@ -201,7 +198,6 @@ export default function Sidebar({
     };
   }, [activeTab, notebook.id]);
 
-  // Также обновим, если удалили файл (закладки могли стать stale)
   const prevSourcesCount = React.useRef(sources.length);
   React.useEffect(() => {
     if (sources.length < prevSourcesCount.current && activeTab === 'bookmarks') {
@@ -240,7 +236,7 @@ export default function Sidebar({
   };
 
   const askAgain = (question) => {
-    // Копируем вопрос в буфер + диспатчим событие для ChatArea
+    // askAgain: копирует вопрос в чат через CustomEvent для ChatArea
     if (navigator.clipboard) navigator.clipboard.writeText(question);
     window.dispatchEvent(new CustomEvent('chat:fill-input', { detail: { text: question } }));
     setViewingBm(null);
@@ -258,14 +254,12 @@ export default function Sidebar({
     }
   };
 
-  // Список уникальных тегов
   const allTags = React.useMemo(() => {
     const set = new Set();
     bookmarks.forEach(b => (b.tags || []).forEach(t => set.add(t)));
     return Array.from(set).sort();
   }, [bookmarks]);
 
-  // Отфильтрованный список
   const filteredBookmarks = React.useMemo(() => {
     const q = bmSearch.trim().toLowerCase();
     return bookmarks.filter(b => {
@@ -291,14 +285,13 @@ export default function Sidebar({
     return m.split(/[\\/]/).filter(Boolean).slice(-1)[0] || m;
   };
 
-  // Источник уже удалён из блокнота? — кнопку показываем, но блокируем
+  // Проверка: источник удалён — кнопка «открыть» блокируется, но карточка остаётся
   const bmSourceStale = (fileName) => {
     return viewingBm?.status === 'stale' || !sources.includes(fileName);
   };
 
   return (
     <div style={{ width }} className="h-full border-r glass flex flex-col z-10 overflow-hidden">
-      {/* Шапка */}
       <div className="p-4 border-b flex items-center justify-between flex-shrink-0 bg-background/50 backdrop-blur-sm">
         <div className="flex items-center gap-3 min-w-0">
           <div className="w-8 h-8 bg-primary/10 rounded-xl flex-shrink-0 flex items-center justify-center text-primary shadow-sm">
@@ -318,7 +311,6 @@ export default function Sidebar({
         </button>
       </div>
 
-      {/* Зона загрузки */}
       <div className="p-4 flex-shrink-0">
         <label 
           onDragOver={onDragOver}
@@ -342,7 +334,6 @@ export default function Sidebar({
 
           {uploadState?.isUploading && (
             <div className="absolute inset-0 bg-background/90 backdrop-blur-md rounded-2xl flex flex-col items-center justify-center p-6 border border-primary/20 shadow-2xl">
-              {/* Текущий файл */}
               <div className="w-full mb-4">
                 <div className="flex justify-between items-center mb-1">
                   <span className="text-[9px] font-black uppercase tracking-widest text-primary">Файл</span>
@@ -358,7 +349,6 @@ export default function Sidebar({
                 </div>
               </div>
 
-              {/* Общий прогресс */}
               <div className="w-full mb-6">
                 <div className="flex justify-between items-center mb-1">
                   <div className="flex items-center gap-2">
@@ -378,7 +368,6 @@ export default function Sidebar({
                 </div>
               </div>
 
-              {/* Статус в нижней части */}
               <div className="absolute bottom-0 left-0 right-0 p-2 bg-primary/10 border-t border-primary/20 backdrop-blur-sm">
                 <p className="text-[9px] font-bold text-primary text-center break-words leading-tight">
                   {uploadState.status || 'Подготовка...'}
@@ -389,7 +378,6 @@ export default function Sidebar({
         </label>
       </div>
 
-      {/* Вкладки: Файлы / Закладки */}
       <div className="px-4 pt-3 flex-shrink-0">
         <div className="flex gap-1 p-1 bg-muted/30 rounded-xl border border-white/5">
           <button
@@ -421,7 +409,6 @@ export default function Sidebar({
         </div>
       </div>
 
-      {/* Список источников */}
       <div className="flex-1 overflow-y-auto px-4 py-2 space-y-2 custom-scrollbar">
         {activeTab === 'files' && (() => {
           const filtered = sources.filter(s => {
@@ -505,7 +492,6 @@ export default function Sidebar({
 
         {activeTab === 'bookmarks' && (
           <div className="space-y-2">
-            {/* Поиск */}
             <div className="relative px-1">
               <Search size={12} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
               <input
@@ -516,7 +502,6 @@ export default function Sidebar({
               />
             </div>
 
-            {/* Фильтр по тегам */}
             {allTags.length > 0 && (
               <div className="flex flex-wrap gap-1 px-1">
                 <button
@@ -548,7 +533,6 @@ export default function Sidebar({
               </div>
             )}
 
-            {/* Список карточек */}
             {bmLoading ? (
               <div className="text-center py-8 opacity-40 text-[10px]">Загрузка…</div>
             ) : filteredBookmarks.length === 0 ? (
@@ -571,7 +555,6 @@ export default function Sidebar({
                       : "border-border/40"
                   )}
                 >
-                  {/* Заголовок или первая строка вопроса */}
                   <div className="flex items-start gap-2 mb-1.5">
                     <p
                       className="text-xs font-bold text-foreground line-clamp-2 flex-1 cursor-pointer hover:text-primary transition-colors"
@@ -587,7 +570,6 @@ export default function Sidebar({
                     )}
                   </div>
 
-                  {/* Теги */}
                   {bm.tags && bm.tags.length > 0 && (
                     <div className="flex flex-wrap gap-1 mb-1.5">
                       {bm.tags.map(t => (
@@ -598,7 +580,6 @@ export default function Sidebar({
                     </div>
                   )}
 
-                  {/* Мета */}
                   <div className="flex items-center gap-2 text-[9px] text-muted-foreground/70 mb-2">
                     {bm.model && (
                       <span className="truncate max-w-[120px]" title={bm.model}>
@@ -615,7 +596,6 @@ export default function Sidebar({
                     )}
                   </div>
 
-                  {/* Действия */}
                   <div className="flex items-center gap-1 opacity-70 group-hover:opacity-100 transition-opacity">
                     <button
                       onClick={() => setViewingBm(bm)}
@@ -655,7 +635,6 @@ export default function Sidebar({
       </div>
 
       <div className="mt-auto flex flex-col border-t bg-muted/5">
-        {/* Мониторинг Llama CPP */}
         <div className="px-4 py-2 flex items-center justify-between border-b border-border/40">
           <div className="flex items-center gap-2">
             <div className={cn(
@@ -692,7 +671,6 @@ export default function Sidebar({
         </div>
       </div>
 
-      {/* ── Модал просмотра закладки ── */}
       <AnimatePresence>
         {viewingBm && (
           <motion.div
@@ -749,9 +727,6 @@ export default function Sidebar({
                       text={viewingBm.answer}
                       sources={viewingBm.sources || []}
                       onCite={(n, src) => {
-                        // Открываем файл справа, модал закладки НЕ закрываем — он
-                        // не мешает просмотрщику, а пользователю удобно вернуться.
-                        // Передаём полный объект, чтобы page/time доехали до DocumentViewer.
                         if (src && onOpenFile) {
                           onOpenFile(src);
                         }
@@ -839,7 +814,6 @@ export default function Sidebar({
         )}
       </AnimatePresence>
 
-      {/* ── Модал редактирования (title + tags) ── */}
       <AnimatePresence>
         {editingBm && (
           <motion.div

@@ -3,19 +3,8 @@ import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { FileText } from 'lucide-react';
 
-/**
- * Единый компонент кнопки-цитаты [N].
- *
- * Используется И в чате (ChatArea), И в модале закладки (LlmMarkdown).
- * Один и тот же визуал, одно и то же поведение hover/click.
- *
- * Props:
- *   n      — номер источника
- *   src    — объект источника {file_name, page, time, text, snippet}
- *   onClick — (src) => void
- *   onHover — (src, {x, y}) => void
- *   onLeave — () => void
- */
+// Единый компонент кнопки-цитаты и тултипа — используется и в чате, и в модале закладки
+
 export function CitationButton({ n, src, onClick, onHover, onLeave }) {
   const btnRef = useRef(null);
 
@@ -47,20 +36,7 @@ export function CitationButton({ n, src, onClick, onHover, onLeave }) {
   );
 }
 
-/**
- * Единый портал-тултип источника.
- *
- * Рендерится в document.body, привязан к координатам кнопки снизу.
- * Стилистика идентична чату: тёмная карточка, иконка FileText, мета, сниппет.
- *
- * Props:
- *   hoveredSource — { src, x, y } | null
- *   onClose       — () => void
- *   onCancelClose — () => void  (вызывается при mouseenter на тултип)
- *   onResumeClose — () => void  (вызывается при mouseleave с тултипа)
- */
 export function CitationTooltipPortal({ hoveredSource, onClose, onCancelClose, onResumeClose }) {
-  // Закрытие по Escape
   useEffect(() => {
     if (!hoveredSource) return;
     const onKey = (e) => { if (e.key === 'Escape') onClose && onClose(); };
@@ -72,7 +48,7 @@ export function CitationTooltipPortal({ hoveredSource, onClose, onCancelClose, o
 
   const { src, x, y } = hoveredSource;
   const preview = src.snippet || src.text || '';
-  const n = (src._n != null) ? src._n : null; // опционально — если хотим показать [N] в углу
+  const n = (src._n != null) ? src._n : null;
 
   return createPortal(
     <AnimatePresence>

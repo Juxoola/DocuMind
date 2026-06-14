@@ -5,21 +5,19 @@ import { cn } from '../lib/utils';
 
 export default function SettingsModal({ isOpen, onClose, settings, onSave }) {
     const [localSettings, setLocalSettings] = useState(settings);
-    const [activeTab, setActiveTab] = useState('llm'); // 'llm' | 'rag'
-    // Режим: true = API, false = GGUF локально
+    const [activeTab, setActiveTab] = useState('llm');
+    // Режим работы: true = внешний API, false = локальный GGUF
     const isApiMode = localSettings.use_gguf !== 'true';
     
-    // GGUF state
     const [ggufModels, setGgufModels] = useState([]);
     const [ggufLoading, setGgufLoading] = useState(false);
     const [ggufLoadedModels, setGgufLoadedModels] = useState([]);
     const [expandedDirs, setExpandedDirs] = useState({});
-    // Hot-swap LLM load state (real-time from /api/llm-status/stream)
+    // SSE-подписка на статус загрузки модели в реальном времени
     const [llmLoadState, setLlmLoadState] = useState({ state: 'idle', phase: null, model: null, elapsed: 0, eta: null, error: null });
     const [ggufConfig, setGgufConfig] = useState({
         search_dirs: '',
-        // F-fix #34: default 4 → 8 (q8_0). q4_k/q5_k не поддерживаются
-        // llama-server для KV-cache, llama-server падает с retcode=1.
+        // Q8_0 — единственное квантование KV-cache, совместимое с llama-server
         gguf_kv_quant: 8,
         presence_penalty: 0.0,
         frequency_penalty: 0.0,
@@ -46,7 +44,6 @@ export default function SettingsModal({ isOpen, onClose, settings, onSave }) {
         }
     }, [isOpen, settings]);
 
-    // SSE-подписка на статус LLM (real-time прогресс hot-swap)
     useEffect(() => {
         if (!isOpen) return;
         let es;
@@ -57,11 +54,10 @@ export default function SettingsModal({ isOpen, onClose, settings, onSave }) {
                 try {
                     const data = JSON.parse(e.data);
                     setLlmLoadState(prev => ({ ...prev, ...data }));
-                } catch (err) { /* ignore */ }
+                } catch (err) { }
             };
             es.onerror = () => {
                 if (es) { es.close(); es = null; }
-                // Reconnect через 2с
                 reconnectTimer = setTimeout(connect, 2000);
             };
         };
@@ -133,14 +129,12 @@ export default function SettingsModal({ isOpen, onClose, settings, onSave }) {
             use_gguf: 'true',
             gguf_model_path: modelPath,
             gguf_mmproj_path: mmprojPath || '',
-            llm_url: '', // Очищаем API URL
+            llm_url: '',
         };
         setLocalSettings(newSettings);
-        // Автосохранение при выборе модели
         onSave(newSettings);
         localStorage.setItem('llm_settings', JSON.stringify(newSettings));
-        // Hot-swap: запускаем модель в фоне через preload endpoint.
-        // Это избавляет от задержки 10-30с при первом сообщении.
+        // Hot-swap: предзагрузка модели в фоне убирает задержку 10-30с при первом сообщении
         try {
             setLlmLoadState({ state: 'loading', model: modelPath, phase: 'starting', elapsed: 0, eta: null });
             const res = await fetch('/api/preload-llm', {
@@ -219,7 +213,6 @@ export default function SettingsModal({ isOpen, onClose, settings, onSave }) {
                     exit={{ scale: 0.9, opacity: 0, y: 20 }}
                     className="relative w-full max-w-lg bg-card border border-border shadow-2xl rounded-3xl overflow-hidden max-h-[90vh] flex flex-col"
                 >
-                    {/* Шапка */}
                     <div className="flex items-center justify-between p-6 border-b border-border/50 flex-shrink-0">
                         <h2 className="text-xl font-bold flex items-center gap-2">
                             <span className="p-2 bg-primary/10 rounded-xl text-primary">
@@ -232,7 +225,6 @@ export default function SettingsModal({ isOpen, onClose, settings, onSave }) {
                         </button>
                     </div>
 
-                    {/* Вкладки */}
                     <div className="flex border-b border-border/50 flex-shrink-0">
                         <button
                             onClick={() => setActiveTab('llm')}
@@ -258,12 +250,9 @@ export default function SettingsModal({ isOpen, onClose, settings, onSave }) {
                         </button>
                     </div>
 
-                    {/* Содержимое */}
                     <div className="flex-1 overflow-y-auto">
-                        {/* LLM Tab */}
                         {activeTab === 'llm' && (
                             <div className="p-6 space-y-6">
-                                {/* Переключатель режима: API / Локально */}
                                 <div className="flex items-center justify-between p-4 rounded-2xl bg-muted/30 border border-border/50">
                                     <div className="space-y-1">
                                         <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest flex items-center gap-2">
@@ -293,7 +282,6 @@ export default function SettingsModal({ isOpen, onClose, settings, onSave }) {
                                     </button>
                                 </div>
 
-                                {/* API Mode */}
                                 {isApiMode && (
                                     <div className="space-y-4">
                                         <div className="space-y-2">
@@ -358,10 +346,8 @@ export default function SettingsModal({ isOpen, onClose, settings, onSave }) {
                                     </div>
                                 )}
 
-                                {/* GGUF Mode */}
                                 {!isApiMode && (
                                     <div className="space-y-4">
-                                        {/* Статус загруженных моделей */}
                                         {ggufLoadedModels.length > 0 && (
                                             <div className="rounded-2xl border border-primary/20 bg-primary/5 p-4">
                                                 <div className="flex items-center justify-between mb-2">
@@ -386,7 +372,6 @@ export default function SettingsModal({ isOpen, onClose, settings, onSave }) {
                                             </div>
                                         )}
 
-                                        {/* Текущий выбор GGUF */}
                                         {localSettings.gguf_model_path && (
                                         <div className="rounded-2xl border border-green-500/20 bg-green-500/5 p-4">
                                             <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest mb-2" title="Основная модель используется для ответов на вопросы и работы с текстом">
@@ -400,7 +385,6 @@ export default function SettingsModal({ isOpen, onClose, settings, onSave }) {
                                                     + mmproj: {localSettings.gguf_mmproj_path.split('/').pop()}
                                                 </p>
                                             )}
-                                            {/* Hot-swap прогресс */}
                                             {llmLoadState.state === 'loading' && (
                                                 <div className="mt-3 p-3 rounded-xl bg-blue-500/10 border border-blue-500/20">
                                                     <div className="flex items-center gap-2 mb-2">
@@ -477,7 +461,6 @@ export default function SettingsModal({ isOpen, onClose, settings, onSave }) {
                                                 </label>
                                             </div>
 
-                                            {/* Тонкие настройки для Основной модели */}
                                             <div className="mt-4 pt-4 border-t border-border/20 space-y-4">
                                                 <p className="text-[9px] font-bold text-muted-foreground uppercase tracking-widest flex items-center gap-1.5">
                                                     <Cpu size={10} /> Тонкие настройки генерации
@@ -517,7 +500,6 @@ export default function SettingsModal({ isOpen, onClose, settings, onSave }) {
                                         </div>
                                         )}
 
-                                        {/* Vision модель */}
                                         {localSettings.vision_model_path && (
                                         <div className="rounded-2xl border border-purple-500/20 bg-purple-500/5 p-4">
                                             <div className="flex justify-between items-start">
@@ -621,7 +603,6 @@ export default function SettingsModal({ isOpen, onClose, settings, onSave }) {
                                         </div>
                                         )}
 
-                                        {/* Список моделей */}
                                         <div className="space-y-2">
                                             <div className="flex items-center justify-between">
                                                 <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest flex items-center gap-1.5">
@@ -742,7 +723,6 @@ export default function SettingsModal({ isOpen, onClose, settings, onSave }) {
                                     </div>
                                 )}
 
-                                {/* Параметры генерации — только для API-режима (GGUF настраивается внутри карточки модели) */}
                                 {isApiMode && (
                                 <div className="rounded-2xl border border-border/30 p-4 space-y-3">
                                     <p className="text-[9px] font-bold text-muted-foreground uppercase tracking-widest flex items-center gap-1.5">
@@ -798,7 +778,6 @@ export default function SettingsModal({ isOpen, onClose, settings, onSave }) {
                             </div>
                         )}
 
-                        {/* RAG Tab */}
                         {activeTab === 'rag' && (
                             <div className="p-6 space-y-6">
                                 <div className="flex items-center justify-between p-4 rounded-2xl bg-muted/30 border border-border/50">
@@ -921,7 +900,6 @@ export default function SettingsModal({ isOpen, onClose, settings, onSave }) {
                         )}
                     </div>
 
-                    {/* Подвал */}
                     <div className="p-6 bg-muted/30 flex gap-3 flex-shrink-0">
                         <button 
                             onClick={onClose}

@@ -6,38 +6,30 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
-// import rehypeRaw from 'rehype-raw'; // XSS fix: rehype-raw позволял LLM-выводу выполнять произвольный HTML
 import 'katex/dist/katex.min.css';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { atomDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import { cn } from '../lib/utils';
-// F-fix #code-split: SettingsModal (949 LOC / 79 КБ) грузится только при первом
-// открытии модалки. До этого момента весь его код (SleekSlider, формы для
-// 30+ параметров моделей, иконки настроек) не нужен пользователю.
-// React.lazy + Suspense даёт нативный split chunk в Vite.
+
+// Ленивая загрузка SettingsModal для code-splitting — модалка тяжёлая, грузится по требованию
 const SettingsModal = lazy(() => import('./SettingsModal'));
-// F-fix #virt-list: виртуализация длинного списка сообщений. На длинных диалогах
-// (100+ Q&A) React рендерит сотни MessageItem, что тормозит скролл и TTI.
-// useVirtualizer рендерит только видимые + немного overscan, остальные
-// заменяет на пустые div той же высоты. ~5 КБ gzip, нулевая конфигурация.
+
+// Виртуализация списка сообщений — без неё на длинных диалогах тормозит скролл
 import { useVirtualizer } from '@tanstack/react-virtual';
 import axios from 'axios';
 import { CitationButton, CitationTooltipPortal } from '../lib/CitationTooltip';
 import { extractCleanContent, copyAsRichText } from '../lib/copyToClipboard';
 
-// ── Collapsible Thinking Block ────────────────────────────────────────────────
 const ThinkingBlock = ({ content, isStreaming }) => {
   const [open, setOpen] = useState(true);
   const bodyRef = useRef(null);
 
-  // Автоскролл тела пока стримится
   useEffect(() => {
     if (isStreaming && bodyRef.current) {
       bodyRef.current.scrollTop = bodyRef.current.scrollHeight;
     }
   }, [content, isStreaming]);
 
-  // Автосворачивание когда стриминг завершён
   useEffect(() => {
     if (!isStreaming && content) {
       setOpen(false);
@@ -93,8 +85,6 @@ const ThinkingBlock = ({ content, isStreaming }) => {
 };
 
 const Citation = ({ n, sources, onClick, onHover, onLeave }) => {
-  // Делегируем в общий компонент. Старая локальная реализация удалена,
-  // API идентично — props один-в-один.
   return (
     <CitationButton
       n={n}
@@ -106,7 +96,6 @@ const Citation = ({ n, sources, onClick, onHover, onLeave }) => {
   );
 };
 
-// ── Sleek Custom Slider Component ───────────────────────────────────────────
 const SleekSlider = ({
   label,
   value,
@@ -126,7 +115,6 @@ const SleekSlider = ({
 }) => {
   const [inputValue, setInputValue] = useState(value);
 
-  // Sync internal state when prop changes
   useEffect(() => {
     setInputValue(value);
   }, [value]);
@@ -161,7 +149,6 @@ const SleekSlider = ({
     }
   };
 
-  // Calculate percentage for gradient track filling
   const pct = disabled ? 0 : ((value - min) / (max - min)) * 100;
 
   return (
@@ -193,7 +180,6 @@ const SleekSlider = ({
           )}
         </div>
         
-        {/* Sleek inline number input */}
         <div className="flex items-center gap-1.5 bg-muted/60 border border-border/40 rounded-lg px-2 py-0.5">
           <input
             type="number"
@@ -217,7 +203,6 @@ const SleekSlider = ({
         </p>
       )}
 
-      {/* Slide range with custom visual background fill */}
       <div className="relative mt-2.5 flex items-center">
         <input
           type="range"
@@ -234,7 +219,6 @@ const SleekSlider = ({
         />
       </div>
 
-      {/* Preset markers */}
       {presets.length > 0 && (
         <div className="flex items-center justify-between mt-2.5 flex-wrap gap-1">
           {presets.map((p) => {
@@ -266,7 +250,6 @@ const SleekSlider = ({
   );
 };
 
-// ── Memoized Message Item Component for High Performance ──────────────────────
 const MessageItem = React.memo(({
   msg,
   index,
@@ -276,8 +259,8 @@ const MessageItem = React.memo(({
   setTooltipCoords,
   tooltipTimeoutRef,
   notebook,
-  question, // текст вопроса пользователя над этим AI-сообщением (для закладки)
-  onBookmarkSaved, // (index, ts) => void
+  question,
+  onBookmarkSaved,
 }) => {
   const [bmPopover, setBmPopover] = React.useState(false);
   const [bmTitle, setBmTitle] = React.useState('');
@@ -305,14 +288,11 @@ const MessageItem = React.memo(({
   React.useEffect(() => () => clearTimeout(copyTimeoutRef.current), []);
 
   const openBmPopover = () => {
-    setBmTitle(''); // По умолчанию пусто — на карточке возьмётся question
+    setBmTitle('');
     setBmTags('');
     setBmError('');
-    // Позиционируем относительно кнопки через getBoundingClientRect
     if (bmBtnRef.current) {
       const rect = bmBtnRef.current.getBoundingClientRect();
-      // Поповер шириной 320px — выровняем по левому краю кнопки,
-      // но если упрётся в правый край viewport — сдвинем влево
       const popWidth = 320;
       const margin = 8;
       let left = rect.left;
@@ -326,18 +306,15 @@ const MessageItem = React.memo(({
     setBmPopover(true);
   };
 
-  // Закрытие по клику вне и по Escape
   React.useEffect(() => {
     if (!bmPopover) return;
     const onDown = (e) => {
       if (bmPopoverRef.current && !bmPopoverRef.current.contains(e.target)) {
-        // Игнорируем клик по самой кнопке (она сама переключает)
         if (bmBtnRef.current && bmBtnRef.current.contains(e.target)) return;
         setBmPopover(false);
       }
     };
     const onKey = (e) => { if (e.key === 'Escape') setBmPopover(false); };
-    // mousedown чтобы успеть до onClick
     document.addEventListener('mousedown', onDown);
     document.addEventListener('keydown', onKey);
     return () => {
@@ -351,7 +328,6 @@ const MessageItem = React.memo(({
     setBmSaving(true);
     setBmError('');
     try {
-      // Снэпшот источников (только метаданные, без полного текста — текст устаревает)
       const sourcesSnap = (msg.sources || []).map(s => ({
         file_name: s.file_name,
         page: s.page ?? null,
@@ -370,7 +346,6 @@ const MessageItem = React.memo(({
         tags: bmTags.split(',').map(s => s.trim()).filter(Boolean),
       };
       await axios.post('/api/bookmarks', payload);
-      // Сообщаем ChatArea, чтобы пометить сообщение как сохранённое
       if (onBookmarkSaved) onBookmarkSaved(msg.id || index, Date.now());
       window.dispatchEvent(new CustomEvent('bookmark:added'));
       setBmPopover(false);
@@ -383,26 +358,21 @@ const MessageItem = React.memo(({
   const preProcessMessage = (text) => {
     if (!text) return "";
     
-    // Сначала обрабатываем формулы LaTeX
     let processed = text
-      .replace(/\\\[([\s\S]*?)\\\]/g, '$$$$$1$$$$')
+      .replace(/\\\[[\s\S]*?\\\]/g, '$$$$$1$$$$')
       .replace(/\\\(([\s\S]*?)\\\)/g, '$$$1$$');
 
-    // Разделяем текст на части: обычный текст и блоки кода (```...```)
     const parts = processed.split(/(```[\s\S]*?```)/g);
     
     const finalParts = parts.map(part => {
-      // Если это блок кода, возвращаем его как есть (не трогаем цитаты внутри)
       if (part.startsWith('```')) return part;
       
-      // В обычном тексте защищаем LaTeX от ссылок
       const mathBlocks = [];
-      let subPart = part.replace(/(\$\$[\s\S]*?\$\$|\$[^\$\n]+?\$)/g, (m) => {
+      let subPart = part.replace(/(\$\$[\s\S]*?\$\$|\$[^$\n]+?\$)/g, (m) => {
         mathBlocks.push(m);
         return `%%MATH_${mathBlocks.length - 1}%%`;
       });
 
-      // Заменяем [N] на ссылки только в обычном тексте
       subPart = subPart.replace(/(?<!\\in|\\subset|\\subseteq|\\supset)\[(\d+(?:,\s*\d+)*)\]/g, (match, nums) => {
         return nums.split(',').map(n => {
           const num = n.trim();
@@ -410,17 +380,15 @@ const MessageItem = React.memo(({
         }).join('');
       });
 
-      // Возвращаем LaTeX
       return subPart.replace(/%%MATH_(\d+)%%/g, (_, idx) => mathBlocks[parseInt(idx)]);
     });
 
     processed = finalParts.join('');
 
-    // Обработка всех форматов thinking-тегов:
     const thinkFormats = [
-      { open: '<|channel|>', close: '<channel|>' },   // Gemma 4 (рус)
-      { open: '<think>', close: '</think>' },     // Qwen/DeepSeek (рус)
-      { open: '<|think|>', close: '<|/think|>' },  // запасной
+      { open: '<|channel|>', close: '<channel|>' },
+      { open: '<think>', close: '</think>' },
+      { open: '<|think|>', close: '<|/think|>' },
     ];
     for (const { open, close } of thinkFormats) {
       if (!processed.includes(open)) continue;
@@ -433,7 +401,7 @@ const MessageItem = React.memo(({
       } else if (thinkContent) {
         processed = `${beforeThink}<div class="mb-4 rounded-xl border border-purple-500/20 bg-purple-500/5 overflow-hidden"><div class="px-4 py-2 text-[11px] font-bold text-purple-500 flex items-center gap-2"><span class="animate-pulse">✨ Модель рассуждает...</span></div><div class="p-4 text-xs text-muted-foreground/80 italic border-t border-purple-500/10 whitespace-pre-wrap">${thinkContent}</div></div>`;
       }
-      break; // обработали — выходим
+      break;
     }
     return processed;
   };
@@ -455,7 +423,6 @@ const MessageItem = React.memo(({
           </div>
         )}
 
-        {/* Блок рассуждений — рендерится отдельно, до ответа */}
         {msg.thinkingContent && (
           <ThinkingBlock
             content={msg.thinkingContent}
@@ -498,7 +465,6 @@ const MessageItem = React.memo(({
                 const lang = match ? match[1] : '';
                 return !inline && match ? (
                   <div className="relative group my-4 rounded-xl overflow-hidden bg-[#0d1117] border border-white/5">
-                    {/* Тонкий индикатор языка и кнопка COPY в одной строке, встроенные в блок */}
                     <div data-copy-skip="1" className="flex items-center justify-between px-4 py-2 opacity-40 group-hover:opacity-100 transition-opacity">
                       <span className="text-[9px] font-bold text-white/50 uppercase tracking-[0.2em]">{lang}</span>
                       <button
@@ -561,7 +527,6 @@ const MessageItem = React.memo(({
             </div>
           )}
 
-          {/* Кнопка «Сохранить в закладки» (только для AI и только когда стрим завершён) */}
           {msg.role === 'ai' && !msg.loading && msg.content && notebook && (
             <div data-copy-skip="1" className="mt-3 pt-2 border-t border-border/20 flex items-center gap-2">
               {msg._savedAt ? (
@@ -598,8 +563,6 @@ const MessageItem = React.memo(({
             </div>
           )}
 
-          {/* Кнопка «Копировать» для сообщений пользователя — снаружи prose,
-              чтобы не ломать типографику текстового блока */}
           {msg.role === 'user' && !msg.loading && msg.content && (
             <div data-copy-skip="1" className="pt-2 flex items-center gap-2">
               <button
@@ -636,8 +599,6 @@ const MessageItem = React.memo(({
         {renderContent()}
       </div>
 
-      {/* Поповер «Сохранить в закладки» — рендерим в портал, чтобы overflow-hidden
-          родительского chat-bubble-ai не обрезал форму. */}
       {bmPopover && msg.role === 'ai' && createPortal(
         <AnimatePresence>
           <motion.div
@@ -716,18 +677,8 @@ const MessageItem = React.memo(({
   );
 });
 
-// ── Режимы ответа ──────────────────────────────────────────────────────────────
-// Канонический список ключей — в config.ANSWER_MODES (backend).
-// Метки и иконки — UI-уровень, живут здесь.
-// При добавлении нового режима в config.SYSTEM_PROMPT_RULES нужно
-// добавить запись и сюда, иначе в дропдауне он не появится.
-//
-// Логические группы (отображаются в дропдауне в этом порядке):
-//   1) По длине:        concise → moderate → detailed
-//   2) По формату:      summary → step_by_step → checklist
-//   3) По аудитории:    expert → eli5
+// Режимы ответа — ключи и метки. Синхронизировано с config.ANSWER_MODES на бэкенде.
 const ANSWER_MODE_OPTIONS = [
-  // ── Длина ответа ──
   {
     key: 'concise',
     label: 'Кратко + пояснение',
@@ -749,7 +700,6 @@ const ANSWER_MODE_OPTIONS = [
     Icon: FileText,
     accent: 'text-blue-400',
   },
-  // ── Формат вывода ──
   {
     key: 'summary',
     label: 'TL;DR — 1-3 предложения',
@@ -771,7 +721,6 @@ const ANSWER_MODE_OPTIONS = [
     Icon: ListChecks,
     accent: 'text-rose-400',
   },
-  // ── Аудитория ──
   {
     key: 'expert',
     label: 'Экспертный',
@@ -791,12 +740,9 @@ const ANSWER_MODE_OPTIONS = [
 const ANSWER_MODE_KEYS = ANSWER_MODE_OPTIONS.map(o => o.key);
 const ANSWER_MODE_DEFAULT = ANSWER_MODE_KEYS[0];
 
-// Валидирует значение из localStorage: при обновлении приложения старые
-// режимы (или мусор) не должны ломать UI — fallback на дефолт.
 const normalizeAnswerMode = (raw) =>
   ANSWER_MODE_KEYS.includes(raw) ? raw : ANSWER_MODE_DEFAULT;
 
-// ── Дропдаун режима ответа ─────────────────────────────────────────────────────
 function AnswerModeSelect({ value, onChange }) {
   const [open, setOpen] = useState(false);
   const [menuPos, setMenuPos] = useState({ top: 0, left: 0, width: 0 });
@@ -806,7 +752,6 @@ function AnswerModeSelect({ value, onChange }) {
   const current = ANSWER_MODE_OPTIONS.find(o => o.key === value) || ANSWER_MODE_OPTIONS[0];
   const CurrentIcon = current.Icon;
 
-  // Закрытие по клику снаружи и по Escape
   useEffect(() => {
     if (!open) return;
     const onDocClick = (e) => {
@@ -823,14 +768,11 @@ function AnswerModeSelect({ value, onChange }) {
     };
   }, [open]);
 
-  // Пересчёт координат меню при открытии и при ресайзе/скролле
   useEffect(() => {
     if (!open) return;
     const recalc = () => {
       const r = triggerRef.current?.getBoundingClientRect();
       if (!r) return;
-      // Меню рендерится в портале, position: fixed, координаты viewport.
-      // Привязка по левому краю триггера, отступ 4px сверху.
       setMenuPos({ top: r.bottom + 4, left: r.left, width: r.width });
     };
     recalc();
@@ -944,33 +886,21 @@ export default function ChatArea({ notebook, selectedSources, onOpenSource, llmS
   const [isTuningOpen, setIsTuningOpen] = useState(false);
   const [contextStrategy, setContextStrategy] = useState(() => localStorage.getItem('chat_context_strategy') || 'sliding');
   const [thinkingMode, setThinkingMode] = useState(() => localStorage.getItem('chat_thinking_mode') === 'true');
-  const [thinkingBudget, setThinkingBudget] = useState(() => parseInt(localStorage.getItem('chat_thinking_budget')) || 1024); // -1 = no limit
-  // Режим ответа: см. ANSWER_MODE_OPTIONS. Ключ — произвольная строка,
-  // backend выбирает правила из config.SYSTEM_PROMPT_RULES; неизвестный
-  // ключ → ANSWER_MODE_DEFAULT на стороне сервера.
+  const [thinkingBudget, setThinkingBudget] = useState(() => parseInt(localStorage.getItem('chat_thinking_budget')) || 1024);
   const [answerMode, setAnswerMode] = useState(() => normalizeAnswerMode(localStorage.getItem('chat_answer_mode')));
   const [hoveredSource, setHoveredSource] = useState(null);
   const [tooltipCoords, setTooltipCoords] = useState({ x: 0, y: 0 });
   const [abortController, setAbortController] = useState(null);
   const [selectedImage, setSelectedImage] = useState(null);
   const [imagePreview, setImagePreview] = useState(null);
-  // F-fix #30: streaming state. Используем closure-vars (fullContent/
-  // thinkingContent) + rAF throttle. rAF-callback читает closure-vars
-  // напрямую при срабатывании — нет race между "новый чанк пришёл" и
-  // "rAF сработал" (что ломало pc || next[idx].content в предыдущей
-  // версии с промежуточным ref). Per-chunk накопление в closure,
-  // setState раз в ~16мс (60fps). Финальный flushNow() после стрима.
+
+  // Стриминг через rAF-throttle: накопление в closure, setState раз в ~16мс вместо каждого чанка
   const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = useRef(null);
   const tooltipTimeoutRef = useRef(null);
   const messagesScrollRef = useRef(null);
   const textareaRef = useRef(null);
 
-  // F-fix #virt-list: виртуализация списка сообщений.
-  // estimateSize — приблизительная высота одного сообщения (адаптивная
-  // оценка, реальная измеряется автоматически при ресайзе/стриме).
-  // overscan — сколько элементов рендерить за пределами viewport'а,
-  // чтобы скролл был плавным. 8 — комфортно для чата с длинными AI-ответами.
   const rowVirtualizer = useVirtualizer({
     count: messages.length,
     getScrollElement: () => messagesScrollRef.current,
@@ -978,32 +908,22 @@ export default function ChatArea({ notebook, selectedSources, onOpenSource, llmS
     overscan: 8,
   });
 
-  // F-fix #virt-scroll: при добавлении нового сообщения автоматически
-  // прокручиваем к последнему элементу. Без этого пользователь не увидит
-  // ответ AI, если стрим шёл во время скролла вверх.
   const prevMessagesLength = React.useRef(messages.length);
   React.useEffect(() => {
     if (messages.length > prevMessagesLength.current) {
-      // Новое сообщение — скроллим вниз (используем виртуализатор
-      // scrollToIndex вместо scrollIntoView — он знает правильный offset).
       rowVirtualizer.scrollToIndex(messages.length - 1, { align: 'end' });
     }
     prevMessagesLength.current = messages.length;
   }, [messages.length, rowVirtualizer]);
 
-  // Коллбэк: MessageItem сообщает, что Q&A сохранён — помечаем сообщение
   const markMessageSaved = React.useCallback((msgIndex, ts) => {
     setMessages(prev => prev.map((m, i) => i === msgIndex ? { ...m, _savedAt: ts } : m));
   }, []);
 
-  // F-fix #virt-list: оцениваем высоту сообщения динамически.
-  // Короткий user-вопрос ~60px, AI-ответ с markdown и кодом 200-1000px.
-  // useVirtualizer кеширует измерения и обновляет при изменении контента.
   const measureElement = React.useCallback((el) => {
     if (el) rowVirtualizer.measureElement(el);
   }, [rowVirtualizer]);
 
-  // Слушаем событие «заполни input» от закладки (Sidebar.askAgain)
   React.useEffect(() => {
     const onFill = (e) => {
       const text = e.detail?.text || '';
@@ -1013,7 +933,6 @@ export default function ChatArea({ notebook, selectedSources, onOpenSource, llmS
     return () => window.removeEventListener('chat:fill-input', onFill);
   }, []);
 
-  // Сохранение настроек при изменении
   useEffect(() => {
     localStorage.setItem('chat_max_tokens', maxTokens.toString());
     localStorage.setItem('chat_thinking_mode', thinkingMode.toString());
@@ -1030,9 +949,6 @@ export default function ChatArea({ notebook, selectedSources, onOpenSource, llmS
   }, [input]);
 
   const scrollToBottom = () => {
-    // F-fix #virt-list: используем rowVirtualizer.scrollToIndex вместо
-    // messagesEndRef.scrollIntoView, потому что в виртуализированном списке
-    // нет физического 'end' элемента — все сообщения позиционированы через transform.
     if (messages.length > 0) {
       rowVirtualizer.scrollToIndex(messages.length - 1, { align: 'end', behavior: 'smooth' });
     }
@@ -1040,16 +956,9 @@ export default function ChatArea({ notebook, selectedSources, onOpenSource, llmS
 
   useEffect(scrollToBottom, [messages, rowVirtualizer]);
 
-  // F-fix #28: cleanup для активного streaming fetch при unmount ChatArea.
-  // Без этого при смене блокнота / закрытии вкладки fetch() продолжает
-  // работать, setState вызывает "Can't perform a React state update on an
-  // unmounted component" warning (в React 18 — silenced, но всё равно баг).
-  // Используем setState-обновление через callback ref, чтобы не
-  // зависеть от stale state в cleanup.
   const abortControllerRef = useRef(null);
   useEffect(() => {
     return () => {
-      // abort() на latest controller (не на stale state)
       if (abortControllerRef.current) {
         try { abortControllerRef.current.abort(); } catch { /* ignore */ }
         abortControllerRef.current = null;
@@ -1057,7 +966,6 @@ export default function ChatArea({ notebook, selectedSources, onOpenSource, llmS
     };
   }, []);
 
-  // Подписка на статус LLM (для блокировки Send пока грузится модель)
   const [llmStatus, setLlmStatus] = useState({ state: 'ready', phase: null, model: null, error: null });
   const [contextUsage, setContextUsage] = useState(null);
   const contextIntervalRef = useRef(null);
@@ -1081,7 +989,6 @@ export default function ChatArea({ notebook, selectedSources, onOpenSource, llmS
     };
   }, []);
 
-  // ── Context Usage Indicator ──
   const calcContextUsage = React.useCallback(() => {
     const ctxSize = llmSettings.use_gguf === 'true'
       ? parseInt(llmSettings.gguf_ctx_size) || 32768
@@ -1158,7 +1065,7 @@ export default function ChatArea({ notebook, selectedSources, onOpenSource, llmS
 
   const handleSend = async () => {
     if (!input.trim() && !selectedImage || isLoading) return;
-    if (llmStatus.state === 'loading') return;  // блокируем Send пока грузится модель
+    if (llmStatus.state === 'loading') return;
     if (selectedSources.length === 0) {
       alert('Выберите хотя бы один источник в боковой панели!');
       return;
@@ -1182,7 +1089,6 @@ export default function ChatArea({ notebook, selectedSources, onOpenSource, llmS
       thinkingContent: '',
       thinkingDone: false,
       loading: true,
-      // Снимок настроек на момент вопроса — для закладки
       _meta: {
         model: llmSettings?.gguf_model_path || llmSettings?.llm_model || '',
         answer_mode: answerMode,
@@ -1218,13 +1124,8 @@ export default function ChatArea({ notebook, selectedSources, onOpenSource, llmS
       const decoder = new TextDecoder();
       let fullContent = '';
       let thinkingContent = '';
-      let buffer = ''; // Буфер для склейки разорванных строк
+      let buffer = '';
 
-      // F-fix #30: rAF-throttled streaming. Closure-переменные fullContent/
-      // thinkingContent — единственный источник истины. rAF-callback читает
-      // их напрямую при срабатывании (НЕ через промежуточный ref/state), что
-      // устраняет race с pc || next[idx].content из предыдущей версии.
-      // Скорость: ~60 setMessages/сек вместо ~100/сек от plain setState.
       let rafId = null;
       let lastRenderedContent = '';
       let lastRenderedThinking = '';
@@ -1257,7 +1158,6 @@ export default function ChatArea({ notebook, selectedSources, onOpenSource, llmS
         buffer += decoder.decode(value, { stream: true });
         const lines = buffer.split('\n');
 
-        // Оставляем последний (возможно неполный) кусок в буфере
         buffer = lines.pop() || '';
 
         for (const line of lines) {
@@ -1306,8 +1206,6 @@ export default function ChatArea({ notebook, selectedSources, onOpenSource, llmS
           }
         }
       }
-      // Финальный flush: гарантирует, что последние символы
-      // (которые могли прийти после последнего rAF) отображены.
       flushNow();
     } catch (err) {
       if (err.name === 'AbortError') {
@@ -1365,7 +1263,6 @@ export default function ChatArea({ notebook, selectedSources, onOpenSource, llmS
         )}
       </AnimatePresence>
 
-      {/* Шапка */}
       <div className="flex items-center justify-center gap-3 p-4 border-b bg-background/80 backdrop-blur-md sticky top-0 z-10 flex-wrap">
         <div className="flex items-center gap-2 flex-wrap justify-end">
           <div className="flex items-center gap-3 bg-muted/30 p-1.5 rounded-xl border border-white/5 px-2">
@@ -1445,7 +1342,6 @@ export default function ChatArea({ notebook, selectedSources, onOpenSource, llmS
           >
             <div className="p-5 flex flex-col gap-5">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-                {/* 1. Response length slider */}
                 <SleekSlider
                   label="Максимальная длина ответа"
                   value={maxTokens}
@@ -1468,7 +1364,6 @@ export default function ChatArea({ notebook, selectedSources, onOpenSource, llmS
                   ]}
                 />
 
-                {/* 2. Thinking budget slider */}
                 <SleekSlider
                   label="Бюджет рассуждений"
                   value={thinkingBudget === -1 ? 32000 : thinkingBudget}
@@ -1504,7 +1399,6 @@ export default function ChatArea({ notebook, selectedSources, onOpenSource, llmS
                   ]}
                 />
 
-                {/* 3. Overflow strategy selector */}
                 <div className="flex flex-col gap-2.5 p-4 rounded-xl border border-white/5 bg-white/[0.01] hover:bg-white/[0.03] transition-all duration-300 md:col-span-2">
                   <div className="flex items-center gap-2">
                     <SlidersHorizontal className="text-primary" size={14} />
@@ -1557,7 +1451,6 @@ export default function ChatArea({ notebook, selectedSources, onOpenSource, llmS
         )}
       </AnimatePresence>
 
-      {/* Область сообщений (F-fix #virt-list: виртуализирована) */}
       <div
         ref={messagesScrollRef}
         className="flex-1 overflow-y-auto p-6"
@@ -1584,7 +1477,7 @@ export default function ChatArea({ notebook, selectedSources, onOpenSource, llmS
                   left: 0,
                   width: '100%',
                   transform: `translateY(${virtualRow.start}px)`,
-                  paddingBottom: '2rem', // заменяет space-y-8 между сообщениями
+                  paddingBottom: '2rem',
                 }}
               >
                 <MessageItem
@@ -1605,7 +1498,6 @@ export default function ChatArea({ notebook, selectedSources, onOpenSource, llmS
         </div>
       </div>
 
-      {/* Статистика + Контекст */}
       <div className="px-6">
         <div className="flex items-center justify-between gap-4 flex-wrap mb-3">
           <div className="flex items-center gap-3 flex-wrap">
@@ -1648,7 +1540,6 @@ export default function ChatArea({ notebook, selectedSources, onOpenSource, llmS
         </div>
       </div>
 
-      {/* Область ввода */}
       <div className="px-6 pb-6">
         {imagePreview && (
           <motion.div
@@ -1730,7 +1621,6 @@ export default function ChatArea({ notebook, selectedSources, onOpenSource, llmS
 
 
       </div>
-      {/* Модальное окно настроек (lazy: грузится только при первом открытии) */}
       <Suspense fallback={null}>
         {isSettingsOpen && (
           <SettingsModal
@@ -1739,10 +1629,7 @@ export default function ChatArea({ notebook, selectedSources, onOpenSource, llmS
             settings={llmSettings}
             onSave={(newSettings) => {
               setLlmSettings(newSettings);
-              // F-fix #27: API-ключ выносим в sessionStorage (живёт только в текущей вкладке).
-              // В localStorage — всё остальное (модели, температуры, URL).
-              // При компрометации скрипта через XSS злоумышленник получит доступ
-              // к localStorage, но НЕ к ключу (если вкладка закрыта — ключа уже нет).
+              // API-ключ хранится в sessionStorage (только текущая вкладка) — защита от XSS через localStorage
               const { llm_api_key, ...rest } = newSettings;
               try { sessionStorage.setItem('llm_api_key', llm_api_key || ''); } catch (e) { /* sessionStorage disabled */ }
               localStorage.setItem('llm_settings', JSON.stringify(rest));
@@ -1751,7 +1638,6 @@ export default function ChatArea({ notebook, selectedSources, onOpenSource, llmS
         )}
       </Suspense>
 
-      {/* Глобальный портал для тултипов — единый компонент, общий с модалом закладки */}
       <CitationTooltipPortal
         hoveredSource={hoveredSource && tooltipCoords.x ? { src: hoveredSource, ...tooltipCoords } : null}
         onClose={() => setHoveredSource(null)}

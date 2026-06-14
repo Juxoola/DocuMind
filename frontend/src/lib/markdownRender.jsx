@@ -3,20 +3,16 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
-// import rehypeRaw from 'rehype-raw'; // XSS fix: rehype-raw позволял LLM-выводу выполнять произвольный HTML
 import { CitationButton, CitationTooltipPortal } from './CitationTooltip';
 
-/**
- * Превращает [N] в исходном тексте в ссылки [N](#cite:N),
- * которые потом ловит кастомный рендер a в ReactMarkdown.
- * Защищает LaTeX и блоки кода от подмены.
- */
+// Рендер markdown-сообщений LLM: [N] → кликабельные цитаты, LaTeX, блоки кода
+
 export function preProcessMessage(text) {
   if (!text) return '';
 
   let processed = text
-    .replace(/\\\[([\s\S]*?)\\\]/g, '$$$$$1$$$$')
-    .replace(/\\\(([\s\S]*?)\\\)/g, '$$$1$$');
+    .replace(/\\\[[\s\S]*?\\\]/g, '$$$$$1$$$$')
+    .replace(/\\\([\s\S]*?\\\)/g, '$$$1$$');
 
   const parts = processed.split(/(```[\s\S]*?```)/g);
 
@@ -40,23 +36,8 @@ export function preProcessMessage(text) {
   return finalParts.join('');
 }
 
-/**
- * Рендер markdown-сообщения LLM.
- *
- * - Полный markdown: заголовки, списки, **bold**, *italic*, `code`, ```блоки```, $формулы$
- * - [N] — кликабельные бейджи CitationButton (общий с чатом)
- * - Единый hover-тултип CitationTooltipPortal (идентичен чату)
- *
- * Props:
- *   text       — исходный текст
- *   sources    — [{file_name, page, time, snippet|text}]
- *   onCite     — (n, source) => void  (вызывается при клике)
- *   className  — доп. классы
- */
 export function LlmMarkdown({ text, sources = [], onCite, className = '' }) {
-  // Локальное состояние тултипа — изолировано внутри компонента,
-  // чтобы модал закладки и чат не дрались за один глобальный стейт.
-  const [hovered, setHovered] = useState(null); // { src, x, y }
+  const [hovered, setHovered] = useState(null);
   const timeoutRef = useRef(null);
 
   const cancelClose = () => {
@@ -70,7 +51,6 @@ export function LlmMarkdown({ text, sources = [], onCite, className = '' }) {
     timeoutRef.current = setTimeout(() => setHovered(null), 120);
   };
 
-  // Закрытие по Escape
   useEffect(() => {
     if (!hovered) return;
     const onKey = (e) => { if (e.key === 'Escape') setHovered(null); };

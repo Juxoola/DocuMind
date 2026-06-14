@@ -18,8 +18,7 @@ export default function MainApp({ notebook, onExit }) {
     const saved = localStorage.getItem('chat_max_width');
     return saved ? parseInt(saved) : 1400;
   });
-  // F-fix #29: для viewer-resizer нужны snapshot-значения (startX/startWidth),
-  // поэтому хук useDragWidth не подходит. Делаем cleanup вручную через ref.
+  // Ручной cleanup ref для drag-ресайзеров — при unmount во время drag снимает listeners с document
   const viewerDragCleanupRef = useRef(null);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [uploadState, setUploadState] = useState({
@@ -32,8 +31,7 @@ export default function MainApp({ notebook, onExit }) {
   });
   const [llmSettings, setLlmSettings] = useState(() => {
 		const saved = localStorage.getItem('llm_settings');
-		// F-fix #27: API-ключ читаем из sessionStorage (а не localStorage).
-		// Если ключа нет (новая вкладка / после закрытия) — fallback 'lm-studio'.
+		// API-ключ из sessionStorage: живёт только в текущей вкладке
 		let apiKey = 'lm-studio';
 		try { apiKey = sessionStorage.getItem('llm_api_key') || apiKey; } catch {}
 		return saved ? { ...JSON.parse(saved), llm_api_key: apiKey } : {
@@ -157,7 +155,7 @@ export default function MainApp({ notebook, onExit }) {
           console.error("[UPLOAD] Error refreshing sources:", e);
         }
 
-        // Небольшая пауза перед следующим файлом для стабильности
+        // Пауза 500мс перед следующим файлом для стабильности ingestion-пайплайна
         await new Promise(r => setTimeout(r, 500));
       } catch (err) {
         console.error(`[UPLOAD] Error uploading ${file.name}:`, err);
@@ -168,7 +166,7 @@ export default function MainApp({ notebook, onExit }) {
   };
 
   useEffect(() => {
-    // F-fix #29: при unmount снять viewer-resizer listeners если drag в процессе
+
     return () => {
       if (viewerDragCleanupRef.current) {
         try { viewerDragCleanupRef.current(); } catch { /* ignore */ }
@@ -227,11 +225,11 @@ export default function MainApp({ notebook, onExit }) {
       const data = await res.json();
       const files = data.files || [];
       setSources(files);
-      // Сохраняем выбор пользователя: автоматически выбираем только НОВЫЕ файлы, не сбрасывая текущий выбор
+      // Сохраняем выбор: новые файлы добавляются автоматически, удалённые убираются из выделения
       setSelectedSources(prev => {
-        if (prev.length === 0) return files; // Первая загрузка — выбираем все
+        if (prev.length === 0) return files;
         const newFiles = files.filter(f => !prev.includes(f) && !sources.includes(f));
-        const kept = prev.filter(f => files.includes(f)); // Убираем удалённые файлы из выбора
+        const kept = prev.filter(f => files.includes(f));
         return [...kept, ...newFiles];
       });
     } catch (err) {
@@ -287,7 +285,7 @@ export default function MainApp({ notebook, onExit }) {
 
   return (
     <div className="flex h-screen w-full overflow-hidden bg-background relative">
-      {/* Боковая панель с фиксированным позиционированием */}
+
       <AnimatePresence initial={false}>
         {isSidebarOpen && (
           <motion.div
@@ -313,7 +311,7 @@ export default function MainApp({ notebook, onExit }) {
               onUpload={handleUpload}
             />
 
-            {/* Ресайзер боковой панели (F-fix #29: см. useDragWidth cleanup) */}
+
             <div
               className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize z-50 group/s-resizer hover:bg-primary/30 transition-colors"
               onMouseDown={onSidebarMouseDown}
@@ -322,7 +320,7 @@ export default function MainApp({ notebook, onExit }) {
         )}
       </AnimatePresence>
 
-      {/* Кнопка переключения скрытой панели */}
+
       {!isSidebarOpen && (
         <motion.button 
           initial={{ opacity: 0, x: -20 }}
@@ -334,7 +332,7 @@ export default function MainApp({ notebook, onExit }) {
         </motion.button>
       )}
 
-      {/* Основная зона чата */}
+
       <main
         ref={mainRef}
         className="flex-1 flex flex-col min-w-0 bg-background relative z-0"
@@ -343,7 +341,7 @@ export default function MainApp({ notebook, onExit }) {
           className="flex-1 flex flex-col mx-auto w-full relative"
           style={{ maxWidth: chatRenderWidth }}
         >
-          {/* Ресайзер на правом краю чата */}
+
           <div
             className="absolute right-0 top-0 bottom-0 w-4 cursor-col-resize z-[99] group/c-resizer flex items-center justify-center"
             onMouseDown={(e) => {
@@ -380,7 +378,7 @@ export default function MainApp({ notebook, onExit }) {
         </div>
       </main>
 
-      {/* Оверлей просмотра документа */}
+
       <AnimatePresence>
         {isViewerOpen && (
           <>
@@ -399,10 +397,10 @@ export default function MainApp({ notebook, onExit }) {
               style={{ width: viewerWidth }}
               className="fixed right-0 top-0 bottom-0 glass z-50 border-l flex flex-col shadow-2xl"
             >
-              {/* Глобальный невидимый оверлей при ресайзе */}
+
               {isResizing && <div className="fixed inset-0 z-[100] cursor-col-resize" />}
 
-              {/* Ресайзер просмотрщика */}
+
               <div
                 className="absolute left-0 top-0 bottom-0 w-4 -left-2 cursor-col-resize z-[60] group/resizer"
                 onMouseDown={(e) => {
@@ -422,7 +420,7 @@ export default function MainApp({ notebook, onExit }) {
                     document.removeEventListener('mouseup', onMouseUp);
                     viewerDragCleanupRef.current = null;
                   };
-                  // F-fix #29: сохраняем cleanup для unmount-safety
+
                   viewerDragCleanupRef.current = onMouseUp;
                   document.addEventListener('mousemove', onMouseMove);
                   document.addEventListener('mouseup', onMouseUp);
@@ -443,7 +441,7 @@ export default function MainApp({ notebook, onExit }) {
         )}
       </AnimatePresence>
 
-      {/* Глобальная плавающая карточка загрузки */}
+
       <AnimatePresence>
         {uploadState.isUploading && (
           <motion.div
@@ -452,7 +450,7 @@ export default function MainApp({ notebook, onExit }) {
             exit={{ opacity: 0, y: 50, scale: 0.9 }}
             className="fixed bottom-6 right-6 z-[1000] w-72 glass border border-primary/20 rounded-3xl p-5 shadow-[0_20px_50px_rgba(0,0,0,0.3)] overflow-hidden"
           >
-            {/* Фоновое свечение */}
+
             <div className="absolute -top-10 -right-10 w-24 h-24 bg-primary/20 blur-[40px] rounded-full pointer-events-none" />
             
             <div className="relative z-10">
@@ -475,7 +473,7 @@ export default function MainApp({ notebook, onExit }) {
                 </div>
               </div>
 
-              {/* Полосы прогресса */}
+
               <div className="space-y-4">
                 <div>
                   <div className="flex justify-between items-center mb-1.5">
