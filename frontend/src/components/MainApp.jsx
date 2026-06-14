@@ -247,8 +247,6 @@ export default function MainApp({ notebook, onExit }) {
   const sidebarDragCleanupRef = useRef(null);
   const chatResizeCleanupRef = useRef(null);
 
-  const sidebarMax = window.innerWidth - chatRenderWidth;
-
   const onSidebarMouseDown = (e) => {
     e.preventDefault();
     const startX = e.clientX;
@@ -275,6 +273,8 @@ export default function MainApp({ notebook, onExit }) {
 
   const chatAvailWidth = window.innerWidth - (isSidebarOpen ? sidebarWidth : 0);
   const chatRenderWidth = Math.max(755, Math.min(chatMaxWidth, chatAvailWidth));
+
+  const sidebarMax = window.innerWidth - chatRenderWidth;
 
   const handleExit = () => {
     setIsViewerOpen(false);
