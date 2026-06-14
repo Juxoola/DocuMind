@@ -1,8 +1,4 @@
 """Общие состояние и утилиты для роутеров."""
-#
-# Файл: shared.py — глобальные объекты (HTTP-сессия, флаги отмены, фоновые задачи)
-# и утилиты для безопасной работы с файловой системой (удаление, имена).
-#
 
 import asyncio
 import ctypes
@@ -24,7 +20,6 @@ import config
 logger = logging.getLogger(__name__)
 
 
-# Фабрика HTTP-сессии с настраиваемым пулом соединений.
 def make_http_session(pool_size: int = 10) -> requests.Session:
     s = requests.Session()
     adapter = requests.adapters.HTTPAdapter(pool_connections=pool_size, pool_maxsize=pool_size)
@@ -36,13 +31,11 @@ def make_http_session(pool_size: int = 10) -> requests.Session:
 # HTTP-сессия с пулом соединений — используется всеми роутерами для внешних API-вызовов (LLM, эмбеддинги).
 _http_session = make_http_session(config.HTTP_POOL_SIZE_MAIN)
 
-# Глобальное состояние: статус ингеста, флаги отмены, реестр фоновых asyncio-задач.
 ingestion_status: dict = {}
 upload_cancel_flags: dict = {}
 _background_tasks: "set[asyncio.Task]" = set()
 
 
-# Валидатор имени файла — защита от path traversal и недопустимых символов Windows.
 def safe_filename(filename: str) -> str:
     from fastapi import HTTPException
 
@@ -79,7 +72,6 @@ def _schedule_delete_on_reboot(path: str) -> None:
         raise OSError(f"MoveFileExW failed, WinError={err}: {ctypes.FormatError(err)}")
 
 
-# Многоуровневое удаление: chmod + retry, gc, cmd.exe rmdir, отложенное удаление через перезагрузку.
 def robust_rmtree(path: str, max_retries: int = 3, delay: float = 0.5) -> tuple:
     if not os.path.exists(path):
         return True, None
@@ -157,7 +149,6 @@ def robust_rmtree(path: str, max_retries: int = 3, delay: float = 0.5) -> tuple:
         return False, err_msg
 
 
-# Безопасное извлечение текста из ответа LLM API — защита от KeyError при ошибках сервера.
 def safe_extract_llm_response(data: dict) -> str | None:
     try:
         return data["choices"][0]["message"]["content"]

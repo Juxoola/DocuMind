@@ -1,9 +1,5 @@
 """Глобальное состояние GGUF-подсистемы."""
 
-# Файл: state.py — глобальные контейнеры состояния GGUF-процессов,
-# кеш-файла сканирования и Win32 Job Object для управления процессами.
-# Все разделяемые структуры защищены threading.Lock.
-
 import ctypes
 import logging
 import os
@@ -22,8 +18,6 @@ _server_configs: dict[str, dict] = {}
 _server_roles: dict[str, str] = {}
 _lock = threading.Lock()
 
-# Состояние загрузки LLM: отслеживает фазу (idle/loading/ready/error),
-# URL порта, время старта и готовности, ошибки.
 _llm_load_state: dict = {
     "state": "idle",
     "model": None,
@@ -37,8 +31,7 @@ _llm_load_state: dict = {
 }
 
 _win32_job = None
-# Win32 Job Object: привязывает дочерние процессы llama-server к job-объекту,
-# чтобы при аварийном завершении родителя ОС гарантированно убила все серверы.
+# Win32 Job Object: привязывает llama-server к job, чтобы ОС убила при аварии родителя
 if os.name == "nt":
     try:
         _win32_job = ctypes.windll.kernel32.CreateJobObjectW(None, None)
@@ -62,8 +55,7 @@ def _assign_to_job(process):
             logger.debug(f"AssignProcessToJobObject failed (non-critical): {e}")
 
 
-# Маппер типов KV-кеша: числовые коды llama.cpp → строковые флаги
-# для --cache-type-k / --cache-type-v.
+# Маппер KV-кеша: числовые коды llama.cpp → строковые флаги
 CACHE_TYPE_MAP = {
     0: "f16",
     1: "f32",
@@ -74,8 +66,6 @@ CACHE_TYPE_MAP = {
     8: "q8_0",
 }
 
-# Файл и TTL для кеша результатов сканирования GGUF-директорий.
-# Позволяет не ходить по файловой системе при каждом запросе списка моделей.
 _GGUF_CACHE_FILE = os.path.join(config.BASE_DIR, "_gguf_scan_cache.json")
 _GGUF_CACHE_TTL_SEC = 300.0
 _gguf_cache_lock = threading.Lock()

@@ -1,10 +1,7 @@
 """
 Роутер: загрузка, удаление файлов, метаданные.
 """
-#
-# Файл: files.py — эндпоинты для загрузки, удаления и просмотра файлов,
-# а также для получения статуса ингеста и метаданных видео.
-#
+# Роутер загрузки/удаления файлов с SSE-стримингом прогресса ingestion-пайплайна
 
 import asyncio
 import gc
@@ -33,7 +30,6 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["files"])
 
 
-# Список файлов в блокноте — сканирует директорию data/, исключая JSON-файлы метаданных.
 @router.get("/api/files")
 async def get_files(notebook_id: str):
     paths = config.get_notebook_paths(notebook_id)
@@ -44,8 +40,6 @@ async def get_files(notebook_id: str):
     return {"files": files_list}
 
 
-# Загрузка файла: валидация расширения, сохранение на диск, запуск ингеста,
-# затем SSE-стриминг прогресса (очередь Queue -> event_generator).
 @router.post("/api/upload")
 async def upload_file(
     file: UploadFile = File(...),
@@ -288,7 +282,6 @@ async def upload_file(
     _background_tasks.add(_task)
     _task.add_done_callback(_background_tasks.discard)
 
-    # SSE-генератор событий: читает из Queue и отправляет клиенту прогресс/ошибку/завершение.
     async def event_generator():
         loop = asyncio.get_running_loop()
         while True:
@@ -302,7 +295,6 @@ async def upload_file(
 
 @router.post("/api/upload/cancel")
 async def cancel_upload(notebook_id: str = Query(...), task_id: str = Query(None)):
-    # Отмена загрузки: убивает subprocess-ы блокнота и выставляет Event-флаг отмены.
     try:
         from src.ingestion import kill_subprocesses
 
@@ -326,7 +318,6 @@ async def cancel_upload(notebook_id: str = Query(...), task_id: str = Query(None
 
 @router.delete("/api/files/{filename}")
 async def delete_file(filename: str, notebook_id: str):
-    # Удаление файла: закрывает видеопоток, повторные попытки удаления, очистка векторов и закладок.
     import cv2
 
     filename = safe_filename(filename)
@@ -387,7 +378,6 @@ async def get_source_content(filename: str, notebook_id: str):
 
 @router.get("/api/video_metadata")
 async def get_video_metadata(filename: str, notebook_id: str):
-    # Читает JSON-файл метаданных видео (сцены, субтитры, OCR), сгенерированный при ингесте.
     filename = safe_filename(filename)
     paths = config.get_notebook_paths(notebook_id)
     json_path = os.path.join(paths["data"], f"{filename}.json")
@@ -406,7 +396,6 @@ async def get_video_metadata(filename: str, notebook_id: str):
 
 @router.delete("/api/clear")
 async def clear_notebook(notebook_id: str):
-    # Полная очистка блокнота: закрывает все клиенты ChromaDB, удаляет data/chroma_db/images.
     from src.rag_pipeline import close_all_clients as _close_all
 
     def _clear_data():
@@ -424,5 +413,4 @@ async def clear_notebook(notebook_id: str):
 
 @router.get("/api/ingestion_status")
 async def get_ingestion_status(notebook_id: str):
-    # Возвращает текущий статус загрузки/ингеста для панели прогресса на фронтенде.
     return ingestion_status.get(notebook_id, {"is_uploading": False})

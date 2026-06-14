@@ -3,9 +3,7 @@
 Вынесено из gguf_manager.py при рефакторинге.
 """
 
-# Файл: scanner.py — рекурсивный поиск .gguf и .mmproj файлов в
-# директориях из config.GGUF_SEARCH_DIRS. Результаты кешируются
-# в JSON с проверкой по TTL и mtime корневых папок.
+# Рекурсивный обход GGUF_SEARCH_DIRS: os.walk ищет .gguf/.mmproj, кеш в JSON с TTL=300с и проверкой mtime
 
 import json
 import logging
@@ -29,9 +27,6 @@ def _dir_mtime(root: str) -> float:
 
 def _scan_gguf_dirs_uncached() -> list[dict]:
 
-    # Реальный обход файловой системы: для каждой корневой директории
-    # из конфига os.walk ищет .gguf файлы, разделяя модели (.gguf)
-    # и проекционные файлы (.mmproj.gguf).
     results = []
     search_dirs = [d.strip() for d in config.GGUF_SEARCH_DIRS.split(";") if d.strip()]
 
@@ -69,9 +64,6 @@ def _scan_gguf_dirs_uncached() -> list[dict]:
 
 def scan_gguf_dirs() -> list[dict]:
 
-    # Сначала пытаемся загрузить закешированный результат.
-    # Если кеш свежий (TTL < 300 с) и mtime корней не изменились —
-    # возвращаем сохранённые данные, иначе делаем реальный обход.
     with _gguf_cache_lock:
         cached = None
         try:
@@ -103,8 +95,6 @@ def scan_gguf_dirs() -> list[dict]:
                 "dir_mtimes": {r: _dir_mtime(r) for r in roots},
                 "results": results,
             }
-            # Атомарная запись: сначала .tmp, затем os.replace —
-            # чтобы не повредить кеш при сбое в середине записи.
             tmp = _GGUF_CACHE_FILE + ".tmp"
             with open(tmp, "w", encoding="utf-8") as f:
                 json.dump(payload, f, ensure_ascii=False)

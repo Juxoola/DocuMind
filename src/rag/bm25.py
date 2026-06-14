@@ -1,11 +1,6 @@
 """BM25 lifecycle: сборка, debounce, отмена, проверка готовности."""
 
-# Фоновая пересборка BM25-индекса с debounce-защитой:
-# при каждом новом документе таймер сбрасывается, полная сборка
-# запускается через _BM25_DEBOUNCE_SEC секунд бездействия.
-# Инкрементальный режим: новые узлы аккумулируются в _bm25_pending_nodes,
-# при срабатывании таймера объединяются с кешем из _bm25_node_cache.
-# ChromaDB читается только при первом (холодном) старте.
+# Инкрементальная пересборка BM25: debounce 30с, новые узлы аккумулируются в pending, ChromaDB только при cold start
 
 import logging
 import os
@@ -38,14 +33,12 @@ def _rebuild_bm25_bg(notebook_id: str, db_path: str, new_nodes: list = None):
         old_nodes = _bm25_node_cache.get(notebook_id, [])
 
         if old_nodes or new_nodes:
-            # Инкрементальная сборка из памяти — без ChromaDB I/O
             full_corpus = old_nodes + new_nodes
             logger.info(
                 f"[RAG] BM25 инкрементальная сборка: "
                 f"{len(old_nodes)} кеш + {len(new_nodes)} новых = {len(full_corpus)} узлов"
             )
         else:
-            # Холодный старт — читаем все записи из ChromaDB
             import chromadb as _chromadb
 
             tmp_client = _chromadb.PersistentClient(path=db_path)
@@ -98,9 +91,6 @@ def _rebuild_bm25_bg(notebook_id: str, db_path: str, new_nodes: list = None):
         logger.warning(f"[RAG] Ошибка фоновой сборки BM25: {e}")
 
 
-# Планирование пересборки BM25 с debounce: отменяет предыдущий
-# таймер для этого notebook и запускает новый на _BM25_DEBOUNCE_SEC секунд.
-# new_nodes — опциональные узлы, которые накопятся и попадут в пересборку.
 def _schedule_bm25_rebuild(notebook_id: str, db_path: str, new_nodes: list = None):
     with _bm25_pending_lock:
         old = _bm25_pending_timers.get(notebook_id)
@@ -151,8 +141,6 @@ def cancel_bm25_rebuild(notebook_id: str):
                 logger.debug(f"[cancel_bm25_rebuild] timer.cancel: {e}")
 
 
-# Принудительный запуск пересборки BM25 сейчас (с отменой debounce).
-# Неоплаченные pending-узлы передаются в сборку.
 def flush_bm25_rebuild(
     notebook_id: str,
     db_path: str = None,
@@ -193,8 +181,6 @@ def flush_bm25_rebuild(
         _bm25_rebuilding.discard(notebook_id)
 
 
-# Проверка: готов ли BM25-индекс для notebook (существует на диске,
-# нет активных таймеров и фоновых пересборок).
 def is_bm25_ready(notebook_id: str) -> bool:
     paths = config.get_notebook_paths(notebook_id)
     bm25_dir = os.path.join(paths["base"], "bm25")

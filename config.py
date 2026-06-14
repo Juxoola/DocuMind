@@ -53,7 +53,6 @@ LLM_DEFAULT_MODEL = os.getenv("LLM_DEFAULT_MODEL", "gpt-4o")
 EMBEDDING_DEFAULT_API_KEY = os.getenv("EMBEDDING_DEFAULT_API_KEY", "lm-studio")
 EMBEDDING_DEFAULT_MODEL = os.getenv("EMBEDDING_DEFAULT_MODEL", "text-embedding-ada-002")
 
-# Настройка лимитов загрузки файлов и список разрешённых расширений.
 UPLOAD_MAX_SIZE_MB = int(os.getenv("UPLOAD_MAX_SIZE_MB", "500"))
 UPLOAD_MAX_SIZE_BYTES = UPLOAD_MAX_SIZE_MB * 1024 * 1024
 
@@ -94,8 +93,6 @@ MIN_FINAL_CHUNKS = int(os.getenv("MIN_FINAL_CHUNKS", "5"))
 RAG_RRF_K = int(os.getenv("RAG_RRF_K", 60))
 RAG_TOP_K_RATIO = float(os.getenv("RAG_TOP_K_RATIO", "0.1"))
 
-# Настройки GGUF-сервера: порт, пути поиска моделей, параметры
-# инференса (контекст, кол-во потоков, GPU-слои).
 GGUF_SEARCH_DIRS = os.getenv("GGUF_SEARCH_DIRS", "F:/llm;" + os.path.join(BASE_DIR, "models"))
 GGUF_SERVER_PORT = int(os.getenv("GGUF_SERVER_PORT", 8081))
 GGUF_SERVER_HOST = os.getenv("GGUF_SERVER_HOST", "127.0.0.1")
@@ -204,8 +201,6 @@ def resolve_model_path(path_or_filename: str) -> str:
     return path_or_filename
 
 
-# RLock для потокобезопасного обновления runtime-настроек.
-# Защищает update_rag_config и другие операции, меняющие глобальные переменные.
 _config_lock = threading.RLock()
 
 

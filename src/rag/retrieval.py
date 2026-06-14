@@ -30,7 +30,6 @@ from src.rag.state import _get_rerank_session, _model_cache
 logger = logging.getLogger(__name__)
 
 
-# Хелпер: создаёт MetadataFilters для фильтрации по именам файлов.
 def _file_filter(file_names: str | list[str]):
     if isinstance(file_names, str):
         file_names = [file_names]
@@ -55,8 +54,7 @@ def _file_filter(file_names: str | list[str]):
     )
 
 
-# Промпт для генерации альтернативных поисковых запросов (Query Expansion).
-# Просит LLM составить несколько коротких, конкретных запросов из терминов задания.
+# Query Expansion: LLM генерирует 3-5 альтернативных запросов для лучшего покрытия
 _QUERY_GEN_PROMPT = (
     "Ты — эксперт по поиску информации. Сформулируй ровно {num_queries} разных коротких поисковых запроса "
     "на том же языке для поиска справочной теории, правил и формул в учебных материалах на основе следующего задания/вопроса.\n"
@@ -68,9 +66,6 @@ _QUERY_GEN_PROMPT = (
 )
 
 
-# Создание LLM-клиента для Query Expansion. Проверяет доступность
-# GGUF-сервера (из src.gguf.server) или падает на LM Studio.
-# Возвращает None, если LLM-сервер недоступен — QE отключается.
 def _get_qe_llm():
     from src.gguf.server import get_active_llm_url
 
@@ -106,8 +101,7 @@ def _get_qe_llm():
     )
 
 
-# Reciprocal Rank Fusion: объединяет результаты векторного и BM25 поиска,
-# присваивая каждому документу вес 1/(k + rank) из каждого списка.
+# Reciprocal Rank Fusion: score = sum(1/(k + rank_i)) из каждого источника. k=60 — стандартный параметр
 def _rrf_fuse(vector_results, bm25_results, k: int = None):
     scores: dict = {}
     nodes_by_id: dict = {}
@@ -127,8 +121,6 @@ def _rrf_fuse(vector_results, bm25_results, k: int = None):
     return [NodeWithScore(node=nodes_by_id[i].node, score=scores[i]) for i in sorted_ids]
 
 
-# RRF для случая нескольких файлов: сначала фузия внутри каждого файла,
-# затем межфайловая фузия объединённых списков.
 def _rrf_fuse_across_files(file_results, k: int = None):
     scores: dict = {}
     nodes_by_id: dict = {}
@@ -144,13 +136,7 @@ def _rrf_fuse_across_files(file_results, k: int = None):
     return [NodeWithScore(node=nodes_by_id[i].node, score=scores[i]) for i in sorted_ids]
 
 
-# Главная точка входа в RAG-поиск. Выполняет:
-# 1. Инициализацию моделей и векторного индекса
-# 2. Загрузку/форсированную сборку BM25
-# 3. Query Expansion (если включён)
-# 4. Гибридный поиск (вектор + BM25) с RRF
-# 5. Реранкинг через GGUF-модель
-# 6. Адаптивную обрезку по скорам
+# Гибридный поиск: векторный (ChromaDB) + BM25 с Reciprocal Rank Fusion, опциональный реранкинг через GGUF
 def retrieve_nodes(query: str, notebook_id: str, allowed_files=None, max_tokens=1024):
     init_settings(max_tokens=max_tokens)
     vector_store = get_vector_store(notebook_id)
@@ -354,12 +340,7 @@ def retrieve_nodes(query: str, notebook_id: str, allowed_files=None, max_tokens=
         logger.info(f"Ошибка унифицированного поиска: {e}")
         all_nodes = []
 
-    # === Реранкинг через GGUF-модель ===
-    # Загружает реранкер, отправляет все найденные чанки на переранжировку,
-    # обновляет node.score ответом сервера.
     if all_nodes and config.USE_RERANKER:
-        # Сохраняем оригинальные RRF scores до реранкинга —
-        # при падении реранкера вернём их вместо эвристики.
         _original_scores = [n.score if hasattr(n, "score") else 0.0 for n in all_nodes]
 
         if len(all_nodes) > config.RAG_RERANK_POOL:
@@ -451,9 +432,7 @@ def retrieve_nodes(query: str, notebook_id: str, allowed_files=None, max_tokens=
         all_nodes.sort(key=lambda x: x.score, reverse=True)
         all_nodes = all_nodes[: config.RAG_FINAL_TOP_N]
 
-        # === Адаптивная фильтрация по скорам ===
-        # Отсекает чанки со скорами значительно ниже медианы (median - 2*MAD),
-        # а затем по top-k ratio от максимального скора.
+        # Адаптивная фильтрация: отсекает чанки ниже median - 2*MAD, затем top-k ratio от максимума
 
         if len(all_nodes) >= 4:
             score_vals = [n.score for n in all_nodes]

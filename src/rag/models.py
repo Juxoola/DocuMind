@@ -1,8 +1,5 @@
 """Инициализация, предзагрузка и выгрузка RAG-моделей (embedding, reranker, LLM)."""
 
-# Загрузка GGUF-моделей эмбеддингов и реранкера через локальный сервер,
-# настройка llama_index Settings.
-
 import logging
 
 import torch
@@ -20,8 +17,6 @@ def init_settings(max_tokens=1024):
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
     with _init_lock:
-        # Инициализация эмбеддингов однократно: проверяем формат GGUF,
-        # запускаем локальный сервер и создаём OpenAIEmbedding-клиент
         if "embed_model" not in _model_cache:
             model_name = config.EMBEDDING_MODEL_NAME
 
@@ -63,8 +58,6 @@ def init_settings(max_tokens=1024):
 
     Settings.embed_model = _model_cache["embed_model"]
 
-    # LLM (chat) всегда инициализируется заново — max_tokens может
-    # меняться между запросами. Подключается к LM Studio или GGUF-серверу.
     Settings.llm = OpenAI(
         api_base=config.LM_STUDIO_URL,
         api_key=config.LLM_DEFAULT_API_KEY,
@@ -74,8 +67,6 @@ def init_settings(max_tokens=1024):
     )
 
 
-# Предзагрузка всех моделей при старте приложения.
-# Игнорирует ошибки — если что-то не загрузилось, подгрузится lazily.
 def preload_all_models():
     logger.info("[RAG] Предзагрузка моделей...")
     try:
@@ -100,8 +91,6 @@ def preload_all_models():
     logger.info("[RAG] Предзагрузка завершена.")
 
 
-# Выгрузка моделей из памяти. hard=True — полная очистка кеша,
-# hard=False — только сборка мусора, модели остаются в памяти процесса.
 def unload_rag_models(hard=True):
     global _model_cache
     if not _model_cache:

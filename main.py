@@ -2,10 +2,6 @@
 
 Запуск: python main.py
 """
-#
-# Файл: main.py — точка входа FastAPI-приложения. Настраивает логгирование, CORS,
-# статику, lifespan (миграция + предзагрузка моделей), middleware контроля размера загрузок.
-#
 
 import logging
 import os
@@ -75,7 +71,6 @@ async def lifespan(app: FastAPI):
         kill_stray_servers()
 
 
-# Фоновая предзагрузка RAG-моделей (эмбеддинги, реранкер) — запускается в отдельном потоке при старте.
 def preload_all_models():
     try:
         from src.rag_pipeline import preload_all_models as _preload
@@ -85,7 +80,6 @@ def preload_all_models():
         logger.warning(f"Предзагрузка моделей не удалась: {e}")
 
 
-# Выгрузка моделей при получении сигнала закрытия консоли.
 def _shutdown_models():
     try:
         from src.gguf.server import kill_stray_servers, unload_all_models
@@ -146,7 +140,6 @@ app.add_middleware(
 )
 
 
-# Health-check — используется Docker/monitoring для проверки живости приложения.
 @app.get("/health")
 async def health():
     return {"status": "ok", "app": "DocuMind"}
@@ -156,7 +149,6 @@ os.makedirs(os.path.join(config.BASE_DIR, "static"), exist_ok=True)
 app.mount("/static", StaticFiles(directory=os.path.join(config.BASE_DIR, "static")), name="static")
 app.mount("/files", StaticFiles(directory=config.NOTEBOOKS_DIR), name="notebooks")
 
-# Регистрация всех роутеров приложения.
 from routers.bookmarks import router as bookmarks_router
 from routers.chat import router as chat_router
 from routers.files import router as files_router
