@@ -273,7 +273,7 @@ export default function MainApp({ notebook, onExit }) {
     localStorage.setItem('chat_max_width', chatMaxWidth);
   }, [chatMaxWidth]);
 
-  const chatAvailWidth = window.innerWidth - (isSidebarOpen ? sidebarWidth : 0);
+  const chatAvailWidth = window.innerWidth;
   const chatRenderWidth = Math.max(755, Math.min(chatMaxWidth, chatAvailWidth));
 
   const handleExit = () => {
@@ -335,7 +335,6 @@ export default function MainApp({ notebook, onExit }) {
       <main
         ref={mainRef}
         className="flex-1 flex flex-col min-w-0 bg-background relative z-0"
-        style={{ paddingLeft: isSidebarOpen ? sidebarWidth : 0 }}
       >
         <div
           className="flex-1 flex flex-col mx-auto w-full relative"
