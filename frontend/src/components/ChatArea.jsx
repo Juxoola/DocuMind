@@ -1059,6 +1059,8 @@ export default function ChatArea({ notebook, selectedSources, onOpenSource, llmS
 
   // Подписка на статус LLM (для блокировки Send пока грузится модель)
   const [llmStatus, setLlmStatus] = useState({ state: 'ready', phase: null, model: null, error: null });
+  const [contextUsage, setContextUsage] = useState(null);
+  const contextIntervalRef = useRef(null);
   useEffect(() => {
     let es;
     let reconnectTimer;
@@ -1076,6 +1078,24 @@ export default function ChatArea({ notebook, selectedSources, onOpenSource, llmS
     return () => {
       if (es) es.close();
       if (reconnectTimer) clearTimeout(reconnectTimer);
+    };
+  }, []);
+
+  // ── Context Usage Indicator ──
+  useEffect(() => {
+    const poll = async () => {
+      try {
+        const res = await fetch('/api/context-usage');
+        if (res.ok) {
+          const data = await res.json();
+          setContextUsage(data);
+        }
+      } catch { /* ignore */ }
+    };
+    poll();
+    contextIntervalRef.current = setInterval(poll, 5000);
+    return () => {
+      if (contextIntervalRef.current) clearInterval(contextIntervalRef.current);
     };
   }, []);
 
@@ -1350,6 +1370,25 @@ export default function ChatArea({ notebook, selectedSources, onOpenSource, llmS
             <span className="flex items-center gap-1 px-2 py-0.5 bg-green-500/10 text-green-500 rounded-full text-[9px] font-bold border border-green-500/20 whitespace-nowrap">
               <HardDrive size={10} /> GGUF
             </span>
+          )}
+          {contextUsage && contextUsage.total > 0 && (
+            <div
+              className="flex items-center gap-1.5 px-2 py-1 rounded-full bg-muted/40 border border-border/30"
+              title={`${contextUsage.used.toLocaleString()} / ${contextUsage.total.toLocaleString()} токенов (${contextUsage.pct}%)`}
+            >
+              <div className="w-14 h-1.5 bg-muted rounded-full overflow-hidden">
+                <div
+                  className={cn(
+                    "h-full rounded-full transition-all duration-500",
+                    contextUsage.pct > 80 ? "bg-red-500" : contextUsage.pct > 50 ? "bg-yellow-500" : "bg-primary"
+                  )}
+                  style={{ width: `${Math.min(contextUsage.pct, 100)}%` }}
+                />
+              </div>
+              <span className="text-[9px] font-bold text-muted-foreground">
+                {contextUsage.used >= 1000 ? `${(contextUsage.used / 1000).toFixed(1)}k` : contextUsage.used}
+              </span>
+            </div>
           )}
         </div>
         <div className="flex items-center gap-2 flex-wrap justify-end">

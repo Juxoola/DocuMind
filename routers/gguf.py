@@ -219,6 +219,39 @@ async def api_llm_status():
     return get_llm_status()
 
 
+# Потребление контекста LLM — опрашивает llama-server /slots.
+@router.get("/api/context-usage")
+async def api_context_usage():
+    try:
+        from src.gguf.state import _server_ports, _server_processes, _server_roles
+
+        llm_port = None
+        for path, proc in _server_processes.items():
+            if _server_roles.get(path) == "llm" and proc.poll() is None:
+                llm_port = _server_ports.get(path)
+                break
+        if llm_port is None:
+            return {"used": 0, "total": 0, "pct": 0}
+        import httpx
+
+        async with httpx.AsyncClient(timeout=3) as client:
+            resp = await client.get(f"http://127.0.0.1:{llm_port}/slots")
+            if resp.status_code == 200:
+                slots = resp.json()
+                if isinstance(slots, list) and len(slots) > 0:
+                    slot = slots[0]
+                    n_past = slot.get("n_past", 0) or 0
+                    n_ctx = slot.get("n_ctx", 0) or 1
+                    return {
+                        "used": n_past,
+                        "total": n_ctx,
+                        "pct": round(n_past / max(n_ctx, 1) * 100, 1),
+                    }
+        return {"used": 0, "total": 0, "pct": 0}
+    except Exception:
+        return {"used": 0, "total": 0, "pct": 0}
+
+
 # Стриминг статуса LLM в реальном времени через SSE — для отслеживания прогресса предзагрузки.
 @router.get("/api/llm-status/stream")
 async def api_llm_status_stream():
