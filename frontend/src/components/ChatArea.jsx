@@ -1366,16 +1366,7 @@ export default function ChatArea({ notebook, selectedSources, onOpenSource, llmS
       </AnimatePresence>
 
       {/* Шапка */}
-      <div className="flex items-center justify-between gap-3 p-4 border-b bg-background/80 backdrop-blur-md sticky top-0 z-10 flex-wrap">
-        <div className="flex items-center gap-2 min-w-0">
-          <FileText className="text-muted-foreground shrink-0" size={18} />
-          <h2 className="font-medium text-sm whitespace-nowrap">Ассистент по документам</h2>
-          {llmSettings.use_gguf === 'true' && (
-            <span className="flex items-center gap-1 px-2 py-0.5 bg-green-500/10 text-green-500 rounded-full text-[9px] font-bold border border-green-500/20 whitespace-nowrap">
-              <HardDrive size={10} /> GGUF
-            </span>
-          )}
-        </div>
+      <div className="flex items-center justify-end gap-3 p-4 border-b bg-background/80 backdrop-blur-md sticky top-0 z-10 flex-wrap">
         <div className="flex items-center gap-2 flex-wrap justify-end">
           <div className="flex items-center gap-3 bg-muted/30 p-1.5 rounded-xl border border-white/5 px-2">
             <button
