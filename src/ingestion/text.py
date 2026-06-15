@@ -274,6 +274,11 @@ def _convert_via_libreoffice(file_path):
     pdf_path = os.path.splitext(file_path)[0] + ".pdf"
     if result.returncode == 0 and os.path.exists(pdf_path):
         logger.info(f"[DOCX] Сконвертировано в PDF через LibreOffice: {os.path.basename(pdf_path)}")
+        # Удаляем оригинальный docx/pptx после успешной конвертации
+        try:
+            os.remove(file_path)
+        except OSError:
+            pass
         return pdf_path
     raise RuntimeError(
         f"LibreOffice конвертация не удалась (code={result.returncode}): "
