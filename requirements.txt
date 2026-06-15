@@ -9,10 +9,11 @@ chromadb==1.5.8
 
 # ── Speech & Audio (WhisperX) ──
 # torch 2.8.x обязателен для whisperx==3.8.5 (~=2.8.0)
-# Установка с CUDA: pip install torch==2.8.0 torchaudio==2.8.0 torchvision==0.23.0 --index-url https://download.pytorch.org/whl/cu128
-torch==2.8.0
-torchaudio==2.8.0
-torchvision==0.23.0
+# --extra-index-url нужен для CUDA-билдов torch (иначе pip ставит CPU-only)
+--extra-index-url https://download.pytorch.org/whl/cu128
+torch==2.8.0+cu128
+torchaudio==2.8.0+cu128
+torchvision==0.23.0+cu128
 whisperx==3.8.5
 
 # ── Backend & API ──
