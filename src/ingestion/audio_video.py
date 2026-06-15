@@ -155,14 +155,23 @@ def process_audio_video(
     transcript_data = []
     frame_data = []
 
-    prog(15, "Транскрибация речи (WhisperX)...")
+    prog(15, "Загрузка модели WhisperX...")
     device = "cuda" if torch.cuda.is_available() else "cpu"
     try:
         import whisperx
 
         model = get_or_load_whisper("medium", device, "int8")
+        prog(18, "Загрузка аудио...")
         audio = whisperx.load_audio(file_path)
-        result = model.transcribe(audio, batch_size=16)
+        duration_sec = len(audio) / 16000
+        prog(20, f"VAD + транскрибация ({format_seconds(duration_sec)})...")
+
+        def _whisper_progress(pct):
+            pct_int = int(pct)
+            if pct_int <= 100:
+                prog(20 + int(pct_int * 0.38), f"Транскрибация: {pct_int}%")
+
+        result = model.transcribe(audio, batch_size=16, progress_callback=_whisper_progress)
         for seg in result.get("segments", []):
             transcript_data.append(
                 {"start": seg["start"], "end": seg["end"], "text": seg["text"].strip()}
