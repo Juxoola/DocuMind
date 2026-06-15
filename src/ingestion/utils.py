@@ -4,7 +4,6 @@ import gc
 import inspect as _inspect_module
 import logging
 import os
-import warnings
 
 import torch
 
@@ -12,24 +11,7 @@ import config
 from routers.shared import make_http_session
 
 logger = logging.getLogger(__name__)
-# Подавление шумных предупреждений сторонних библиотек
-
-warnings.filterwarnings("ignore", message="Module 'speechbrain")
-warnings.filterwarnings("ignore", message="torchcodec is not installed")
-warnings.filterwarnings("ignore", message="TensorFloat-32")
-warnings.filterwarnings("ignore", message=".*speechbrain.*deprecated", category=UserWarning)
-warnings.filterwarnings("ignore", message=".*Lightning automatically upgraded.*")
-warnings.filterwarnings(
-    "ignore", message=".*torchaudio._backend.list_audio_backends.*", category=UserWarning
-)
-warnings.filterwarnings("ignore", message=".*Could not load libtorchcodec.*", category=UserWarning)
-
-logging.getLogger("bm25s.utils.benchmark").setLevel(logging.ERROR)
-logging.getLogger("lightning.pytorch.utilities.migration").setLevel(logging.ERROR)
-logging.getLogger("lightning.pytorch").setLevel(logging.ERROR)
-logging.getLogger("whisperx").setLevel(logging.WARNING)
-logging.getLogger("speechbrain").setLevel(logging.ERROR)
-logging.getLogger("pyannote").setLevel(logging.WARNING)
+# Предупреждения библиотек подавлены в main.py (до импорта сторонних модулей)
 
 _orig_getmodule = _inspect_module.getmodule
 

@@ -28,6 +28,19 @@ logging.basicConfig(
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("chromadb").setLevel(logging.WARNING)
 logging.getLogger("llama_index").setLevel(logging.WARNING)
+logging.getLogger("bm25s.utils.benchmark").setLevel(logging.ERROR)
+logging.getLogger("lightning.pytorch").setLevel(logging.ERROR)
+logging.getLogger("speechbrain").setLevel(logging.ERROR)
+logging.getLogger("pyannote").setLevel(logging.WARNING)
+
+import warnings
+
+warnings.filterwarnings("ignore", message="torchcodec is not installed")
+warnings.filterwarnings("ignore", message=".*Could not load libtorchcodec.*")
+warnings.filterwarnings("ignore", message=".*list_audio_backends.*")
+warnings.filterwarnings("ignore", message=".*Lightning automatically upgraded.*")
+warnings.filterwarnings("ignore", message="TensorFloat-32")
+warnings.filterwarnings("ignore", category=DeprecationWarning, module="speechbrain")
 
 logger = logging.getLogger(__name__)
 
