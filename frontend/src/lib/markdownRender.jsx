@@ -26,11 +26,20 @@ export function preProcessMessage(text) {
     });
 
     subPart = subPart.replace(
-      /(?<!\\in|\\subset|\\subseteq|\\supset)\[(\d+(?:,\s*\d+)*)\]/g,
+      /(?<!\\in|\\subset|\\subseteq|\\supset)\\[(\\d+(?:,\\s*\\d+)*)\\]/g,
       (match, nums) => nums.split(',').map(n => `[${n.trim()}](#cite:${n.trim()})`).join('')
     );
 
-    return subPart.replace(/%%MATH_(\d+)%%/g, (_, idx) => mathBlocks[parseInt(idx)]);
+    // Цитированные цифры: [①] → [1](#cite:1), [①, ②] → [1](#cite:1)[2](#cite:2)
+    const CIRCLED = '①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳';
+    subPart = subPart.replace(/\[([①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳](?:[, ]*[①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳])*)\]/g, (match, nums) => {
+      return nums.split(/[, ]+/).filter(Boolean).map(ch => {
+        const idx = CIRCLED.indexOf(ch) + 1;
+        return idx > 0 ? `[${idx}](#cite:${idx})` : ch;
+      }).join('');
+    });
+
+    return subPart.replace(/%%MATH_(\\d+)%%/g, (_, idx) => mathBlocks[parseInt(idx)]);
   });
 
   return finalParts.join('');

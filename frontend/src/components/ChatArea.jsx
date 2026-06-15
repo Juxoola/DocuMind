@@ -373,14 +373,23 @@ const MessageItem = React.memo(({
         return `%%MATH_${mathBlocks.length - 1}%%`;
       });
 
-      subPart = subPart.replace(/(?<!\\in|\\subset|\\subseteq|\\supset)\[(\d+(?:,\s*\d+)*)\]/g, (match, nums) => {
+      subPart = subPart.replace(/(?<!\\in|\\subset|\\subseteq|\\supset)\\[(\\d+(?:,\\s*\\d+)*)\\]/g, (match, nums) => {
         return nums.split(',').map(n => {
           const num = n.trim();
           return `[${num}](#cite:${num})`;
         }).join('');
       });
 
-      return subPart.replace(/%%MATH_(\d+)%%/g, (_, idx) => mathBlocks[parseInt(idx)]);
+      // Цитированные цифры: [①] → [1](#cite:1), [①, ②] → [1](#cite:1)[2](#cite:2)
+      const CIRCLED = '①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳';
+      subPart = subPart.replace(/\[([①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳](?:[, ]*[①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳])*)\]/g, (match, nums) => {
+        return nums.split(/[, ]+/).filter(Boolean).map(ch => {
+          const idx = CIRCLED.indexOf(ch) + 1;
+          return idx > 0 ? `[${idx}](#cite:${idx})` : ch;
+        }).join('');
+      });
+
+      return subPart.replace(/%%MATH_(\\d+)%%/g, (_, idx) => mathBlocks[parseInt(idx)]);
     });
 
     processed = finalParts.join('');
