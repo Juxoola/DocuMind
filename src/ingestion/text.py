@@ -9,7 +9,6 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import fitz
 from llama_index.core.schema import TextNode
-from pptx import Presentation
 
 import config
 from src.gguf.server import unload_all_models
@@ -338,43 +337,61 @@ def process_pptx(
     cancel_check=None,
     keep_vision_alive=False,
 ):
-
-    nodes = []
+    """PPTX → PDF (LibreOffice) → process_pdf с Vision-анализом изображений."""
     file_name = os.path.basename(file_path)
 
-    # Быстрый путь: python-pptx — не требует Office, работает сразу
+    # Всегда конвертируем pptx в PDF для анализа изображений
     try:
-        prs = Presentation(file_path)
-        for i, slide in enumerate(prs.slides):
-            nodes.append(
-                TextNode(
-                    text="\n".join([sh.text for sh in slide.shapes if hasattr(sh, "text")]),
-                    metadata={"file_name": file_name, "page": i + 1},
-                )
-            )
-        logger.info(f"[PPTX] Обработано через python-pptx: {len(nodes)} слайдов")
-        return nodes
+        pdf_path = _convert_via_libreoffice(file_path)
+    except FileNotFoundError:
+        logger.info("[PPTX] LibreOffice не найден, пробую COM-конвертацию...")
+        try:
+            pdf_path = _convert_via_com(file_path, "Powerpoint.Application", 32)
+        except IngestionCancelled:
+            raise
+        except Exception as e:
+            logger.warning(f"[PPTX] COM-конвертация тоже не удалась: {e}")
+            return _process_pptx_textonly(file_path, file_name)
     except IngestionCancelled:
         raise
     except Exception as e:
-        logger.info(f"python-pptx не справился ({e}), пробую COM-конвертацию в PDF...")
+        logger.warning(f"[PPTX] LibreOffice конвертация не удалась: {e}")
+        try:
+            pdf_path = _convert_via_com(file_path, "Powerpoint.Application", 32)
+        except IngestionCancelled:
+            raise
+        except Exception:
+            return _process_pptx_textonly(file_path, file_name)
 
-    # Медленный путь: COM (PowerPoint) → PDF → process_pdf с Vision
+    return process_pdf(
+        pdf_path,
+        images_dir,
+        llm_settings,
+        shared_llm_url,
+        original_filename=file_name,
+        progress_cb=progress_cb,
+        cancel_check=cancel_check,
+        keep_vision_alive=keep_vision_alive,
+    )
+
+
+def _process_pptx_textonly(file_path, file_name):
+    """Fallback: извлечь текст через python-pptx без анализа изображений."""
     try:
-        pdf_path = _convert_via_com(file_path, "Powerpoint.Application", 32)
-        nodes = process_pdf(
-            pdf_path,
-            images_dir,
-            llm_settings,
-            shared_llm_url,
-            original_filename=os.path.basename(pdf_path),
-            progress_cb=progress_cb,
-            cancel_check=cancel_check,
-            keep_vision_alive=keep_vision_alive,
-        )
-    except IngestionCancelled:
-        raise
-    return nodes
+        from pptx import Presentation
+
+        prs = Presentation(file_path)
+        nodes = []
+        for i, slide in enumerate(prs.slides):
+            text = "\n".join([sh.text for sh in slide.shapes if hasattr(sh, "text")])
+            if text.strip():
+                nodes.append(TextNode(text=text, metadata={"file_name": file_name, "page": i + 1}))
+        if nodes:
+            logger.info(f"[PPTX] Fallback: {len(nodes)} слайдов через python-pptx (без Vision)")
+            return nodes
+    except Exception as e:
+        logger.warning(f"[PPTX] python-pptx fallback тоже не удался: {e}")
+    return []
 
 
 def process_docx(
