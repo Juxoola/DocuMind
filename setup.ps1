@@ -267,13 +267,13 @@ if (-not (Test-Path $soffice)) {
     Write-Color $Colors.Info "[8/8] Скачивание LibreOffice для конвертации DOCX → PDF (~350 МБ)..."
     try {
         $loMsi = Join-Path $env:TEMP "libreoffice.msi"
-        $loUrl = "https://download.documentfoundation.org/libreoffice/stable/25.2.2/win/x86_64/LibreOffice_25.2.2_Win_x86-64.msi"
+        $loUrl = "https://download.documentfoundation.org/libreoffice/stable/25.8.7/win/x86_64/LibreOffice_25.8.7_Win_x86-64.msi"
         Write-Color $Colors.Info "  Скачивание..."
         Invoke-WebRequest -Uri $loUrl -OutFile $loMsi -UseBasicParsing
 
         Write-Color $Colors.Info "  Распаковка в libreoffice/..."
         $null = New-Item -ItemType Directory -Path $loDir -Force
-        Start-Process msiexec.exe -ArgumentList "/a `"$loMsi`" TARGETDIR=`"$loDir`" /qn" -Wait -NoNewWindow
+        & msiexec.exe /a "$loMsi" "TARGETDIR=$loDir" /qn /norestart | Out-Null
 
         Remove-Item $loMsi -Force -ErrorAction SilentlyContinue
         if (Test-Path $soffice) {
