@@ -27,7 +27,7 @@ Write-Color $Colors.Info "=== DocuMind — Установка ==="
 Write-Color $Colors.Info "Директория: $ScriptDir"
 
 # ── 1. Проверка Python ──
-Write-Color $Colors.Info "[1/6] Проверка Python..."
+Write-Color $Colors.Info "[1/7] Проверка Python..."
 try {
     $pyVersion = python --version 2>&1
     Write-Color $Colors.Ok "  $pyVersion"
@@ -40,11 +40,11 @@ try {
 # ── 2. Виртуальное окружение ──
 $venvDir = Join-Path $ScriptDir ".venv"
 if (-not (Test-Path $venvDir)) {
-    Write-Color $Colors.Info "[2/5] Создание виртуального окружения..."
+    Write-Color $Colors.Info "[2/7] Создание виртуального окружения..."
     python -m venv $venvDir
     Write-Color $Colors.Ok "  Виртуальное окружение создано: $venvDir"
 } else {
-    Write-Color $Colors.Ok "[2/5] Виртуальное окружение уже существует"
+    Write-Color $Colors.Ok "[2/7] Виртуальное окружение уже существует"
 }
 
 # Активируем и устанавливаем зависимости
@@ -53,7 +53,7 @@ if (-not (Test-Path $pip)) {
     $pip = Join-Path $venvDir "Scripts" "python.exe"
 }
 
-Write-Color $Colors.Info "[3/6] Установка Python-зависимостей..."
+Write-Color $Colors.Info "[3/7] Установка Python-зависимостей..."
 try {
     if (Test-Path (Join-Path $ScriptDir "pyproject.toml")) {
         & "$(Join-Path $venvDir 'Scripts' 'python.exe')" -m pip install -e "$ScriptDir" --quiet 2>&1 | Out-Null
@@ -67,7 +67,7 @@ try {
 }
 
 # ── 3. Node.js и frontend ──
-Write-Color $Colors.Info "[4/6] Проверка Node.js..."
+Write-Color $Colors.Info "[4/7] Проверка Node.js..."
 try {
     $nodeVersion = node --version 2>&1
     Write-Color $Colors.Ok "  $nodeVersion"
@@ -95,7 +95,7 @@ try {
 }
 
 # ── 4. .env файл ──
-Write-Color $Colors.Info "[5/5] Проверка .env..."
+Write-Color $Colors.Info "[5/7] Проверка .env..."
 $envFile = Join-Path $ScriptDir ".env"
 $envExample = Join-Path $ScriptDir ".env.example"
 if (-not (Test-Path $envFile)) {
@@ -122,7 +122,7 @@ $binDir = Join-Path $ScriptDir "bin"
 $serverExe = Join-Path $binDir "llama-server.exe"
 
 if (-not (Test-Path $serverExe)) {
-    Write-Color $Colors.Info "[5/6] llama-server.exe не найден — скачиваю с GitHub..."
+    Write-Color $Colors.Info "[6/7] llama-server.exe не найден — скачиваю с GitHub..."
 
     try {
         # Получаем последний релиз из GitHub API
@@ -173,7 +173,7 @@ if (-not (Test-Path $serverExe)) {
         Write-Color $Colors.Warn "  Нужна CUDA-сборка, распакуйте в: $binDir"
     }
 } else {
-    Write-Color $Colors.Ok "[5/6] llama-server.exe найден"
+    Write-Color $Colors.Ok "[6/7] llama-server.exe найден"
 }
 
 # ── 6. Скачивание моделей ──
@@ -200,7 +200,7 @@ $models = @(
     }
 )
 
-Write-Color $Colors.Info "[6/6] Проверка моделей GGUF..."
+Write-Color $Colors.Info "[6/7] Проверка моделей GGUF..."
 
 $allPresent = $true
 foreach ($m in $models) {
@@ -220,7 +220,7 @@ if (-not $allPresent) {
         if (Test-Path $modelPath) {
             continue
         }
-        Write-Color $Colors.Info "  [6/6] Скачиваю $($m.Label)..."
+        Write-Color $Colors.Info "  [6/7] Скачиваю $($m.Label)..."
         try {
             $tempFile = Join-Path $env:TEMP $m.FileName
             Invoke-WebRequest -Uri $m.Url -OutFile $tempFile -UseBasicParsing
@@ -233,6 +233,31 @@ if (-not $allPresent) {
     }
 } else {
     Write-Color $Colors.Ok "  Все модели на месте"
+}
+
+# ── 7. Скачивание Whisper модели ──
+$whisperDir = Join-Path $modelsDir "whisper"
+$whisperMarker = Join-Path $whisperDir ".downloaded"
+if (-not (Test-Path $whisperMarker)) {
+    Write-Color $Colors.Info "[7/7] Скачивание Whisper medium (1.5 ГБ)..."
+    try {
+        & python -c @"
+import warnings; warnings.filterwarnings('ignore')
+import logging; logging.disable(logging.INFO)
+from faster_whisper import WhisperModel
+WhisperModel('medium', device='cpu', compute_type='int8', download_root=r'$whisperDir')
+open(r'$whisperMarker', 'w').close()
+"@ 2>&1 | Out-Null
+        if (Test-Path $whisperMarker) {
+            Write-Color $Colors.Ok "  Whisper medium скачан в models/whisper/"
+        } else {
+            Write-Color $Colors.Warn "  Whisper: модель не подтверждена"
+        }
+    } catch {
+        Write-Color $Colors.Warn "  Ошибка скачивания Whisper: $_"
+    }
+} else {
+    Write-Color $Colors.Ok "[7/7] Whisper medium уже скачан"
 }
 
 # ── Итог ──

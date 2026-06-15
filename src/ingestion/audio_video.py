@@ -87,7 +87,12 @@ def get_or_load_whisper(
         # Подавляем DEBUG от speechbrain/lightning при первом импорте
         logging.disable(logging.INFO)
         try:
-            model = whisperx.load_model(model_name, device, compute_type=compute_type)
+            model = whisperx.load_model(
+                model_name,
+                device,
+                compute_type=compute_type,
+                download_root=os.path.join(config.BASE_DIR, "models", "whisper"),
+            )
         finally:
             logging.disable(logging.NOTSET)
         _whisper_model_cache[key] = model
