@@ -66,7 +66,7 @@ def get_vision_url(llm_settings, progress_cb=None):
             flash_attn=v_fa,
             type_k=v_kv,
             type_v=v_kv,
-            n_parallel=v_conc,
+            n_parallel=1,
             mtp_enabled=v_mtp,
             custom_args=[
                 "--reasoning",

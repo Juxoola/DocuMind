@@ -25,8 +25,9 @@ export default function DocumentViewer({ file, notebook, onClose }) {
   const isVideo = filename?.toLowerCase().match(/\.(mp4|avi|mov|mkv)$/i);
   const isAudio = filename?.toLowerCase().match(/\.(mp3|wav|m4a|aac|flac)$/i);
   const isPpt = filename?.toLowerCase().match(/\.(pptx|ppt)$/i);
+  const isImage = filename?.toLowerCase().match(/\.(jpg|jpeg|png|webp|gif|bmp)$/i);
   const isMedia = isVideo || isAudio;
-  const isSpecial = isPdf || isMedia || isPpt;
+  const isSpecial = isPdf || isMedia || isPpt || isImage;
   
   let fileUrl = filename ? `/files/${notebook.id}/data/${encodeURIComponent(filename)}` : '';
   
@@ -49,7 +50,7 @@ export default function DocumentViewer({ file, notebook, onClose }) {
     setContent(null);
 
     const metaUrl = `/api/video_metadata?filename=${encodeURIComponent(filename)}&notebook_id=${notebook.id}`;
-    if (isMedia || isPdf) {
+    if (isMedia || isPdf || isImage) {
       fetch(metaUrl)
         .then(r => r.json())
         .then(data => { if (!data.error) setVideoMeta(data); })
@@ -241,6 +242,24 @@ export default function DocumentViewer({ file, notebook, onClose }) {
             src={viewerUrl}
             className="w-full h-full border-none"
           />
+        ) : isImage ? (
+          <div className="h-full flex flex-col overflow-y-auto">
+            <div className="flex-1 flex items-center justify-center bg-black/5 p-4 min-h-0">
+              <img
+                src={`/files/${notebook.id}/data/${encodeURIComponent(filename)}`}
+                alt={filename}
+                className="max-w-full max-h-full object-contain rounded-lg shadow-lg cursor-zoom-in hover:scale-105 transition-transform duration-300"
+                onClick={() => window.open(`/files/${notebook.id}/data/${encodeURIComponent(filename)}`, '_blank')}
+              />
+            </div>
+            {videoMeta?.frames?.[0]?.description && (
+              <div className="p-4 border-t border-border/30 bg-muted/20">
+                <p className="text-xs leading-relaxed text-foreground/80 font-medium whitespace-pre-wrap">
+                  {videoMeta.frames[0].description}
+                </p>
+              </div>
+            )}
+          </div>
         ) : isMedia ? (
           <div className="h-full flex flex-col overflow-hidden">
             <div className="relative p-6 pb-0 group">
