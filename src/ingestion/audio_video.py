@@ -30,6 +30,49 @@ _whisper_model_cache: dict = {}
 _whisper_lock = threading.Lock()
 
 
+# ── Monkey-patch: whisperx.load_audio вызывает "ffmpeg" из PATH,
+# а imageio-ffmpeg хранит свой bundled ffmpeg в site-packages.
+# Заменяем вызов, чтобы WhisperX использовал тот же ffmpeg, что и ensure_mp3_audio. ──
+def _patch_whisperx_ffmpeg():
+    try:
+        import whisperx.audio as _wa
+        from imageio_ffmpeg import get_ffmpeg_exe
+
+        _orig_load = _wa.load_audio
+        _ffmpeg_bin = get_ffmpeg_exe()
+
+        def _patched_load(file, sr=_wa.SAMPLE_RATE):
+            import numpy as np
+
+            cmd = [
+                _ffmpeg_bin,
+                "-nostdin",
+                "-threads",
+                "0",
+                "-i",
+                file,
+                "-f",
+                "s16le",
+                "-ac",
+                "1",
+                "-acodec",
+                "pcm_s16le",
+                "-ar",
+                str(sr),
+                "-",
+            ]
+            out = subprocess.run(cmd, capture_output=True, check=True).stdout
+            return np.frombuffer(out, np.int16).flatten().astype(np.float32) / 32768.0
+
+        _wa.load_audio = _patched_load
+        logger.info("[WhisperX] ffmpeg заменён на imageio-ffmpeg")
+    except Exception as e:
+        logger.warning(f"[WhisperX] Не удалось патчить ffmpeg: {e}")
+
+
+_patch_whisperx_ffmpeg()
+
+
 def get_or_load_whisper(
     model_name: str = "medium", device: str = "cuda", compute_type: str = "int8"
 ):
