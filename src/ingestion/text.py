@@ -3,6 +3,7 @@
 import json
 import logging
 import os
+import subprocess
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -234,6 +235,53 @@ def process_pdf(
     return nodes
 
 
+def _find_soffice():
+    """Находит soffice.exe LibreOffice: bin/libreoffice/ → PATH → Program Files."""
+    import shutil
+
+    local = os.path.join(config.BASE_DIR, "bin", "libreoffice", "program", "soffice.exe")
+    if os.path.isfile(local):
+        return local
+    found = shutil.which("soffice")
+    if found:
+        return found
+    for pf in ["Program Files", "Program Files (x86)"]:
+        p = os.path.join("C:\\", pf, "LibreOffice", "program", "soffice.exe")
+        if os.path.isfile(p):
+            return p
+    return None
+
+
+def _convert_via_libreoffice(file_path):
+    """Конвертирует документ в PDF через LibreOffice headless.
+
+    Возвращает путь к PDF или выбрасывает исключение.
+    """
+    soffice = _find_soffice()
+    if not soffice:
+        raise FileNotFoundError("LibreOffice не найден. Установите или скачайте через setup.ps1")
+    out_dir = os.path.dirname(file_path)
+    cmd = [
+        soffice,
+        "--headless",
+        "--norestore",
+        "--convert-to",
+        "pdf",
+        "--outdir",
+        out_dir,
+        os.path.abspath(file_path),
+    ]
+    result = subprocess.run(cmd, capture_output=True, timeout=120)
+    pdf_path = os.path.splitext(file_path)[0] + ".pdf"
+    if result.returncode == 0 and os.path.exists(pdf_path):
+        logger.info(f"[DOCX] Сконвертировано в PDF через LibreOffice: {os.path.basename(pdf_path)}")
+        return pdf_path
+    raise RuntimeError(
+        f"LibreOffice конвертация не удалась (code={result.returncode}): "
+        f"{(result.stderr or b'').decode('utf-8', errors='replace')[:200]}"
+    )
+
+
 def _convert_via_com(file_path, app_name, format_code):
     """Конвертирует Office-документ в PDF через COM.
 
@@ -338,40 +386,53 @@ def process_docx(
     cancel_check=None,
     keep_vision_alive=False,
 ):
-
-    nodes = []
+    """DOCX → PDF (LibreOffice) → process_pdf с Vision-анализом изображений."""
     file_name = os.path.basename(file_path)
 
-    # Быстрый путь: python-docx — не требует Office, работает сразу
+    # Всегда конвертируем docx в PDF для корректного отображения и анализа изображений
     try:
-        import docx as _docx
-
-        nodes.append(
-            TextNode(
-                text="\n".join([p.text for p in _docx.Document(file_path).paragraphs]),
-                metadata={"file_name": file_name},
-            )
-        )
-        logger.info("[DOCX] Обработано через python-docx: 1 узел")
-        return nodes
+        pdf_path = _convert_via_libreoffice(file_path)
+    except FileNotFoundError:
+        logger.info("[DOCX] LibreOffice не найден, пробую COM-конвертацию...")
+        try:
+            pdf_path = _convert_via_com(file_path, "Word.Application", 17)
+        except IngestionCancelled:
+            raise
+        except Exception as e:
+            logger.warning(f"[DOCX] COM-конвертация тоже не удалась: {e}")
+            return _process_docx_textonly(file_path, file_name)
     except IngestionCancelled:
         raise
     except Exception as e:
-        logger.info(f"python-docx не справился ({e}), пробую COM-конвертацию в PDF...")
+        logger.warning(f"[DOCX] LibreOffice конвертация не удалась: {e}")
+        try:
+            pdf_path = _convert_via_com(file_path, "Word.Application", 17)
+        except IngestionCancelled:
+            raise
+        except Exception:
+            return _process_docx_textonly(file_path, file_name)
 
-    # Медленный путь: COM (Word) → PDF → process_pdf с Vision
+    return process_pdf(
+        pdf_path,
+        images_dir,
+        llm_settings,
+        shared_llm_url,
+        original_filename=file_name,
+        progress_cb=progress_cb,
+        cancel_check=cancel_check,
+        keep_vision_alive=keep_vision_alive,
+    )
+
+
+def _process_docx_textonly(file_path, file_name):
+    """Fallback: извлечь текст через python-docx без анализа изображений."""
     try:
-        pdf_path = _convert_via_com(file_path, "Word.Application", 17)
-        nodes = process_pdf(
-            pdf_path,
-            images_dir,
-            llm_settings,
-            shared_llm_url,
-            original_filename=os.path.basename(pdf_path),
-            progress_cb=progress_cb,
-            cancel_check=cancel_check,
-            keep_vision_alive=keep_vision_alive,
-        )
-    except IngestionCancelled:
-        raise
-    return nodes
+        import docx as _docx
+
+        text = "\n".join([p.text for p in _docx.Document(file_path).paragraphs])
+        if text.strip():
+            logger.info("[DOCX] Fallback: текст извлечён через python-docx (без Vision)")
+            return [TextNode(text=text, metadata={"file_name": file_name})]
+    except Exception as e:
+        logger.warning(f"[DOCX] python-docx fallback тоже не удался: {e}")
+    return []

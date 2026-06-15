@@ -260,6 +260,35 @@ open(r'$whisperMarker', 'w').close()
     Write-Color $Colors.Ok "[7/7] Whisper medium уже скачан"
 }
 
+# ── 8. Скачивание LibreOffice (конвертация DOCX → PDF) ──
+$loDir = Join-Path $ScriptDir "bin" "libreoffice"
+$soffice = Join-Path $loDir "program" "soffice.exe"
+if (-not (Test-Path $soffice)) {
+    Write-Color $Colors.Info "[8/8] Скачивание LibreOffice для конвертации DOCX → PDF (~350 МБ)..."
+    try {
+        $loMsi = Join-Path $env:TEMP "libreoffice.msi"
+        $loUrl = "https://download.documentfoundation.org/libreoffice/stable/25.2.2/win/x86_64/LibreOffice_25.2.2_Win_x86-64.msi"
+        Write-Color $Colors.Info "  Скачивание ($loUrl)..."
+        Invoke-WebRequest -Uri $loUrl -OutFile $loMsi -UseBasicParsing
+
+        Write-Color $Colors.Info "  Распаковка в bin/libreoffice/..."
+        $null = New-Item -ItemType Directory -Path $loDir -Force
+        Start-Process msiexec.exe -ArgumentList "/a `"$loMsi`" TARGETDIR=`"$loDir`" /qn" -Wait -NoNewWindow
+
+        Remove-Item $loMsi -Force -ErrorAction SilentlyContinue
+        if (Test-Path $soffice) {
+            Write-Color $Colors.Ok "  LibreOffice установлен!"
+        } else {
+            Write-Color $Colors.Warn "  LibreOffice распакован, но soffice.exe не найден"
+        }
+    } catch {
+        Write-Color $Colors.Warn "  Ошибка: $_"
+        Write-Color $Colors.Info "  Конвертация DOCX будет через COM (Word)"
+    }
+} else {
+    Write-Color $Colors.Ok "[8/8] LibreOffice уже установлен"
+}
+
 # ── Итог ──
 Write-Color $Colors.Ok ""
 Write-Color $Colors.Ok "=== Установка завершена! ==="
