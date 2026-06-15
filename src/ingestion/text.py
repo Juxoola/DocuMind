@@ -368,6 +368,9 @@ def process_pptx(
         except Exception:
             return _process_pptx_textonly(file_path, file_name)
 
+    # После конвертации file_name должен ссылаться на PDF
+    file_name = os.path.basename(pdf_path)
+
     return process_pdf(
         pdf_path,
         images_dir,
@@ -433,6 +436,9 @@ def process_docx(
             raise
         except Exception:
             return _process_docx_textonly(file_path, file_name)
+
+    # После конвертации file_name должен ссылаться на PDF
+    file_name = os.path.basename(pdf_path)
 
     return process_pdf(
         pdf_path,
