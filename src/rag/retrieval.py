@@ -145,7 +145,7 @@ def retrieve_nodes(query: str, notebook_id: str, allowed_files=None, max_tokens=
     bm25_dir = os.path.join(paths["base"], "bm25")
 
     bm25_retriever = None
-    if os.path.exists(os.path.join(bm25_dir, "bm25_retriever_params.json")):
+    if os.path.exists(os.path.join(bm25_dir, "retriever.json")):
         try:
             bm25_retriever = BM25Retriever.from_persist_dir(bm25_dir)
         except Exception as e:
@@ -156,7 +156,7 @@ def retrieve_nodes(query: str, notebook_id: str, allowed_files=None, max_tokens=
                 "  [RAG] BM25 отсутствует — форсирую синхронную пересборку для первого запроса"
             )
             flush_bm25_rebuild(notebook_id, db_path=paths["chroma_db"], wait=True, timeout=180)
-            if os.path.exists(os.path.join(bm25_dir, "bm25_retriever_params.json")):
+            if os.path.exists(os.path.join(bm25_dir, "retriever.json")):
                 try:
                     bm25_retriever = BM25Retriever.from_persist_dir(bm25_dir)
                 except Exception as e:

@@ -182,7 +182,7 @@ def flush_bm25_rebuild(
 def is_bm25_ready(notebook_id: str) -> bool:
     paths = config.get_notebook_paths(notebook_id)
     bm25_dir = os.path.join(paths["base"], "bm25")
-    exists = os.path.exists(os.path.join(bm25_dir, "bm25_retriever_params.json"))
+    exists = os.path.exists(os.path.join(bm25_dir, "retriever.json"))
     with _bm25_pending_lock:
         has_pending = notebook_id in _bm25_pending_timers
     is_rebuilding = notebook_id in _bm25_rebuilding
