@@ -109,12 +109,21 @@ SYSTEM_PROMPT_CITATION = (
     "к коду. Указывай источники только в тексте вокруг кода.\n"
 )
 
+SYSTEM_PROMPT_HISTORY = (
+    "ПРАВИЛА РАБОТЫ С ИСТОРИЕЙ:\n"
+    "- В контексте может быть история предыдущих вопросов и ответов.\n"
+    "- Отвечай ТОЛЬКО на ПОСЛЕДНИЙ вопрос пользователя.\n"
+    "- НЕ повторяй ответы на предыдущие вопросы — они уже даны.\n"
+)
+
+
 SYSTEM_PROMPT = (
     SYSTEM_PROMPT_BASE
     + "\n"
     + SYSTEM_PROMPT_RULES[ANSWER_MODE_DEFAULT]
     + "\n"
     + SYSTEM_PROMPT_CITATION
+    + SYSTEM_PROMPT_HISTORY
 )
 
 
@@ -122,4 +131,11 @@ def get_system_prompt(mode: str = None) -> str:
     """Собирает полный системный промпт из базы, правил режима и цитирования."""
     if not mode or mode not in SYSTEM_PROMPT_RULES:
         mode = ANSWER_MODE_DEFAULT
-    return SYSTEM_PROMPT_BASE + "\n" + SYSTEM_PROMPT_RULES[mode] + "\n" + SYSTEM_PROMPT_CITATION
+    return (
+        SYSTEM_PROMPT_BASE
+        + "\n"
+        + SYSTEM_PROMPT_RULES[mode]
+        + "\n"
+        + SYSTEM_PROMPT_CITATION
+        + SYSTEM_PROMPT_HISTORY
+    )
