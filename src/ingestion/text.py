@@ -160,6 +160,7 @@ def process_pdf(
                     for f in frame_list
                 }
                 done_count = 0
+                results = []
                 try:
                     for future in as_completed(futures):
                         if _is_cancelled():
@@ -168,12 +169,33 @@ def process_pdf(
                         frame_info = futures[future]
                         desc = future.result()
                         done_count += 1
-                        if desc and "Изображение без описания" not in desc:
-                            full_text = (
-                                f"Изображение PDF {file_name} стр {frame_info['page']}: {desc}"
+                        results.append((frame_info, desc))
+                        if progress_cb:
+                            progress_cb(
+                                65 + int(done_count / n * 25), f"Описание PDF: {done_count}/{n}"
                             )
-                            if len(full_text) <= config.GGUF_CTX_EMBED_CHARS:
-                                nodes.append(
+                except IngestionCancelled:
+                    raise
+
+                # Сортируем по номеру страницы перед добавлением в nodes
+                results.sort(key=lambda x: x[0]["page"])
+                for frame_info, desc in results:
+                    if desc and "Изображение без описания" not in desc:
+                        full_text = f"Изображение PDF {file_name} стр {frame_info['page']}: {desc}"
+                        if len(full_text) <= config.GGUF_CTX_EMBED_CHARS:
+                            nodes.append(
+                                TextNode(
+                                    text=full_text,
+                                    metadata={
+                                        "file_name": file_name,
+                                        "image_path": frame_info["path"],
+                                        "page": frame_info["page"],
+                                    },
+                                )
+                            )
+                        else:
+                            desc_nodes = splitter.get_nodes_from_documents(
+                                [
                                     TextNode(
                                         text=full_text,
                                         metadata={
@@ -182,39 +204,21 @@ def process_pdf(
                                             "page": frame_info["page"],
                                         },
                                     )
-                                )
-                            else:
-                                desc_nodes = splitter.get_nodes_from_documents(
-                                    [
-                                        TextNode(
-                                            text=full_text,
-                                            metadata={
-                                                "file_name": file_name,
-                                                "image_path": frame_info["path"],
-                                                "page": frame_info["page"],
-                                            },
-                                        )
-                                    ]
-                                )
-                                nodes.extend(desc_nodes)
-                            frame_data.append(
-                                {
-                                    "page": frame_info["page"],
-                                    "image_path": frame_info["path"],
-                                    "description": desc,
-                                }
+                                ]
                             )
-                        else:
-                            try:
-                                os.remove(frame_info["path"])
-                            except Exception:
-                                pass
-                        if progress_cb:
-                            progress_cb(
-                                65 + int(done_count / n * 25), f"Описание PDF: {done_count}/{n}"
-                            )
-                except IngestionCancelled:
-                    raise
+                            nodes.extend(desc_nodes)
+                        frame_data.append(
+                            {
+                                "page": frame_info["page"],
+                                "image_path": frame_info["path"],
+                                "description": desc,
+                            }
+                        )
+                    else:
+                        try:
+                            os.remove(frame_info["path"])
+                        except Exception:
+                            pass
 
         if shared_llm_url and not keep_vision_alive:
             unload_all_models(role="llm")
