@@ -238,7 +238,7 @@ def _find_soffice():
     """Находит soffice.exe LibreOffice: bin/libreoffice/ → PATH → Program Files."""
     import shutil
 
-    local = os.path.join(config.BASE_DIR, "bin", "libreoffice", "program", "soffice.exe")
+    local = os.path.join(config.BASE_DIR, "libreoffice", "program", "soffice.exe")
     if os.path.isfile(local):
         return local
     found = shutil.which("soffice")
