@@ -333,10 +333,20 @@ async def delete_file(filename: str, notebook_id: str):
                 os.remove(file_path)
                 break
             except PermissionError:
-                if i == 9:
-                    logger.error(f"Не удалось удалить {filename}: файл заблокирован")
-                    raise
-                time.sleep(1)
+                if i < 4:
+                    time.sleep(1)
+                    continue
+                # Fallback: переименовываем и удаляем (обходит лок Windows)
+                try:
+                    tmp = file_path + f".del{i}"
+                    os.rename(file_path, tmp)
+                    os.remove(tmp)
+                    break
+                except Exception:
+                    if i == 9:
+                        logger.error(f"Не удалось удалить {filename}: файл заблокирован")
+                        raise
+                    time.sleep(1)
     from src.rag_pipeline import get_vector_store
 
     def _delete_chromadb_entries():
