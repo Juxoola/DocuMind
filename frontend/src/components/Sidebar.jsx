@@ -17,6 +17,7 @@ import {
   FileCode,
   FileSpreadsheet,
   File,
+  Image as ImageIcon,
   Bookmark,
   Search,
   Tag as TagIcon,
@@ -63,6 +64,13 @@ function getFileIcon(filename) {
     case 'txt':
     case 'md':
       return <FileText size={14} className="text-muted-foreground" />;
+    case 'jpg':
+    case 'jpeg':
+    case 'png':
+    case 'webp':
+    case 'gif':
+    case 'bmp':
+      return <ImageIcon size={14} className="text-pink-400" />;
     default:
       return <File size={14} className="text-muted-foreground" />;
   }
