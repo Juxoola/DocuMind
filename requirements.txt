@@ -8,9 +8,11 @@ rank-bm25==0.2.2
 chromadb==1.5.8
 
 # ── Speech & Audio (WhisperX) ──
-# torch обязателен для WhisperX
-torch==2.11.0
-torchaudio==2.11.0
+# torch 2.8.x обязателен для whisperx==3.8.5 (~=2.8.0)
+# Установка с CUDA: pip install torch==2.8.0 torchaudio==2.8.0 torchvision==0.23.0 --index-url https://download.pytorch.org/whl/cu128
+torch==2.8.0
+torchaudio==2.8.0
+torchvision==0.23.0
 whisperx==3.8.5
 
 # ── Backend & API ──
