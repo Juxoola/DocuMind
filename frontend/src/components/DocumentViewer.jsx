@@ -243,12 +243,12 @@ export default function DocumentViewer({ file, notebook, onClose }) {
             className="w-full h-full border-none"
           />
         ) : isImage ? (
-          <div className="h-full flex flex-col overflow-y-auto">
-            <div className="flex-1 flex items-center justify-center bg-black/5 p-4 min-h-0">
+          <div className="h-full overflow-y-auto">
+            <div className="p-4">
               <img
                 src={`/files/${notebook.id}/data/${encodeURIComponent(filename)}`}
                 alt={filename}
-                className="max-w-full max-h-full object-contain rounded-lg shadow-lg cursor-zoom-in hover:scale-105 transition-transform duration-300"
+                className="max-w-full h-auto rounded-lg shadow-lg cursor-zoom-in hover:scale-105 transition-transform duration-300"
                 onClick={() => window.open(`/files/${notebook.id}/data/${encodeURIComponent(filename)}`, '_blank')}
               />
             </div>
