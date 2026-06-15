@@ -159,7 +159,24 @@ async def health():
 
 os.makedirs(os.path.join(config.BASE_DIR, "static"), exist_ok=True)
 app.mount("/static", StaticFiles(directory=os.path.join(config.BASE_DIR, "static")), name="static")
-app.mount("/files", StaticFiles(directory=config.NOTEBOOKS_DIR), name="notebooks")
+
+
+# Кастомный endpoint для раздачи файлов из notebooks/
+# StaticFiles на Windows держит handle на файл пока браузер его читает,
+# что блокирует os.remove(). FileResponse открывает/закрывает файл за запрос.
+@app.get("/files/{notebook_id}/{subpath:path}")
+async def serve_notebook_file(notebook_id: str, subpath: str):
+    from starlette.responses import FileResponse
+
+    file_path = os.path.join(config.NOTEBOOKS_DIR, notebook_id, subpath)
+    file_path = os.path.normpath(file_path)
+    # Защита от path traversal
+    if not file_path.startswith(os.path.normpath(config.NOTEBOOKS_DIR)):
+        return JSONResponse(status_code=403, content={"detail": "Forbidden"})
+    if not os.path.isfile(file_path):
+        return JSONResponse(status_code=404, content={"detail": "Not found"})
+    return FileResponse(file_path)
+
 
 from routers.bookmarks import router as bookmarks_router
 from routers.chat import router as chat_router
