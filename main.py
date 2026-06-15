@@ -32,13 +32,15 @@ logging.getLogger("bm25s.utils.benchmark").setLevel(logging.ERROR)
 logging.getLogger("lightning.pytorch").setLevel(logging.ERROR)
 logging.getLogger("speechbrain").setLevel(logging.ERROR)
 logging.getLogger("pyannote").setLevel(logging.WARNING)
+logging.getLogger("whisperx").setLevel(logging.WARNING)
 
 import warnings
 
-warnings.filterwarnings("ignore", message="torchcodec is not installed")
-warnings.filterwarnings("ignore", message=".*Could not load libtorchcodec.*")
-warnings.filterwarnings("ignore", message=".*list_audio_backends.*")
-warnings.filterwarnings("ignore", message=".*Lightning automatically upgraded.*")
+# (?s) — inline DOTALL: . матчит \n (pyannote начинает сообщение с \n)
+warnings.filterwarnings("ignore", message="(?s).*torchcodec is not installed")
+warnings.filterwarnings("ignore", message="(?s).*Could not load libtorchcodec")
+warnings.filterwarnings("ignore", message="(?s).*list_audio_backends")
+warnings.filterwarnings("ignore", message="(?s).*Lightning automatically upgraded")
 warnings.filterwarnings("ignore", message="TensorFloat-32")
 warnings.filterwarnings("ignore", category=DeprecationWarning, module="speechbrain")
 
