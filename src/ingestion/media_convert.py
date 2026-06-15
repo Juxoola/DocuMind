@@ -262,8 +262,18 @@ def ensure_mp3_audio(file_path, prog_cb=None):
         "128k",
         temp_path,
     ]
-    subprocess.run(cmd, capture_output=True)
-    if os.path.exists(temp_path):
+    result = subprocess.run(cmd, capture_output=True)
+    if result.returncode == 0 and os.path.exists(temp_path) and os.path.getsize(temp_path) > 1000:
         os.remove(file_path)
+        logger.info(f"[media_convert] {os.path.basename(file_path)} → mp3")
         return temp_path
+    # Конвертация не удалась — удаляем битый mp3, возвращаем оригинал
+    try:
+        if os.path.exists(temp_path):
+            os.remove(temp_path)
+    except OSError:
+        pass
+    logger.warning(
+        f"[media_convert] Конвертация в mp3 не удалась, остаётся оригинал: {os.path.basename(file_path)}"
+    )
     return file_path

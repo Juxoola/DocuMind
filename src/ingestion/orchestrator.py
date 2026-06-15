@@ -7,7 +7,7 @@ from llama_index.core.schema import TextNode
 
 import config
 from src.ingestion.audio_video import process_audio_video
-from src.ingestion.media_convert import ensure_720p_video
+from src.ingestion.media_convert import ensure_720p_video, ensure_mp3_audio
 from src.ingestion.splitter import _get_splitter
 from src.ingestion.text import process_docx, process_pdf, process_pptx
 from src.ingestion.utils import IngestionCancelled
@@ -40,6 +40,9 @@ def ingest_file(
         file_path = ensure_720p_video(
             file_path, progress_cb, cancel_check=cancel_check, notebook_id=notebook_id
         )
+    elif ext in [".mp3", ".wav", ".m4a"]:
+        file_path = ensure_mp3_audio(file_path, progress_cb)
+        ext = ".mp3"
 
     if _is_cancelled():
         raise IngestionCancelled("Cancelled after media conversion")
