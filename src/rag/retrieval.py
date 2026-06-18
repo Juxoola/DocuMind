@@ -333,7 +333,7 @@ def retrieve_nodes(query: str, notebook_id: str, allowed_files=None, max_tokens=
                     )
 
     except Exception as e:
-        logger.info(f"Ошибка унифицированного поиска: {e}")
+        logger.warning(f"Ошибка унифицированного поиска: {e}")
         all_nodes = []
 
     if all_nodes and config.USE_RERANKER:
@@ -349,81 +349,82 @@ def retrieve_nodes(query: str, notebook_id: str, allowed_files=None, max_tokens=
         logger.info(f"  [RAG] Чанков для реранкинга: {len(all_nodes)}")
 
         reranker_name = config.RERANKER_MODEL_NAME
-        if not config.validate_gguf_path(reranker_name):
-            raise RuntimeError(
-                "Поддерживаются только GGUF-модели реранкера. "
-                "Укажите путь к .gguf файлу в config.RERANKER_MODEL_NAME.\n"
-                f"Текущее значение: {reranker_name}"
-            )
-
-        if "reranker" not in _model_cache:
-            logger.info(f"  [RAG] Загрузка GGUF реранкера: {reranker_name}")
-            from src.gguf.server import get_gguf_embedding_url
-
-            model_path = config.resolve_model_path(reranker_name)
-            url = get_gguf_embedding_url(model_path, is_reranker=True, n_parallel=1)
-            _model_cache["reranker"] = url
-
-        url = _model_cache["reranker"]
-
-        def _rerank_doc(nws):
-            meta = nws.node.metadata or {}
-            coord_parts = []
-            if meta.get("file_name"):
-                coord_parts.append(str(meta["file_name"]))
-            if meta.get("page") not in (None, ""):
-                coord_parts.append(f"стр.{meta['page']}")
-            elif meta.get("time") not in (None, ""):
-                coord_parts.append(f"@{meta['time']}")
-            elif meta.get("start") not in (None, ""):
-                coord_parts.append(f"@{meta['start']}")
-            prefix = f"[{' '.join(coord_parts)}] " if coord_parts else ""
-            return prefix + nws.node.get_content()
-
-        documents = [_rerank_doc(n) for n in all_nodes]
-
-        try:
-            _rerank_start = _time.time()
-            scores = [0.0] * len(all_nodes)
-
-            resp = _get_rerank_session().post(
-                f"{url}/v1/rerank",
-                json={
-                    "model": "gguf-reranker",
-                    "query": query,
-                    "documents": documents,
-                    "top_n": len(documents),
-                },
-                timeout=120,
-            )
-            resp.raise_for_status()
-            results = resp.json().get("results", [])
-            if not results:
-                logger.debug(f"[RAG] Реранкер вернул пустой results: {resp.text[:200]}")
-            for r in results:
-                orig_idx = r.get("index", 0)
-                if orig_idx < len(scores):
-                    scores[orig_idx] = r.get("relevance_score", 0.0)
-
-            elapsed_r = _time.time() - _rerank_start
-            logger.info(f"  [RAG] ✅ Реранкинг: {len(documents)} doc за {elapsed_r:.2f}с")
-
-        except Exception as e:
-            err_body = ""
-            if hasattr(e, "response") and e.response is not None:
-                err_body = f" body={e.response.text[:300]}"
-            logger.info(f"[RAG] Ошибка GGUF реранкера: {e}{err_body}")
-            scores = [0] * len(all_nodes)
-
-        if scores and max(scores) < 1e-6:
+        reranker_available = config.validate_gguf_path(reranker_name)
+        if not reranker_available:
             logger.warning(
-                f"  [RAG] ⚠️ GGUF реранкер выдал слишком низкие оценки "
-                f"(max: {max(scores)}). Используются оригинальные RRF scores."
+                f"  [RAG] ⚠ Реранкер пропущен: неверный путь ({reranker_name}). "
+                "Используются оригинальные RRF scores."
             )
-            scores = _original_scores
 
-        for node, score in zip(all_nodes, scores):
-            node.score = float(score)
+        if reranker_available:
+            if "reranker" not in _model_cache:
+                logger.info(f"  [RAG] Загрузка GGUF реранкера: {reranker_name}")
+                from src.gguf.server import get_gguf_embedding_url
+
+                model_path = config.resolve_model_path(reranker_name)
+                url = get_gguf_embedding_url(model_path, is_reranker=True, n_parallel=1)
+                _model_cache["reranker"] = url
+
+            url = _model_cache["reranker"]
+
+            def _rerank_doc(nws):
+                meta = nws.node.metadata or {}
+                coord_parts = []
+                if meta.get("file_name"):
+                    coord_parts.append(str(meta["file_name"]))
+                if meta.get("page") not in (None, ""):
+                    coord_parts.append(f"стр.{meta['page']}")
+                elif meta.get("time") not in (None, ""):
+                    coord_parts.append(f"@{meta['time']}")
+                elif meta.get("start") not in (None, ""):
+                    coord_parts.append(f"@{meta['start']}")
+                prefix = f"[{' '.join(coord_parts)}] " if coord_parts else ""
+                return prefix + nws.node.get_content()
+
+            documents = [_rerank_doc(n) for n in all_nodes]
+
+            try:
+                _rerank_start = _time.time()
+                scores = [0.0] * len(all_nodes)
+
+                resp = _get_rerank_session().post(
+                    f"{url}/v1/rerank",
+                    json={
+                        "model": "gguf-reranker",
+                        "query": query,
+                        "documents": documents,
+                        "top_n": len(documents),
+                    },
+                    timeout=120,
+                )
+                resp.raise_for_status()
+                results = resp.json().get("results", [])
+                if not results:
+                    logger.debug(f"[RAG] Реранкер вернул пустой results: {resp.text[:200]}")
+                for r in results:
+                    orig_idx = r.get("index", 0)
+                    if orig_idx < len(scores):
+                        scores[orig_idx] = r.get("relevance_score", 0.0)
+
+                elapsed_r = _time.time() - _rerank_start
+                logger.info(f"  [RAG] ✅ Реранкинг: {len(documents)} doc за {elapsed_r:.2f}с")
+
+            except Exception as e:
+                err_body = ""
+                if hasattr(e, "response") and e.response is not None:
+                    err_body = f" body={e.response.text[:300]}"
+                logger.warning(f"[RAG] Ошибка GGUF реранкера: {e}{err_body}")
+                scores = [0] * len(all_nodes)
+
+            if scores and max(scores) < 1e-6:
+                logger.warning(
+                    f"  [RAG] ⚠️ GGUF реранкер выдал слишком низкие оценки "
+                    f"(max: {max(scores)}). Используются оригинальные RRF scores."
+                )
+                scores = _original_scores
+
+            for node, score in zip(all_nodes, scores):
+                node.score = float(score)
 
         all_nodes.sort(key=lambda x: x.score, reverse=True)
         all_nodes = all_nodes[: config.RAG_FINAL_TOP_N]
