@@ -12,7 +12,7 @@ from pydantic import BaseModel
 import config
 from src.rag.prompts import get_system_prompt
 
-from .shared import _http_session, safe_extract_llm_response
+from .shared import get_async_http, safe_extract_llm_response
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["chat"])
@@ -156,8 +156,8 @@ async def chat(request: ChatRequest):
                 ]
                 try:
                     v_payload = {"messages": vision_messages, "stream": False, "max_tokens": 1024}
-                    r_vision = await asyncio.to_thread(
-                        _http_session.post,
+                    http = get_async_http()
+                    r_vision = await http.post(
                         f"{active_llm}/v1/chat/completions",
                         json=v_payload,
                         timeout=60,

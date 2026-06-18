@@ -12,6 +12,7 @@ import sys
 import time
 from ctypes import wintypes
 
+import httpx
 import requests
 import requests.adapters
 
@@ -30,6 +31,23 @@ def make_http_session(pool_size: int = 10) -> requests.Session:
 
 # HTTP-сессия с пулом соединений — используется всеми роутерами для внешних API-вызовов (LLM, эмбеддинги).
 _http_session = make_http_session(config.HTTP_POOL_SIZE_MAIN)
+
+# Асинхронная HTTP-сессия — для async-эндпоинтов (chat streaming, vision OCR)
+_async_http: httpx.AsyncClient | None = None
+
+
+def get_async_http() -> httpx.AsyncClient:
+    global _async_http
+    if _async_http is None or _async_http.is_closed:
+        _async_http = httpx.AsyncClient(
+            timeout=httpx.Timeout(config.LM_STUDIO_HTTP_TIMEOUT),
+            limits=httpx.Limits(
+                max_connections=config.HTTP_POOL_SIZE_MAIN,
+                max_keepalive_connections=config.HTTP_POOL_SIZE_MAIN,
+            ),
+        )
+    return _async_http
+
 
 ingestion_status: dict = {}
 upload_cancel_flags: dict = {}
