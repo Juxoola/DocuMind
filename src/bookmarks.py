@@ -1,11 +1,12 @@
 """Хранилище закладок (bookmarks.json) для вопросов/ответов по блокноту."""
 
-import json
 import logging
 import os
 import threading
 import time
 import uuid
+
+import orjson
 
 import config
 
@@ -34,12 +35,12 @@ def _read_bookmarks(notebook_id: str) -> list:
         return []
     try:
         with open(path, encoding="utf-8") as f:
-            data = json.load(f)
+            data = orjson.loads(f.read())
         if not isinstance(data, list):
             logger.warning(f"[BOOKMARKS] Неверный формат в {path}, ожидался list — обнуляю")
             return []
         return data
-    except (json.JSONDecodeError, OSError) as e:
+    except (orjson.JSONDecodeError, OSError) as e:
         logger.warning(f"[BOOKMARKS] Не удалось прочитать {path}: {e}")
         return []
 
@@ -49,7 +50,7 @@ def _write_bookmarks(notebook_id: str, bookmarks: list) -> None:
     os.makedirs(os.path.dirname(path), exist_ok=True)
     tmp = path + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(bookmarks, f, ensure_ascii=False, indent=2)
+        f.write(orjson.dumps(bookmarks, option=orjson.OPT_INDENT_2).decode())
     os.replace(tmp, path)
 
 

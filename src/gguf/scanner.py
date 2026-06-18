@@ -1,9 +1,10 @@
 """Сканирование и кеширование GGUF-файлов в поисковых директориях."""
 
-import json
 import logging
 import os
 import time
+
+import orjson
 
 import config
 from src.gguf.state import _GGUF_CACHE_FILE, _GGUF_CACHE_TTL_SEC, _gguf_cache_lock
@@ -64,7 +65,7 @@ def scan_gguf_dirs() -> list[dict]:
         try:
             if os.path.exists(_GGUF_CACHE_FILE):
                 with open(_GGUF_CACHE_FILE, encoding="utf-8") as f:
-                    cached = json.load(f)
+                    cached = orjson.loads(f.read())
         except Exception:
             cached = None
 
@@ -92,7 +93,7 @@ def scan_gguf_dirs() -> list[dict]:
             }
             tmp = _GGUF_CACHE_FILE + ".tmp"
             with open(tmp, "w", encoding="utf-8") as f:
-                json.dump(payload, f, ensure_ascii=False)
+                f.write(orjson.dumps(payload).decode())
             os.replace(tmp, _GGUF_CACHE_FILE)
         except Exception as e:
             logger.warning(f"не удалось сохранить scan cache: {e}")

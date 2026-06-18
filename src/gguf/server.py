@@ -8,7 +8,6 @@ import sys
 import threading
 import time
 
-import requests
 import torch
 
 import config
@@ -30,8 +29,11 @@ logger = logging.getLogger(__name__)
 def is_server_ready(port: int) -> bool:
 
     try:
-        r = requests.get(f"http://127.0.0.1:{port}/health", timeout=1)
-        return r.status_code == 200
+        import httpx
+
+        with httpx.Client(timeout=1) as client:
+            r = client.get(f"http://127.0.0.1:{port}/health")
+            return r.status_code == 200
     except Exception:
         return False
 
@@ -628,7 +630,10 @@ def unload_all_models(role: str = None):
                 port = _server_ports.get(path)
                 if port:
                     try:
-                        requests.post(f"http://127.0.0.1:{port}/slots/0/clear", timeout=0.5)
+                        import httpx
+
+                        with httpx.Client(timeout=0.5) as client:
+                            client.post(f"http://127.0.0.1:{port}/slots/0/clear")
                     except Exception:
                         pass
             except Exception:

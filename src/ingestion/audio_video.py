@@ -1,6 +1,5 @@
 """Обработка аудио/видео: транскрибация WhisperX, анализ кадров, Vision."""
 
-import json
 import logging
 import os
 import subprocess
@@ -9,6 +8,7 @@ import uuid
 
 import cv2
 import numpy as np
+import orjson
 import torch
 from llama_index.core.schema import TextNode
 
@@ -389,5 +389,5 @@ def process_audio_video(
     with open(
         os.path.join(os.path.dirname(file_path), f"{file_name}.json"), "w", encoding="utf-8"
     ) as f:
-        json.dump(metadata_json, f, ensure_ascii=False, indent=2)
+        f.write(orjson.dumps(metadata_json, option=orjson.OPT_INDENT_2).decode())
     return nodes

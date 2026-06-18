@@ -1,7 +1,8 @@
 """Асинхронный стриминг чат-ответов через llama-server API."""
 
-import json
 import logging
+
+import orjson
 
 logger = logging.getLogger(__name__)
 
@@ -56,7 +57,7 @@ async def stream_gguf_chat(
                         if line_str == "data: [DONE]":
                             break
                         try:
-                            data = json.loads(line_str[6:])
+                            data = orjson.loads(line_str[6:])
                             delta = data["choices"][0]["delta"]
 
                             reasoning = delta.get("reasoning_content", "")

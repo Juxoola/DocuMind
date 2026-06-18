@@ -1,6 +1,5 @@
 """Обработка текстовых документов: PDF, PPTX, DOCX."""
 
-import json
 import logging
 import os
 import subprocess
@@ -8,6 +7,7 @@ import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import fitz
+import orjson
 from llama_index.core.schema import TextNode
 
 import config
@@ -244,7 +244,7 @@ def process_pdf(
             with open(
                 os.path.join(os.path.dirname(file_path), f"{file_name}.json"), "w", encoding="utf-8"
             ) as f:
-                json.dump(metadata_json, f, ensure_ascii=False, indent=2)
+                f.write(orjson.dumps(metadata_json, option=orjson.OPT_INDENT_2).decode())
     finally:
         doc.close()
     return nodes

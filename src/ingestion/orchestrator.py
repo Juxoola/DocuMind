@@ -199,9 +199,9 @@ def process_image(
             "w",
             encoding="utf-8",
         ) as f:
-            import json
+            import orjson
 
-            json.dump(metadata_json, f, ensure_ascii=False, indent=2)
+            f.write(orjson.dumps(metadata_json, option=orjson.OPT_INDENT_2).decode())
 
     if progress_cb:
         progress_cb(60, f"Изображение: {file_name} готово")

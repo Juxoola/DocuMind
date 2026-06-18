@@ -11,7 +11,7 @@
 
 import os
 import sys
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -177,29 +177,41 @@ class TestServerReady:
     """Проверка is_server_ready (с моком requests)."""
 
     def test_ready_when_200(self):
-        with patch("src.gguf.server.requests.get") as mock_get:
-            mock_get.return_value.status_code = 200
+        mock_client = MagicMock()
+        mock_client.get.return_value.status_code = 200
+        mock_client.__enter__ = MagicMock(return_value=mock_client)
+        mock_client.__exit__ = MagicMock(return_value=False)
+        with patch("httpx.Client", return_value=mock_client):
             from src.gguf.server import is_server_ready
 
             assert is_server_ready(8081) is True
 
     def test_not_ready_when_not_200(self):
-        with patch("src.gguf.server.requests.get") as mock_get:
-            mock_get.return_value.status_code = 503
+        mock_client = MagicMock()
+        mock_client.get.return_value.status_code = 503
+        mock_client.__enter__ = MagicMock(return_value=mock_client)
+        mock_client.__exit__ = MagicMock(return_value=False)
+        with patch("httpx.Client", return_value=mock_client):
             from src.gguf.server import is_server_ready
 
             assert is_server_ready(8081) is False
 
     def test_not_ready_when_exception(self):
-        with patch("src.gguf.server.requests.get") as mock_get:
-            mock_get.side_effect = ConnectionError("refused")
+        mock_client = MagicMock()
+        mock_client.get.side_effect = Exception("Connection refused")
+        mock_client.__enter__ = MagicMock(return_value=mock_client)
+        mock_client.__exit__ = MagicMock(return_value=False)
+        with patch("httpx.Client", return_value=mock_client):
             from src.gguf.server import is_server_ready
 
             assert is_server_ready(8081) is False
 
     def test_not_ready_when_timeout(self):
-        with patch("src.gguf.server.requests.get") as mock_get:
-            mock_get.side_effect = TimeoutError("timeout")
+        mock_client = MagicMock()
+        mock_client.get.side_effect = TimeoutError("timeout")
+        mock_client.__enter__ = MagicMock(return_value=mock_client)
+        mock_client.__exit__ = MagicMock(return_value=False)
+        with patch("httpx.Client", return_value=mock_client):
             from src.gguf.server import is_server_ready
 
             assert is_server_ready(8081) is False
