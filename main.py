@@ -2,6 +2,7 @@
 
 import logging
 import os
+import re
 import sys
 import threading
 from contextlib import asynccontextmanager
@@ -124,6 +125,8 @@ if os.name == "nt":
 
 app = FastAPI(title="DocuMind", lifespan=lifespan)
 
+_NB_ID_PATTERN = re.compile(r"^[a-f0-9]{8}$")
+
 
 # Middleware: проверяет Content-Length для /api/upload до передачи в роутер — отклоняет файлы больше лимита.
 @app.middleware("http")
@@ -168,10 +171,12 @@ app.mount("/static", StaticFiles(directory=os.path.join(config.BASE_DIR, "static
 async def serve_notebook_file(notebook_id: str, subpath: str):
     from starlette.responses import FileResponse
 
-    file_path = os.path.join(config.NOTEBOOKS_DIR, notebook_id, subpath)
-    file_path = os.path.normpath(file_path)
-    # Защита от path traversal
-    if not file_path.startswith(os.path.normpath(config.NOTEBOOKS_DIR)):
+    if not _NB_ID_PATTERN.match(notebook_id):
+        return JSONResponse(status_code=400, content={"detail": "Некорректный ID блокнота"})
+
+    file_path = os.path.realpath(os.path.join(config.NOTEBOOKS_DIR, notebook_id, subpath))
+    # Защита от path traversal через realpath (разрешает симлинки)
+    if not file_path.startswith(os.path.realpath(config.NOTEBOOKS_DIR)):
         return JSONResponse(status_code=403, content={"detail": "Forbidden"})
     if not os.path.isfile(file_path):
         return JSONResponse(status_code=404, content={"detail": "Not found"})
