@@ -75,13 +75,13 @@ async def chat(request: ChatRequest):
     nodes = []
     sources = []
     context = ""
+    loop = asyncio.get_running_loop()
     skip_initial_rag = (
         request.image_base64 and request.use_gguf == "true" and request.gguf_model_path
     )
 
     if query_for_rag.strip() and not skip_initial_rag:
         logger.debug(f"DEBUG: Запуск RAG поиска для: {query_for_rag[:50]}...")
-        loop = asyncio.get_running_loop()
         nodes = await loop.run_in_executor(
             RAG_POOL, retrieve_nodes, query_for_rag, request.notebook_id, request.allowed_files
         )
@@ -300,10 +300,25 @@ async def chat(request: ChatRequest):
                     yield f"data: {json.dumps({'type': 'error', 'text': 'LLM не инициализирован. Настройте URL API-модели или загрузите GGUF-модель.'}, ensure_ascii=False)}\n\n"
                     yield "data: [DONE]\n\n"
                     return
-                for chunk in active_llm.stream_chat(chat_messages):
-                    if chunk.delta:
-                        token_count += 1
-                        yield f"data: {json.dumps({'type': 'chunk', 'text': chunk.delta}, ensure_ascii=False)}\n\n"
+
+                queue = asyncio.Queue()
+
+                def _sync_producer():
+                    try:
+                        for chunk in active_llm.stream_chat(chat_messages):
+                            if chunk.delta:
+                                asyncio.run_coroutine_threadsafe(queue.put(chunk.delta), loop)
+                    finally:
+                        asyncio.run_coroutine_threadsafe(queue.put(None), loop)
+
+                loop.run_in_executor(RAG_POOL, _sync_producer)
+
+                while True:
+                    delta = await queue.get()
+                    if delta is None:
+                        break
+                    token_count += 1
+                    yield f"data: {json.dumps({'type': 'chunk', 'text': delta}, ensure_ascii=False)}\n\n"
 
             elapsed = time.time() - global_start_time
             yield f"data: {json.dumps({'type': 'stats', 'elapsed_sec': round(elapsed, 2), 'total_tokens': token_count, 'tokens_per_sec': round(token_count / elapsed, 1) if elapsed > 0 else 0})}\n\n"
