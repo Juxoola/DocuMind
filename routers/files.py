@@ -29,6 +29,9 @@ router = APIRouter(tags=["files"])
 
 @router.get("/api/files")
 async def get_files(notebook_id: str):
+    from routers.notebooks import validate_nb_id
+
+    notebook_id = validate_nb_id(notebook_id)
     paths = config.get_notebook_paths(notebook_id)
     if os.path.exists(paths["data"]):
         files_list = [f for f in os.listdir(paths["data"]) if not f.endswith(".json")]
@@ -317,6 +320,9 @@ async def cancel_upload(notebook_id: str = Query(...), task_id: str = Query(None
 async def delete_file(filename: str, notebook_id: str):
     import cv2
 
+    from routers.notebooks import validate_nb_id
+
+    notebook_id = validate_nb_id(notebook_id)
     filename = safe_filename(filename)
     paths = config.get_notebook_paths(notebook_id)
     file_path = os.path.join(paths["data"], filename)
