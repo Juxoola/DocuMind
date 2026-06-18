@@ -243,6 +243,12 @@ async def upload_file(
         except IngestionCancelled:
             logger.info(f"[INGESTION] Загрузка отменена пользователем: {file.filename}")
             try:
+                from src.gguf.server import unload_all_models
+
+                unload_all_models()
+            except Exception:
+                logger.debug("cancel: не удалось выгрузить модели")
+            try:
                 if os.path.exists(file_path):
                     os.remove(file_path)
             except Exception:
