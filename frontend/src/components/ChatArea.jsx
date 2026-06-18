@@ -886,7 +886,7 @@ function AnswerModeSelect({ value, onChange }) {
 
 export default function ChatArea({ notebook, selectedSources, onOpenSource, llmSettings, setLlmSettings }) {
   const [messages, setMessages] = useState([
-    { role: 'ai', content: 'Привет! Я проанализировал ваши источники и готов ответить на любые вопросы. Что вас интересует?' }
+    { role: 'ai', content: 'Привет! Я проанализировал ваши источники и готов ответить на любые вопросы. Что вас интересует?', system: true }
   ]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
