@@ -267,9 +267,7 @@ async def upload_file(
             ingestion_status[notebook_id] = {"is_uploading": False, "cancelled": True}
             q.put({"type": "cancelled", "filename": file.filename})
         except Exception as e:
-            import traceback
-
-            traceback.print_exc()
+            logger.error("Ошибка при обработке загрузки", exc_info=True)
             ingestion_status[notebook_id] = {"is_uploading": False, "error": str(e)}
             q.put({"type": "error", "msg": str(e)})
         finally:

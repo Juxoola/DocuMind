@@ -4,7 +4,6 @@ import asyncio
 import json
 import logging
 import time
-import traceback
 
 from fastapi import APIRouter
 from fastapi.responses import StreamingResponse
@@ -301,7 +300,7 @@ async def chat(request: ChatRequest):
             yield f"data: {json.dumps({'type': 'stats', 'elapsed_sec': round(elapsed, 2), 'total_tokens': token_count, 'tokens_per_sec': round(token_count / elapsed, 1) if elapsed > 0 else 0})}\n\n"
             yield "data: [DONE]\n\n"
         except Exception as e:
-            traceback.print_exc()
+            logger.error("Ошибка при обработке чата", exc_info=True)
             yield f"data: {json.dumps({'type': 'error', 'text': str(e)}, ensure_ascii=False)}\n\n"
             yield "data: [DONE]\n\n"
         finally:
