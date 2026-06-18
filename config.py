@@ -112,8 +112,8 @@ CHAT_MIN_P = float(os.getenv("CHAT_MIN_P", 0.05))
 
 RAG_CONFIG_FILE = os.path.join(BASE_DIR, "rag_config.json")
 
-from src.config_manager import load_rag_config as _load_rag_config_file
-from src.config_manager import save_rag_config as _save_rag_config_file
+from src.config_manager import load_rag_config as _cm_load
+from src.config_manager import save_rag_config as _cm_save
 
 
 def _apply_rag_config(data: dict) -> None:
@@ -152,20 +152,15 @@ def _collect_rag_config() -> dict:
     }
 
 
-def _load_from_file():
+def load_rag_config():
     defaults = _collect_rag_config()
-    data = _load_rag_config_file(RAG_CONFIG_FILE, defaults)
+    data = _cm_load(RAG_CONFIG_FILE, defaults)
     _apply_rag_config(data)
 
 
-def _save_to_file():
+def save_rag_config():
     data = _collect_rag_config()
-    _save_rag_config_file(RAG_CONFIG_FILE, data)
-
-
-# Обёртки для обратной совместимости
-save_rag_config = _save_to_file
-load_rag_config = _load_from_file
+    _cm_save(RAG_CONFIG_FILE, data)
 
 
 load_rag_config()
