@@ -2,6 +2,7 @@
 
 import logging
 import threading
+from concurrent.futures import ThreadPoolExecutor
 
 import requests
 
@@ -13,8 +14,11 @@ logger = logging.getLogger(__name__)
 _init_lock = threading.Lock()
 
 _model_cache: dict = {}
-
 _client_cache: dict = {}
+
+# Выделенный пул потоков для RAG-операций (ChromaDB + BM25 + reranking).
+# Отдельный от default executor чтобы не блокировать другие async-задачи.
+RAG_POOL = ThreadPoolExecutor(max_workers=4, thread_name_prefix="rag")
 
 # HTTP-сессия реранкера: отдельный pool чтобы не конкурировать с основными запросами
 _rerank_session: requests.Session | None = None
