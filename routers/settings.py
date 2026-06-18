@@ -6,6 +6,7 @@ from fastapi import APIRouter
 from pydantic import BaseModel
 
 import config
+from src.config_manager import _config_lock
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["settings"])
@@ -27,7 +28,7 @@ class UpdateModelDirsRequest(BaseModel):
 
 @router.post("/api/update-model-dirs")
 async def update_model_dirs(req: UpdateModelDirsRequest):
-    with config._config_lock:
+    with _config_lock:
         config.GGUF_SEARCH_DIRS = req.dirs
         config.save_rag_config()
     try:
@@ -64,7 +65,7 @@ class UpdateRagConfigRequest(BaseModel):
 async def update_rag_config(req: UpdateRagConfigRequest):
     from src.rag.models import unload_rag_models
 
-    with config._config_lock:
+    with _config_lock:
         config.EMBEDDING_MODEL_NAME = req.embedding_model
         config.RERANKER_MODEL_NAME = req.reranker_model
         config.RAG_TOP_K_PER_FILE = req.top_k_per_file
