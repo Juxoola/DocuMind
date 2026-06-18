@@ -112,9 +112,6 @@ CHAT_MIN_P = float(os.getenv("CHAT_MIN_P", 0.05))
 
 RAG_CONFIG_FILE = os.path.join(BASE_DIR, "rag_config.json")
 
-from src.config_manager import load_rag_config_sync as _cm_load
-from src.config_manager import save_rag_config_sync as _cm_save
-
 
 def _apply_rag_config(data: dict) -> None:
     global \
@@ -152,18 +149,20 @@ def _collect_rag_config() -> dict:
     }
 
 
-def load_rag_config():
-    defaults = _collect_rag_config()
-    data = _cm_load(RAG_CONFIG_FILE, defaults)
-    _apply_rag_config(data)
+# Sync загрузка при старте (до async event loop)
+def _load_config_sync():
+    try:
+        if os.path.exists(RAG_CONFIG_FILE):
+            import orjson
+
+            with open(RAG_CONFIG_FILE, "rb") as f:
+                data = orjson.loads(f.read())
+            _apply_rag_config(data)
+    except Exception as e:
+        logger.warning(f"Не удалось загрузить RAG config: {e}")
 
 
-def save_rag_config():
-    data = _collect_rag_config()
-    _cm_save(RAG_CONFIG_FILE, data)
-
-
-load_rag_config()
+_load_config_sync()
 
 
 # Поиск GGUF-файла: сначала абсолютный путь, потом по имени через
