@@ -1,4 +1,4 @@
-"""RAG retrieval pipeline: Query Expansion, гибридный поиск (RRF), реранкинг."""
+"""Модуль извлечения документов для RAG-пайплайна."""
 
 import logging
 import os
@@ -27,7 +27,6 @@ logger = logging.getLogger(__name__)
 
 
 def invalidate_index_cache(notebook_id: str = None):
-    """Сбрасывает кеш VectorStoreIndex для конкретного или всех ноутбуков."""
     with _index_cache_lock:
         if notebook_id:
             _index_cache.pop(notebook_id, None)
@@ -147,7 +146,6 @@ def _rrf_fuse_across_files(file_results, k: int = None):
 
 
 def _load_bm25_retriever(notebook_id: str):
-    """Загружает BM25Retriever из persist-директории. При отсутствии — форсирует пересборку."""
     paths = config.get_notebook_paths(notebook_id)
     bm25_dir = os.path.join(paths["base"], "bm25")
 
@@ -173,7 +171,6 @@ def _load_bm25_retriever(notebook_id: str):
 
 
 def _hybrid_search(index, query: str, allowed_files, bm25_retriever, qe_llm):
-    """Гибридный поиск: векторный (ChromaDB) + BM25 с Reciprocal Rank Fusion, опциональный QE."""
     all_nodes = []
 
     if config.RAG_QUERY_EXPANSION:
@@ -351,7 +348,6 @@ def _hybrid_search(index, query: str, allowed_files, bm25_retriever, qe_llm):
 
 
 def _rerank_nodes(all_nodes, query: str):
-    """Реранкинг через GGUF-реранкер. Возвращает отсортированный список, обрезанный до RAG_FINAL_TOP_N."""
     if not all_nodes or not config.USE_RERANKER:
         return all_nodes
 
@@ -454,9 +450,6 @@ def _rerank_nodes(all_nodes, query: str):
 
 
 def _filter_chunks(all_nodes):
-    """Адаптивная фильтрация: median-MAD порог + top-k ratio."""
-    # Адаптивная фильтрация: отсекает чанки ниже median - 2*MAD, затем top-k ratio от максимума
-
     if len(all_nodes) >= 4:
         score_vals = [n.score for n in all_nodes]
         median = _stats.median(score_vals)

@@ -128,7 +128,6 @@ SYSTEM_PROMPT = (
 
 
 def get_system_prompt(mode: str = None) -> str:
-    """Собирает полный системный промпт из базы, правил режима и цитирования."""
     if not mode or mode not in SYSTEM_PROMPT_RULES:
         mode = ANSWER_MODE_DEFAULT
     return (

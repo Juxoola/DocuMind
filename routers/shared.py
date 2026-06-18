@@ -56,7 +56,6 @@ _INGESTION_STATUS_TTL_SEC = 3600  # 1 час
 
 
 def _cleanup_ingestion_status():
-    """Удаляет записи ingestion_status старше _INGESTION_STATUS_TTL_SEC."""
     now = time.time()
     expired = [
         k

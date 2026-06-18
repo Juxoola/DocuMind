@@ -55,7 +55,6 @@ def _write_bookmarks(notebook_id: str, bookmarks: list) -> None:
 
 
 def list_bookmarks(notebook_id: str) -> list:
-    """Возвращает все закладки блокнота, новые сверху."""
     with _lock_for(notebook_id):
         items = _read_bookmarks(notebook_id)
     return sorted(items, key=lambda b: b.get("created_at", 0), reverse=True)
@@ -70,7 +69,6 @@ def get_bookmark(notebook_id: str, bookmark_id: str) -> dict | None:
 
 
 def create_bookmark(notebook_id: str, payload: dict) -> dict:
-    """Создаёт новую закладку. payload — словарь от клиента (без id/created_at/status)."""
     with _lock_for(notebook_id):
         items = _read_bookmarks(notebook_id)
         bm = {
@@ -96,7 +94,6 @@ def create_bookmark(notebook_id: str, payload: dict) -> dict:
 
 
 def update_bookmark(notebook_id: str, bookmark_id: str, patch: dict) -> dict | None:
-    """Частичное обновление (title, tags). Не позволяет перезаписать question/answer."""
     with _lock_for(notebook_id):
         items = _read_bookmarks(notebook_id)
         for i, b in enumerate(items):
@@ -126,10 +123,6 @@ def delete_bookmark(notebook_id: str, bookmark_id: str) -> bool:
 
 
 def mark_stale_for_file(notebook_id: str, file_name: str) -> int:
-    """
-    Помечает закладки, ссылающиеся на удалённый файл, статусом 'stale'.
-    Возвращает количество обновлённых.
-    """
     with _lock_for(notebook_id):
         items = _read_bookmarks(notebook_id)
         updated = 0

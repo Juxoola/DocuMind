@@ -50,7 +50,6 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Lifespan-менеджер: cleanup pending_delete, миграция старых данных, фоновая предзагрузка моделей.
 
     logger.info("Запуск сервера...")
 
@@ -175,7 +174,6 @@ async def serve_notebook_file(notebook_id: str, subpath: str):
         return JSONResponse(status_code=400, content={"detail": "Некорректный ID блокнота"})
 
     file_path = os.path.realpath(os.path.join(config.NOTEBOOKS_DIR, notebook_id, subpath))
-    # Защита от path traversal через realpath (разрешает симлинки)
     if not file_path.startswith(os.path.realpath(config.NOTEBOOKS_DIR)):
         return JSONResponse(status_code=403, content={"detail": "Forbidden"})
     if not os.path.isfile(file_path):

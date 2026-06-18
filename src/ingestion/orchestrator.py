@@ -123,11 +123,9 @@ def process_image(
     cancel_check=None,
     keep_vision_alive=False,
 ):
-    """Анализ изображения через Vision: описание → RAG + просмотр в правой панели."""
     file_name = os.path.basename(file_path)
     logger.info(f"[IMAGE] Анализ: {file_name}")
 
-    # Копируем в images/ для просмотра в правой панели
     dest_name = f"img_{uuid.uuid4().hex[:6]}{os.path.splitext(file_path)[1].lower()}"
     dest_path = os.path.join(images_dir, dest_name)
     shutil.copy2(file_path, dest_path)
@@ -188,7 +186,6 @@ def process_image(
     else:
         logger.info("[IMAGE] Vision не настроен — пропуск анализа изображения")
 
-    # Сохраняем метаданные
     if frame_data:
         metadata_json = {
             "file_name": file_name,

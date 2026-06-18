@@ -104,9 +104,6 @@ def process_pdf(
     n_workers = min(8, (os.cpu_count() or 4), total_pages)
 
     try:
-        # Один проход: анализ страницы + построение узлов + рендер pixmap
-        # в одном ThreadPoolExecutor — вместо двух последовательных пулов.
-        # Батчами по BATCH_SIZE чтобы не держать всеPixmap в памяти.
         BATCH_SIZE = 16
         if n_workers <= 1:
             for page_num in range(total_pages):
@@ -189,7 +186,6 @@ def process_pdf(
                     except IngestionCancelled:
                         raise
 
-                    # Сортируем по номеру страницы перед добавлением в nodes
                     results.sort(key=lambda x: x[0]["page"])
                     for frame_info, desc in results:
                         if desc and "Изображение без описания" not in desc:
@@ -255,7 +251,6 @@ def process_pdf(
 
 
 def _find_soffice():
-    """Находит soffice.exe LibreOffice: bin/libreoffice/ → PATH → Program Files."""
     import shutil
 
     local = os.path.join(config.BASE_DIR, "libreoffice", "program", "soffice.exe")
@@ -272,10 +267,6 @@ def _find_soffice():
 
 
 def _convert_via_libreoffice(file_path):
-    """Конвертирует документ в PDF через LibreOffice headless.
-
-    Возвращает путь к PDF или выбрасывает исключение.
-    """
     soffice = _find_soffice()
     if not soffice:
         raise FileNotFoundError("LibreOffice не найден. Установите или скачайте через setup.ps1")
@@ -294,7 +285,6 @@ def _convert_via_libreoffice(file_path):
     pdf_path = os.path.splitext(file_path)[0] + ".pdf"
     if result.returncode == 0 and os.path.exists(pdf_path):
         logger.info(f"[DOCX] Сконвертировано в PDF через LibreOffice: {os.path.basename(pdf_path)}")
-        # Удаляем оригинальный docx/pptx после успешной конвертации
         try:
             os.remove(file_path)
         except OSError:
@@ -307,11 +297,6 @@ def _convert_via_libreoffice(file_path):
 
 
 def _convert_via_com(file_path, app_name, format_code):
-    """Конвертирует Office-документ в PDF через COM.
-
-    Возвращает путь к PDF или выбрасывает исключение.
-    Используется как fallback для PPTX (PowerPoint) и DOCX (Word).
-    """
     import pythoncom
     import win32com.client
 
@@ -362,10 +347,8 @@ def process_pptx(
     cancel_check=None,
     keep_vision_alive=False,
 ):
-    """PPTX → PDF (LibreOffice) → process_pdf с Vision-анализом изображений."""
     file_name = os.path.basename(file_path)
 
-    # Всегда конвертируем pptx в PDF для анализа изображений
     try:
         pdf_path = _convert_via_libreoffice(file_path)
     except FileNotFoundError:
@@ -388,7 +371,6 @@ def process_pptx(
         except Exception:
             return _process_pptx_textonly(file_path, file_name)
 
-    # После конвертации file_name должен ссылаться на PDF
     file_name = os.path.basename(pdf_path)
 
     return process_pdf(
@@ -404,7 +386,6 @@ def process_pptx(
 
 
 def _process_pptx_textonly(file_path, file_name):
-    """Fallback: извлечь текст через python-pptx без анализа изображений."""
     try:
         from pptx import Presentation
 
@@ -431,10 +412,8 @@ def process_docx(
     cancel_check=None,
     keep_vision_alive=False,
 ):
-    """DOCX → PDF (LibreOffice) → process_pdf с Vision-анализом изображений."""
     file_name = os.path.basename(file_path)
 
-    # Всегда конвертируем docx в PDF для корректного отображения и анализа изображений
     try:
         pdf_path = _convert_via_libreoffice(file_path)
     except FileNotFoundError:
@@ -457,7 +436,6 @@ def process_docx(
         except Exception:
             return _process_docx_textonly(file_path, file_name)
 
-    # После конвертации file_name должен ссылаться на PDF
     file_name = os.path.basename(pdf_path)
 
     return process_pdf(
@@ -473,7 +451,6 @@ def process_docx(
 
 
 def _process_docx_textonly(file_path, file_name):
-    """Fallback: извлечь текст через python-docx без анализа изображений."""
     try:
         import docx as _docx
 

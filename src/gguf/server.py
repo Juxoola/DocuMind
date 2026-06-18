@@ -118,7 +118,6 @@ def _start_llm_server_sync(gguf_path: str, mmproj_path: str, current_config: dic
     )
     _assign_to_job(process)
 
-    # Backoff 0.05→1.0с: если процесс упал — RuntimeError, если 60с — TimeoutError
     start_wait = time.time()
     backoff = 0.05
     while time.time() - start_wait < 60:
@@ -468,7 +467,6 @@ def get_gguf_embedding_url(
         "n_parallel": n_parallel,
     }
 
-    # Шаг 1: проверка кэша под lock
     with _lock:
         if gguf_path in _server_processes:
             if (
@@ -485,7 +483,6 @@ def get_gguf_embedding_url(
         if not os.path.exists(gguf_path):
             raise FileNotFoundError(f"GGUF модель не найдена: {gguf_path}")
 
-    # Шаг 2: запуск сервера БЕЗ lock (может занять до 60 сек)
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     s.bind(("", 0))
     port = s.getsockname()[1]
@@ -528,13 +525,11 @@ def get_gguf_embedding_url(
     )
     _assign_to_job(process)
 
-    # Шаг 3: poll loop БЕЗ lock
     start_wait = time.time()
     backoff = 0.05
     while time.time() - start_wait < 60:
         if is_server_ready(port):
             logger.info(f"[GGUF Server] {role.capitalize()} готов!")
-            # Шаг 4: запись результата под lock
             with _lock:
                 _server_processes[gguf_path] = process
                 _server_ports[gguf_path] = port
@@ -572,7 +567,6 @@ def kill_stray_servers():
         if not _server_processes:
             logger.debug("[GGUF Server] Нет отслеживаемых процессов для завершения.")
             return
-        # Копируем под lock, убиваем без lock
         processes_copy = dict(_server_processes)
         _server_processes.clear()
         _server_ports.clear()

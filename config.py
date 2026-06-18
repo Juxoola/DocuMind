@@ -1,3 +1,5 @@
+"""Конфигурация приложения: переменные окружения, пути и параметры RAG-пайплайна."""
+
 import logging
 import os
 from functools import lru_cache
@@ -200,5 +202,4 @@ def resolve_model_path(path_or_filename: str) -> str:
 
 
 def validate_gguf_path(name: str) -> bool:
-    """Проверяет, что имя или путь модели — .gguf файл."""
     return bool(name.lower().endswith(".gguf") or (os.path.isabs(name) and os.path.exists(name)))

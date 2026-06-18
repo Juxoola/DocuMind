@@ -19,7 +19,6 @@ def get_image_base64(image_path):
 
 
 def make_vision_message(base64_data: str, text: str = "") -> list:
-    """Build the content list for a vision user message."""
     msg = [{"type": "text", "text": text}] if text else []
     msg.append(
         {
