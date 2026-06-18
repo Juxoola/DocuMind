@@ -4,7 +4,6 @@ import asyncio
 import json
 import logging
 import os
-import subprocess
 
 from fastapi import APIRouter
 from fastapi.responses import StreamingResponse
@@ -27,7 +26,7 @@ router = APIRouter(tags=["gguf"])
 @router.get("/api/gguf-models")
 async def api_scan_gguf_models():
     try:
-        models = scan_gguf_dirs()
+        models = await asyncio.to_thread(scan_gguf_dirs)
         return {"models": models}
     except Exception as e:
         from fastapi import HTTPException
@@ -68,14 +67,14 @@ def _get_gguf_servers_info() -> list:
 
 @router.post("/api/gguf-unload")
 async def api_gguf_unload_all():
-    unload_all_models()
+    await asyncio.to_thread(unload_all_models)
     return {"status": "ok", "msg": "Все модели выгружены"}
 
 
 @router.post("/api/gguf-kill-all")
 async def api_gguf_kill_all():
-    kill_stray_servers()
-    unload_all_models()
+    await asyncio.to_thread(kill_stray_servers)
+    await asyncio.to_thread(unload_all_models)
     return {"status": "ok", "msg": "Все процессы llama-server завершены"}
 
 
@@ -103,16 +102,19 @@ async def api_vram():
     free_mib = 0
     gpu_name = "unknown"
     try:
-        out = subprocess.run(
-            [
-                "nvidia-smi",
-                "--query-gpu=name,memory.used,memory.free,memory.total",
-                "--format=csv,noheader,nounits",
-            ],
-            capture_output=True,
-            text=True,
-            timeout=3,
+        proc = await asyncio.create_subprocess_exec(
+            "nvidia-smi",
+            "--query-gpu=name,memory.used,memory.free,memory.total",
+            "--format=csv,noheader,nounits",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
         )
+        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=3)
+        out = type(
+            "Result",
+            (),
+            {"returncode": proc.returncode, "stdout": stdout.decode() if stdout else ""},
+        )()
         if out.returncode == 0 and out.stdout.strip():
             parts = [p.strip() for p in out.stdout.strip().split(",")]
             if len(parts) >= 4:
@@ -124,16 +126,19 @@ async def api_vram():
         logger.debug("gguf: не удалось запросить nvidia-smi (GPU)")
     per_process = []
     try:
-        out = subprocess.run(
-            [
-                "nvidia-smi",
-                "--query-compute-apps=pid,process_name,used_memory",
-                "--format=csv,noheader,nounits",
-            ],
-            capture_output=True,
-            text=True,
-            timeout=3,
+        proc = await asyncio.create_subprocess_exec(
+            "nvidia-smi",
+            "--query-compute-apps=pid,process_name,used_memory",
+            "--format=csv,noheader,nounits",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
         )
+        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=3)
+        out = type(
+            "Result",
+            (),
+            {"returncode": proc.returncode, "stdout": stdout.decode() if stdout else ""},
+        )()
         if out.returncode == 0:
             for line in out.stdout.strip().splitlines():
                 parts = [p.strip() for p in line.split(",")]
