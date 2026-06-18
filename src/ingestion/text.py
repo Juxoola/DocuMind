@@ -103,101 +103,97 @@ def process_pdf(
     total_pages = len(doc)
     n_workers = min(8, (os.cpu_count() or 4), total_pages)
 
-    # Один проход: анализ страницы + построение узлов + рендер pixmap
-    # в одном ThreadPoolExecutor — вместо двух последовательных пулов.
-    # Батчами по BATCH_SIZE чтобы не держать всеPixmap в памяти.
-    BATCH_SIZE = 16
-    if n_workers <= 1:
-        for page_num in range(total_pages):
-            if _is_cancelled():
-                raise IngestionCancelled(f"Cancelled at page {page_num + 1}")
-            pn, local_nodes, image_path = _analyze_and_build_page(
-                page_num, doc, images_dir, file_name, splitter
-            )
-            nodes.extend(local_nodes)
-            if image_path:
-                frame_list.append({"page": pn + 1, "path": image_path})
-    else:
-        for batch_start in range(0, total_pages, BATCH_SIZE):
-            if _is_cancelled():
-                raise IngestionCancelled(f"Cancelled at page {batch_start + 1}")
-            batch_end = min(batch_start + BATCH_SIZE, total_pages)
-            with ThreadPoolExecutor(max_workers=n_workers) as ex:
-                futures = []
-                for page_num in range(batch_start, batch_end):
-                    futures.append(
-                        ex.submit(
-                            _analyze_and_build_page, page_num, doc, images_dir, file_name, splitter
-                        )
-                    )
-                artifacts = [None] * len(futures)
-                for i, fut in enumerate(as_completed(futures)):
-                    if _is_cancelled():
-                        ex.shutdown(wait=False, cancel_futures=True)
-                        raise IngestionCancelled("Cancelled during page processing")
-                    pn, local_nodes, image_path = fut.result()
-                    artifacts[i] = (pn, local_nodes, image_path)
-                for page_num_result, local_nodes, image_path in artifacts:
-                    nodes.extend(local_nodes)
-                    if image_path:
-                        frame_list.append({"page": page_num_result + 1, "path": image_path})
-
-    if frame_list:
-        if shared_llm_url is None:
-            shared_llm_url = get_vision_url(llm_settings)
-        if shared_llm_url:
-            v_conc = int(llm_settings.get("vision_concurrency") or config.VISION_CONCURRENCY)
-            n = len(frame_list)
-            if progress_cb:
-                progress_cb(
-                    65,
-                    f"Анализ {n} страниц PDF ({'параллельно' if v_conc > 1 else 'последовательно'})...",
+    try:
+        # Один проход: анализ страницы + построение узлов + рендер pixmap
+        # в одном ThreadPoolExecutor — вместо двух последовательных пулов.
+        # Батчами по BATCH_SIZE чтобы не держать всеPixmap в памяти.
+        BATCH_SIZE = 16
+        if n_workers <= 1:
+            for page_num in range(total_pages):
+                if _is_cancelled():
+                    raise IngestionCancelled(f"Cancelled at page {page_num + 1}")
+                pn, local_nodes, image_path = _analyze_and_build_page(
+                    page_num, doc, images_dir, file_name, splitter
                 )
-
-            with ThreadPoolExecutor(max_workers=v_conc) as executor:
-                futures = {
-                    executor.submit(
-                        describe_image_with_lmstudio, f["path"], llm_settings, shared_llm_url
-                    ): f
-                    for f in frame_list
-                }
-                done_count = 0
-                results = []
-                try:
-                    for future in as_completed(futures):
+                nodes.extend(local_nodes)
+                if image_path:
+                    frame_list.append({"page": pn + 1, "path": image_path})
+        else:
+            for batch_start in range(0, total_pages, BATCH_SIZE):
+                if _is_cancelled():
+                    raise IngestionCancelled(f"Cancelled at page {batch_start + 1}")
+                batch_end = min(batch_start + BATCH_SIZE, total_pages)
+                with ThreadPoolExecutor(max_workers=n_workers) as ex:
+                    futures = []
+                    for page_num in range(batch_start, batch_end):
+                        futures.append(
+                            ex.submit(
+                                _analyze_and_build_page,
+                                page_num,
+                                doc,
+                                images_dir,
+                                file_name,
+                                splitter,
+                            )
+                        )
+                    artifacts = [None] * len(futures)
+                    for i, fut in enumerate(as_completed(futures)):
                         if _is_cancelled():
-                            executor.shutdown(wait=False, cancel_futures=True)
-                            raise IngestionCancelled(f"Cancelled during OCR ({done_count}/{n})")
-                        frame_info = futures[future]
-                        desc = future.result()
-                        done_count += 1
-                        results.append((frame_info, desc))
-                        if progress_cb:
-                            progress_cb(
-                                65 + int(done_count / n * 25), f"Описание PDF: {done_count}/{n}"
-                            )
-                except IngestionCancelled:
-                    raise
+                            ex.shutdown(wait=False, cancel_futures=True)
+                            raise IngestionCancelled("Cancelled during page processing")
+                        pn, local_nodes, image_path = fut.result()
+                        artifacts[i] = (pn, local_nodes, image_path)
+                    for page_num_result, local_nodes, image_path in artifacts:
+                        nodes.extend(local_nodes)
+                        if image_path:
+                            frame_list.append({"page": page_num_result + 1, "path": image_path})
 
-                # Сортируем по номеру страницы перед добавлением в nodes
-                results.sort(key=lambda x: x[0]["page"])
-                for frame_info, desc in results:
-                    if desc and "Изображение без описания" not in desc:
-                        full_text = f"Изображение PDF {file_name} стр {frame_info['page']}: {desc}"
-                        if len(full_text) <= config.GGUF_CTX_EMBED_CHARS:
-                            nodes.append(
-                                TextNode(
-                                    text=full_text,
-                                    metadata={
-                                        "file_name": file_name,
-                                        "image_path": frame_info["path"],
-                                        "page": frame_info["page"],
-                                    },
+        if frame_list:
+            if shared_llm_url is None:
+                shared_llm_url = get_vision_url(llm_settings)
+            if shared_llm_url:
+                v_conc = int(llm_settings.get("vision_concurrency") or config.VISION_CONCURRENCY)
+                n = len(frame_list)
+                if progress_cb:
+                    progress_cb(
+                        65,
+                        f"Анализ {n} страниц PDF ({'параллельно' if v_conc > 1 else 'последовательно'})...",
+                    )
+
+                with ThreadPoolExecutor(max_workers=v_conc) as executor:
+                    futures = {
+                        executor.submit(
+                            describe_image_with_lmstudio, f["path"], llm_settings, shared_llm_url
+                        ): f
+                        for f in frame_list
+                    }
+                    done_count = 0
+                    results = []
+                    try:
+                        for future in as_completed(futures):
+                            if _is_cancelled():
+                                executor.shutdown(wait=False, cancel_futures=True)
+                                raise IngestionCancelled(f"Cancelled during OCR ({done_count}/{n})")
+                            frame_info = futures[future]
+                            desc = future.result()
+                            done_count += 1
+                            results.append((frame_info, desc))
+                            if progress_cb:
+                                progress_cb(
+                                    65 + int(done_count / n * 25), f"Описание PDF: {done_count}/{n}"
                                 )
+                    except IngestionCancelled:
+                        raise
+
+                    # Сортируем по номеру страницы перед добавлением в nodes
+                    results.sort(key=lambda x: x[0]["page"])
+                    for frame_info, desc in results:
+                        if desc and "Изображение без описания" not in desc:
+                            full_text = (
+                                f"Изображение PDF {file_name} стр {frame_info['page']}: {desc}"
                             )
-                        else:
-                            desc_nodes = splitter.get_nodes_from_documents(
-                                [
+                            if len(full_text) <= config.GGUF_CTX_EMBED_CHARS:
+                                nodes.append(
                                     TextNode(
                                         text=full_text,
                                         metadata={
@@ -206,37 +202,51 @@ def process_pdf(
                                             "page": frame_info["page"],
                                         },
                                     )
-                                ]
+                                )
+                            else:
+                                desc_nodes = splitter.get_nodes_from_documents(
+                                    [
+                                        TextNode(
+                                            text=full_text,
+                                            metadata={
+                                                "file_name": file_name,
+                                                "image_path": frame_info["path"],
+                                                "page": frame_info["page"],
+                                            },
+                                        )
+                                    ]
+                                )
+                                nodes.extend(desc_nodes)
+                            frame_data.append(
+                                {
+                                    "page": frame_info["page"],
+                                    "image_path": frame_info["path"],
+                                    "description": desc,
+                                }
                             )
-                            nodes.extend(desc_nodes)
-                        frame_data.append(
-                            {
-                                "page": frame_info["page"],
-                                "image_path": frame_info["path"],
-                                "description": desc,
-                            }
-                        )
-                    else:
-                        try:
-                            os.remove(frame_info["path"])
-                        except Exception:
-                            pass
+                        else:
+                            try:
+                                os.remove(frame_info["path"])
+                            except Exception:
+                                pass
 
-        if shared_llm_url and not keep_vision_alive:
-            unload_all_models(role="llm")
+            if shared_llm_url and not keep_vision_alive:
+                unload_all_models(role="llm")
 
-    if frame_data:
-        frame_data.sort(key=lambda x: x["page"])
-        metadata_json = {
-            "file_name": file_name,
-            "is_video": False,
-            "transcript": [],
-            "frames": frame_data,
-        }
-        with open(
-            os.path.join(os.path.dirname(file_path), f"{file_name}.json"), "w", encoding="utf-8"
-        ) as f:
-            json.dump(metadata_json, f, ensure_ascii=False, indent=2)
+        if frame_data:
+            frame_data.sort(key=lambda x: x["page"])
+            metadata_json = {
+                "file_name": file_name,
+                "is_video": False,
+                "transcript": [],
+                "frames": frame_data,
+            }
+            with open(
+                os.path.join(os.path.dirname(file_path), f"{file_name}.json"), "w", encoding="utf-8"
+            ) as f:
+                json.dump(metadata_json, f, ensure_ascii=False, indent=2)
+    finally:
+        doc.close()
     return nodes
 
 
