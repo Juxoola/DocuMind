@@ -566,12 +566,19 @@ def get_active_embedding_parallel(gguf_path: str = None) -> int:
 
 def kill_stray_servers():
 
-    if not _server_processes:
-        logger.debug("[GGUF Server] Нет отслеживаемых процессов для завершения.")
-        return
+    with _lock:
+        if not _server_processes:
+            logger.debug("[GGUF Server] Нет отслеживаемых процессов для завершения.")
+            return
+        # Копируем под lock, убиваем без lock
+        processes_copy = dict(_server_processes)
+        _server_processes.clear()
+        _server_ports.clear()
+        _server_configs.clear()
+        _server_roles.clear()
 
     logger.info("[GGUF Server] Завершение отслеживаемых процессов llama-server...")
-    for path, process in list(_server_processes.items()):
+    for path, process in processes_copy.items():
         try:
             if process.poll() is None:
                 if os.name == "nt":
@@ -586,11 +593,6 @@ def kill_stray_servers():
             logger.debug(f"[GGUF Server] Остановлен: {os.path.basename(path)} (PID {process.pid})")
         except Exception as e:
             logger.debug(f"[GGUF Server] Не удалось остановить {os.path.basename(path)}: {e}")
-
-    _server_processes.clear()
-    _server_ports.clear()
-    _server_configs.clear()
-    _server_roles.clear()
 
 
 def count_running_servers() -> int:
