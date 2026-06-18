@@ -8,6 +8,9 @@ import re
 import time
 import uuid
 
+import aiofiles
+import aiofiles.os
+import orjson
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
@@ -57,14 +60,14 @@ def migrate_old_data():
 async def get_notebooks():
     nbs = []
     if os.path.exists(config.NOTEBOOKS_DIR):
-        for entry in os.listdir(config.NOTEBOOKS_DIR):
+        for entry in await aiofiles.os.listdir(config.NOTEBOOKS_DIR):
             if entry.startswith(".") or not _NB_ID_PATTERN.match(entry):
                 continue
             meta_path = os.path.join(config.NOTEBOOKS_DIR, entry, "meta.json")
             if os.path.exists(meta_path):
                 try:
-                    with open(meta_path, encoding="utf-8") as f:
-                        nbs.append(json.load(f))
+                    async with aiofiles.open(meta_path, encoding="utf-8") as f:
+                        nbs.append(orjson.loads(await f.read()))
                 except Exception as e:
                     logger.debug(f"Не удалось прочитать {meta_path}: {e}")
     return nbs
@@ -78,12 +81,12 @@ class CreateNotebookRequest(BaseModel):
 async def create_notebook(req: CreateNotebookRequest):
     nb_id = str(uuid.uuid4())[:8]
     paths = config.get_notebook_paths(nb_id)
-    os.makedirs(paths["data"], exist_ok=True)
-    os.makedirs(paths["chroma_db"], exist_ok=True)
-    os.makedirs(paths["images"], exist_ok=True)
+    await aiofiles.os.makedirs(paths["data"], exist_ok=True)
+    await aiofiles.os.makedirs(paths["chroma_db"], exist_ok=True)
+    await aiofiles.os.makedirs(paths["images"], exist_ok=True)
     meta = {"id": nb_id, "name": req.name, "created_at": time.time()}
-    with open(os.path.join(paths["base"], "meta.json"), "w", encoding="utf-8") as f:
-        json.dump(meta, f)
+    async with aiofiles.open(os.path.join(paths["base"], "meta.json"), "wb") as f:
+        await f.write(orjson.dumps(meta))
     return meta
 
 
