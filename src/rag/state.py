@@ -30,8 +30,8 @@ def _get_rerank_session() -> requests.Session:
     return _rerank_session
 
 
-# Debounce BM25: несколько вызовов подряд сбрасывают таймер (30с покоя)
-_BM25_DEBOUNCE_SEC = 30.0
+# Debounce BM25: несколько вызовов подряд сбрасывают таймер (10с покоя)
+_BM25_DEBOUNCE_SEC = 10.0
 _bm25_pending_timers: dict = {}
 _bm25_pending_dbpath: dict = {}
 _bm25_pending_lock = threading.Lock()
