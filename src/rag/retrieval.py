@@ -1,5 +1,6 @@
 """Модуль извлечения документов для RAG-пайплайна."""
 
+import asyncio
 import logging
 import os
 import re
@@ -29,6 +30,7 @@ logger = logging.getLogger(__name__)
 
 # Reusable httpx client for reranking (avoids new TCP connection per call)
 _rerank_http = httpx.Client(timeout=60)
+_async_rerank_http = httpx.AsyncClient(timeout=60)
 
 # Health-check cache: url -> (is_healthy, timestamp)
 _qe_health_cache: dict[str, tuple[bool, float]] = {}
@@ -43,6 +45,7 @@ def _is_llm_healthy(url: str) -> bool:
         return cached[0]
     try:
         import requests as _req
+
         _req.get(url.replace("/v1", "").rstrip("/") + "/health", timeout=1)
         result = True
     except Exception:
@@ -178,14 +181,14 @@ def _rrf_fuse_across_files(file_results, k: int = None):
 # ---------------------------------------------------------------------------
 
 
-def _load_bm25_retriever(notebook_id: str):
+async def _load_bm25_retriever(notebook_id: str):
     paths = config.get_notebook_paths(notebook_id)
     bm25_dir = os.path.join(paths["base"], "bm25")
 
     bm25_retriever = None
     if os.path.exists(os.path.join(bm25_dir, "retriever.json")):
         try:
-            bm25_retriever = BM25Retriever.from_persist_dir(bm25_dir)
+            bm25_retriever = await asyncio.to_thread(BM25Retriever.from_persist_dir, bm25_dir)
         except Exception as e:
             logger.warning(f"Не удалось загрузить BM25: {e}")
     else:
@@ -193,17 +196,21 @@ def _load_bm25_retriever(notebook_id: str):
             logger.info(
                 "  [RAG] BM25 отсутствует — форсирую синхронную пересборку для первого запроса"
             )
-            flush_bm25_rebuild(notebook_id, db_path=paths["chroma_db"], wait=True, timeout=180)
+            await asyncio.to_thread(
+                flush_bm25_rebuild, notebook_id, db_path=paths["chroma_db"], wait=True, timeout=180
+            )
             if os.path.exists(os.path.join(bm25_dir, "retriever.json")):
                 try:
-                    bm25_retriever = BM25Retriever.from_persist_dir(bm25_dir)
+                    bm25_retriever = await asyncio.to_thread(
+                        BM25Retriever.from_persist_dir, bm25_dir
+                    )
                 except Exception as e:
                     logger.warning(f"Не удалось загрузить BM25 после flush: {e}")
 
     return bm25_retriever
 
 
-def _hybrid_search(index, query: str, allowed_files, bm25_retriever, qe_llm):
+async def _hybrid_search(index, query: str, allowed_files, bm25_retriever, qe_llm):
     all_nodes = []
 
     if config.RAG_QUERY_EXPANSION:
@@ -287,11 +294,17 @@ def _hybrid_search(index, query: str, allowed_files, bm25_retriever, qe_llm):
                             for i, q in enumerate(queries):
                                 q_emb = np.asarray(all_embs[i + 1], dtype=np.float32)
                                 norm_product = orig_norm * np.linalg.norm(q_emb)
-                                sim = float(np.dot(orig_emb, q_emb) / norm_product) if norm_product > 0 else 0.0
+                                sim = (
+                                    float(np.dot(orig_emb, q_emb) / norm_product)
+                                    if norm_product > 0
+                                    else 0.0
+                                )
                                 if sim >= 0.6:
                                     valid.append(q)
                                 else:
-                                    logger.debug(f"[QE] Запрос отфильтрован по cos-sim={sim:.3f}: {q}")
+                                    logger.debug(
+                                        f"[QE] Запрос отфильтрован по cos-sim={sim:.3f}: {q}"
+                                    )
                             if valid:
                                 logger.info(
                                     f"  [RAG] QE валидация: {len(queries)}→{len(valid)} запросов (порог 0.6)"
@@ -318,7 +331,7 @@ def _hybrid_search(index, query: str, allowed_files, bm25_retriever, qe_llm):
                         f"Не удалось получить сгенерированные запросы для лога: {qe_err}"
                     )
 
-            all_nodes = fusion_retriever.retrieve(query)
+            all_nodes = await asyncio.to_thread(fusion_retriever.retrieve, query)
             all_nodes = [n for n in all_nodes if n.node.metadata.get("file_name") in allowed_files]
 
             if bm25_retriever:
@@ -330,8 +343,13 @@ def _hybrid_search(index, query: str, allowed_files, bm25_retriever, qe_llm):
             )
         else:
             if len(allowed_files) == 1:
-                vec_results = vector_retriever.retrieve(query)
-                bm25_results = bm25_retriever.retrieve(query) if bm25_retriever else []
+                vec_results, bm25_results_raw = await asyncio.gather(
+                    asyncio.to_thread(vector_retriever.retrieve, query),
+                    asyncio.to_thread(bm25_retriever.retrieve, query)
+                    if bm25_retriever
+                    else asyncio.coroutine(lambda: [])(),
+                )
+                bm25_results = bm25_results_raw
                 bm25_results = [
                     n for n in bm25_results if n.node.metadata.get("file_name") == allowed_files[0]
                 ][:top_k_per_file]
@@ -345,8 +363,14 @@ def _hybrid_search(index, query: str, allowed_files, bm25_retriever, qe_llm):
                     logger.info(f"  [RAG] 🔍 Вектор по 1 файлу: {len(all_nodes)} фрагм.")
             else:
                 fetch_k = top_k_per_file * len(allowed_files)
-                vec_results_all = vector_retriever.retrieve(query)[:fetch_k]
-                bm25_all = bm25_retriever.retrieve(query) if bm25_retriever else []
+                vec_results_all_raw, bm25_all_raw = await asyncio.gather(
+                    asyncio.to_thread(vector_retriever.retrieve, query),
+                    asyncio.to_thread(bm25_retriever.retrieve, query)
+                    if bm25_retriever
+                    else asyncio.coroutine(lambda: [])(),
+                )
+                vec_results_all = vec_results_all_raw[:fetch_k]
+                bm25_all = bm25_all_raw
 
                 vec_by_file: dict = {}
                 for n in vec_results_all:
@@ -385,7 +409,7 @@ def _hybrid_search(index, query: str, allowed_files, bm25_retriever, qe_llm):
     return all_nodes
 
 
-def _rerank_nodes(all_nodes, query: str):
+async def _rerank_nodes(all_nodes, query: str):
     if not all_nodes or not config.USE_RERANKER:
         return all_nodes
 
@@ -414,7 +438,9 @@ def _rerank_nodes(all_nodes, query: str):
             from src.gguf.server import get_gguf_embedding_url
 
             model_path = config.resolve_model_path(reranker_name)
-            url = get_gguf_embedding_url(model_path, is_reranker=True, n_parallel=1)
+            url = await asyncio.to_thread(
+                get_gguf_embedding_url, model_path, is_reranker=True, n_parallel=1
+            )
             _model_cache["reranker"] = url
 
         url = _model_cache["reranker"]
@@ -439,7 +465,7 @@ def _rerank_nodes(all_nodes, query: str):
             _rerank_start = _time.time()
             scores = [0.0] * len(all_nodes)
 
-            resp = _rerank_http.post(
+            resp = await _async_rerank_http.post(
                 f"{url}/v1/rerank",
                 json={
                     "model": "gguf-reranker",
@@ -531,7 +557,7 @@ def _filter_chunks(all_nodes):
 
 
 # Гибридный поиск: векторный (ChromaDB) + BM25 с Reciprocal Rank Fusion, опциональный реранкинг через GGUF
-def retrieve_nodes(query: str, notebook_id: str, allowed_files=None, max_tokens=1024):
+async def retrieve_nodes(query: str, notebook_id: str, allowed_files=None, max_tokens=1024):
     init_settings(max_tokens=max_tokens)
     vector_store = get_vector_store(notebook_id)
 
@@ -543,7 +569,7 @@ def retrieve_nodes(query: str, notebook_id: str, allowed_files=None, max_tokens=
 
     # Slow path: create index if not cached
     if index is None:
-        new_index = VectorStoreIndex.from_vector_store(vector_store)
+        new_index = await asyncio.to_thread(VectorStoreIndex.from_vector_store, vector_store)
         with _index_cache_lock:
             # Re-check: another thread may have created it while we were building
             index = _index_cache.get(notebook_id)
@@ -559,13 +585,13 @@ def retrieve_nodes(query: str, notebook_id: str, allowed_files=None, max_tokens=
     if not allowed_files:
         return []
 
-    bm25_retriever = _load_bm25_retriever(notebook_id)
+    bm25_retriever = await _load_bm25_retriever(notebook_id)
 
     qe_llm = _get_qe_llm() if config.RAG_QUERY_EXPANSION else None
 
-    all_nodes = _hybrid_search(index, query, allowed_files, bm25_retriever, qe_llm)
+    all_nodes = await _hybrid_search(index, query, allowed_files, bm25_retriever, qe_llm)
 
-    all_nodes = _rerank_nodes(all_nodes, query)
+    all_nodes = await _rerank_nodes(all_nodes, query)
     if all_nodes and config.USE_RERANKER:
         all_nodes = _filter_chunks(all_nodes)
         logger.info(f"  [RAG] Итого после реранкинга: {len(all_nodes)} чанков")

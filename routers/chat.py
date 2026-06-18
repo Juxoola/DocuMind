@@ -81,12 +81,8 @@ async def chat(request: ChatRequest):
 
     if query_for_rag.strip() and not skip_initial_rag:
         logger.debug(f"DEBUG: Запуск RAG поиска для: {query_for_rag[:50]}...")
-        nodes = await loop.run_in_executor(
-            RAG_POOL, retrieve_nodes, query_for_rag, request.notebook_id, request.allowed_files
-        )
-        sources, context = await loop.run_in_executor(
-            RAG_POOL, build_file_context, nodes, request.notebook_id
-        )
+        nodes = await retrieve_nodes(query_for_rag, request.notebook_id, request.allowed_files)
+        sources, context = await asyncio.to_thread(build_file_context, nodes, request.notebook_id)
         logger.debug(f"DEBUG: RAG нашёл {len(nodes)} фрагментов.")
 
     active_llm = None
@@ -174,15 +170,13 @@ async def chat(request: ChatRequest):
                     else:
                         search_query = extracted
                         query_for_rag = f"Пожалуйста, подробно ответь на вопросы или выполни задания с изображения.\n{extracted}"
-                    nodes = await loop.run_in_executor(
-                        RAG_POOL,
-                        retrieve_nodes,
+                    nodes = await retrieve_nodes(
                         search_query,
                         request.notebook_id,
                         request.allowed_files,
                     )
-                    sources, context = await loop.run_in_executor(
-                        RAG_POOL, build_file_context, nodes, request.notebook_id
+                    sources, context = await asyncio.to_thread(
+                        build_file_context, nodes, request.notebook_id
                     )
                 except Exception as ve:
                     logger.error(f"DEBUG: Ошибка OCR: {ve}")
