@@ -357,27 +357,27 @@ async def delete_file(filename: str, notebook_id: str):
                 cap.release()
         gc.collect()
 
-        def _sync_remove_with_retry(fp: str):
+        async def _sync_remove_with_retry(fp: str):
             for i in range(10):
                 try:
-                    os.remove(fp)
+                    await aiofiles.os.remove(fp)
                     return
                 except PermissionError:
                     if i < 4:
-                        time.sleep(1)
+                        await asyncio.sleep(1)
                         continue
                     # Fallback: переименовываем и удаляем (обходит лок Windows)
                     try:
                         tmp = fp + f".del{i}"
-                        os.rename(fp, tmp)
-                        os.remove(tmp)
+                        await aiofiles.os.rename(fp, tmp)
+                        await aiofiles.os.remove(tmp)
                         return
                     except Exception:
                         if i == 9:
                             raise
-                        time.sleep(1)
+                        await asyncio.sleep(1)
 
-        await asyncio.to_thread(_sync_remove_with_retry, file_path)
+        await _sync_remove_with_retry(file_path)
     from src.rag.indexing import get_vector_store
 
     def _delete_chromadb_entries():
@@ -391,7 +391,7 @@ async def delete_file(filename: str, notebook_id: str):
     try:
         from src.bookmarks import mark_stale_for_file
 
-        stale_count = mark_stale_for_file(notebook_id, filename)
+        stale_count = await mark_stale_for_file(notebook_id, filename)
         if stale_count:
             logger.info(
                 f"[BOOKMARKS] {stale_count} закладок помечены как stale после удаления {filename}"
@@ -441,16 +441,16 @@ async def get_video_metadata(filename: str, notebook_id: str):
 async def clear_notebook(notebook_id: str):
     from src.rag.indexing import close_all_clients as _close_all
 
-    def _clear_data():
-        _close_all()
+    async def _clear_data():
+        await asyncio.to_thread(_close_all)
         paths = config.get_notebook_paths(notebook_id)
         for d in ("data", "chroma_db", "images"):
             p = paths[d]
             if os.path.exists(p):
-                robust_rmtree(p)
+                await robust_rmtree(p)
             os.makedirs(p, exist_ok=True)
 
-    await asyncio.to_thread(_clear_data)
+    await _clear_data()
     return {"status": "ok"}
 
 

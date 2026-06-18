@@ -106,7 +106,7 @@ def _schedule_delete_on_reboot(path: str) -> None:
         raise OSError(f"MoveFileExW failed, WinError={err}: {ctypes.FormatError(err)}")
 
 
-def robust_rmtree(path: str, max_retries: int = 3, delay: float = 0.5) -> tuple:
+async def robust_rmtree(path: str, max_retries: int = 3, delay: float = 0.5) -> tuple:
     path = os.path.normpath(path)
     allowed_roots = [
         os.path.normpath(config.NOTEBOOKS_DIR),
@@ -135,20 +135,21 @@ def robust_rmtree(path: str, max_retries: int = 3, delay: float = 0.5) -> tuple:
         try:
             if i > 0:
                 gc.collect()
-            shutil.rmtree(path)
+            await asyncio.to_thread(shutil.rmtree, path)
             return True, None
         except PermissionError as e:
             last_err = e
             if i < max_retries - 1:
-                time.sleep(delay + i * 0.5)
+                await asyncio.sleep(delay + i * 0.5)
         except Exception as e:
             last_err = e
             if i < max_retries - 1:
-                time.sleep(delay + i * 0.5)
+                await asyncio.sleep(delay + i * 0.5)
 
     if sys.platform == "win32":
         try:
-            result = subprocess.run(
+            result = await asyncio.to_thread(
+                subprocess.run,
                 ["cmd.exe", "/c", "rmdir", "/s", "/q", path],
                 capture_output=True,
                 text=True,
@@ -167,7 +168,8 @@ def robust_rmtree(path: str, max_retries: int = 3, delay: float = 0.5) -> tuple:
     except Exception:
         if sys.platform == "win32":
             try:
-                subprocess.run(
+                await asyncio.to_thread(
+                    subprocess.run,
                     ["cmd.exe", "/c", "move", path, deferred],
                     capture_output=True,
                     text=True,

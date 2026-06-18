@@ -106,14 +106,16 @@ def client():
         src.ingestion.kill_subprocesses = MagicMock(return_value=0)
         src.ingestion.IngestionCancelled = RuntimeError
 
+        from unittest.mock import AsyncMock
+
         import src.bookmarks
 
-        src.bookmarks.list_bookmarks = MagicMock(return_value=[])
-        src.bookmarks.get_bookmark = MagicMock(return_value=None)
-        src.bookmarks.create_bookmark = MagicMock(return_value={"id": "test"})
-        src.bookmarks.update_bookmark = MagicMock(return_value={"id": "test"})
-        src.bookmarks.delete_bookmark = MagicMock(return_value=True)
-        src.bookmarks.mark_stale_for_file = MagicMock(return_value=0)
+        src.bookmarks.list_bookmarks = AsyncMock(return_value=[])
+        src.bookmarks.get_bookmark = AsyncMock(return_value=None)
+        src.bookmarks.create_bookmark = AsyncMock(return_value={"id": "test"})
+        src.bookmarks.update_bookmark = AsyncMock(return_value={"id": "test"})
+        src.bookmarks.delete_bookmark = AsyncMock(return_value=True)
+        src.bookmarks.mark_stale_for_file = AsyncMock(return_value=0)
 
         # ── 4. Импортируем main ──
         import main as app_module

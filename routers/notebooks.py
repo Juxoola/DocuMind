@@ -32,7 +32,7 @@ def validate_nb_id(nb_id: str) -> str:
     return nb_id
 
 
-def migrate_old_data():
+async def migrate_old_data():
     try:
         old_data = os.path.join(config.BASE_DIR, "data")
         old_db = os.path.join(config.BASE_DIR, "chroma_db")
@@ -40,18 +40,24 @@ def migrate_old_data():
         if not (os.path.exists(old_data) or os.path.exists(old_db) or os.path.exists(old_imgs)):
             return
         logger.info("Обнаружены старые данные. Миграция в ноутбук 'default'...")
-        import shutil
 
-        paths = config.get_notebook_paths("default")
-        os.makedirs(paths["base"], exist_ok=True)
-        if os.path.exists(old_data):
-            shutil.move(old_data, paths["data"])
-        if os.path.exists(old_db):
-            shutil.move(old_db, paths["chroma_db"])
-        if os.path.exists(old_imgs):
-            shutil.move(old_imgs, paths["images"])
-        with open(os.path.join(paths["base"], "meta.json"), "w", encoding="utf-8") as f:
-            json.dump({"id": "default", "name": "Мой первый блокнот", "created_at": time.time()}, f)
+        def _do_migration():
+            import shutil
+
+            paths = config.get_notebook_paths("default")
+            os.makedirs(paths["base"], exist_ok=True)
+            if os.path.exists(old_data):
+                shutil.move(old_data, paths["data"])
+            if os.path.exists(old_db):
+                shutil.move(old_db, paths["chroma_db"])
+            if os.path.exists(old_imgs):
+                shutil.move(old_imgs, paths["images"])
+            with open(os.path.join(paths["base"], "meta.json"), "w", encoding="utf-8") as f:
+                json.dump(
+                    {"id": "default", "name": "Мой первый блокнот", "created_at": time.time()}, f
+                )
+
+        await asyncio.to_thread(_do_migration)
     except Exception as e:
         logger.warning(f"Ошибка миграции (продолжаем без неё): {e}")
 
@@ -59,12 +65,12 @@ def migrate_old_data():
 @router.get("/api/notebooks")
 async def get_notebooks():
     nbs = []
-    if os.path.exists(config.NOTEBOOKS_DIR):
+    if await aiofiles.os.path.exists(config.NOTEBOOKS_DIR):
         for entry in await aiofiles.os.listdir(config.NOTEBOOKS_DIR):
             if entry.startswith(".") or not _NB_ID_PATTERN.match(entry):
                 continue
             meta_path = os.path.join(config.NOTEBOOKS_DIR, entry, "meta.json")
-            if os.path.exists(meta_path):
+            if await aiofiles.os.path.exists(meta_path):
                 try:
                     async with aiofiles.open(meta_path, encoding="utf-8") as f:
                         nbs.append(orjson.loads(await f.read()))
@@ -96,7 +102,7 @@ async def delete_notebook(nb_id: str):
     paths = config.get_notebook_paths(nb_id)
     base_path = paths["base"]
 
-    if not os.path.exists(base_path):
+    if not await aiofiles.os.path.exists(base_path):
         raise HTTPException(status_code=404, detail="Блокнот не найден")
 
     try:
@@ -113,13 +119,13 @@ async def delete_notebook(nb_id: str):
     except Exception as e:
         logger.debug(f"[delete_notebook] cancel_bm25_rebuild: {e}")
 
-    def _do_delete(path: str) -> None:
-        success, err_msg = robust_rmtree(path)
+    async def _do_delete(path: str) -> None:
+        success, err_msg = await robust_rmtree(path)
         if not success:
             raise RuntimeError(err_msg or f"Не удалось удалить {path}")
 
     try:
-        await asyncio.to_thread(_do_delete, base_path)
+        await _do_delete(base_path)
     except RuntimeError as e:
         raise HTTPException(status_code=503, detail=str(e))
 

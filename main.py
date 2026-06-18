@@ -68,7 +68,7 @@ async def lifespan(app: FastAPI):
 
     from routers.notebooks import migrate_old_data
 
-    migrate_old_data()
+    await migrate_old_data()
 
     threading.Thread(target=preload_all_models, daemon=True).start()
 
