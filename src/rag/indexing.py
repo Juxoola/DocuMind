@@ -11,7 +11,7 @@ from llama_index.vector_stores.chroma import ChromaVectorStore
 import config
 from src.rag.bm25 import _schedule_bm25_rebuild
 from src.rag.models import init_settings
-from src.rag.state import _client_cache, _client_cache_lock
+from src.rag.state import _CLIENT_CACHE_MAXSIZE, _client_cache, _client_cache_lock
 
 logger = logging.getLogger(__name__)
 
@@ -37,9 +37,19 @@ def get_vector_store(notebook_id: str):
     os.makedirs(db_path, exist_ok=True)
 
     with _client_cache_lock:
-        if db_path not in _client_cache:
-            _client_cache[db_path] = chromadb.PersistentClient(path=db_path)
-        db = _client_cache[db_path]
+        if db_path in _client_cache:
+            _client_cache.move_to_end(db_path)
+            db = _client_cache[db_path]
+        else:
+            if len(_client_cache) >= _CLIENT_CACHE_MAXSIZE:
+                _oldest_path, _oldest_client = _client_cache.popitem(last=False)
+                try:
+                    _oldest_client.close()
+                except Exception:
+                    pass
+                logger.debug(f"LRU eviction: закрыт ChromaDB клиент {_oldest_path}")
+            db = chromadb.PersistentClient(path=db_path)
+            _client_cache[db_path] = db
 
     chroma_collection = db.get_or_create_collection("multimodal_rag")
     return ChromaVectorStore(chroma_collection=chroma_collection)

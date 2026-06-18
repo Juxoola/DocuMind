@@ -2,6 +2,7 @@
 
 import logging
 import threading
+from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor
 
 import requests
@@ -14,7 +15,8 @@ logger = logging.getLogger(__name__)
 _init_lock = threading.Lock()
 
 _model_cache: dict = {}
-_client_cache: dict = {}
+_CLIENT_CACHE_MAXSIZE = 20
+_client_cache: OrderedDict = OrderedDict()
 _client_cache_lock = threading.Lock()
 
 # Выделенный пул потоков для RAG-операций (ChromaDB + BM25 + reranking).
