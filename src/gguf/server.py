@@ -466,6 +466,7 @@ def get_gguf_embedding_url(
         "n_parallel": n_parallel,
     }
 
+    # Шаг 1: проверка кэша под lock
     with _lock:
         if gguf_path in _server_processes:
             if (
@@ -482,66 +483,70 @@ def get_gguf_embedding_url(
         if not os.path.exists(gguf_path):
             raise FileNotFoundError(f"GGUF модель не найдена: {gguf_path}")
 
-        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        s.bind(("", 0))
-        port = s.getsockname()[1]
-        s.close()
+    # Шаг 2: запуск сервера БЕЗ lock (может занять до 60 сек)
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    s.bind(("", 0))
+    port = s.getsockname()[1]
+    s.close()
 
-        cmd = [SERVER_EXE, "-m", gguf_path, "--port", str(port), "--parallel", str(n_parallel)]
+    cmd = [SERVER_EXE, "-m", gguf_path, "--port", str(port), "--parallel", str(n_parallel)]
 
-        if not is_reranker:
-            cmd.extend(["--embedding"])
-            if "qwen" in os.path.basename(gguf_path).lower():
-                cmd.extend(["--override-kv", "tokenizer.ggml.suffix_token_id=int:151643"])
-        else:
-            cmd.extend(["--reranking"])
+    if not is_reranker:
+        cmd.extend(["--embedding"])
+        if "qwen" in os.path.basename(gguf_path).lower():
+            cmd.extend(["--override-kv", "tokenizer.ggml.suffix_token_id=int:151643"])
+    else:
+        cmd.extend(["--reranking"])
 
-        min_ctx_per_slot = 2048
-        ctx = str(max(4096, n_parallel * min_ctx_per_slot))
-        if is_reranker:
-            b_size, ub_size = "2048", "2048"
-        else:
-            b_size, ub_size = "512", "512"
-        cmd.extend(["-c", ctx, "-b", b_size, "-ub", ub_size])
+    min_ctx_per_slot = 2048
+    ctx = str(max(4096, n_parallel * min_ctx_per_slot))
+    if is_reranker:
+        b_size, ub_size = "2048", "2048"
+    else:
+        b_size, ub_size = "512", "512"
+    cmd.extend(["-c", ctx, "-b", b_size, "-ub", ub_size])
 
-        cmd.extend(["--cache-type-k", "q8_0", "--cache-type-v", "q8_0"])
+    cmd.extend(["--cache-type-k", "q8_0", "--cache-type-v", "q8_0"])
 
-        if config.GGUF_GPU_LAYERS != 0:
-            cmd.extend(["-ngl", str(config.GGUF_GPU_LAYERS)])
-        cmd.extend(["--flash-attn", "on"])
+    if config.GGUF_GPU_LAYERS != 0:
+        cmd.extend(["-ngl", str(config.GGUF_GPU_LAYERS)])
+    cmd.extend(["--flash-attn", "on"])
 
-        if n_threads and n_threads > 0:
-            cmd.extend(["-t", str(n_threads)])
+    if n_threads and n_threads > 0:
+        cmd.extend(["-t", str(n_threads)])
 
-        logger.info(
-            f"[GGUF Server] Запуск {role}: {os.path.basename(gguf_path)} на порту {port} (parallel={n_parallel})..."
-        )
-        logger.info(f"[GGUF Server]   cmd: {' '.join(cmd)}")
+    logger.info(
+        f"[GGUF Server] Запуск {role}: {os.path.basename(gguf_path)} на порту {port} (parallel={n_parallel})..."
+    )
+    logger.info(f"[GGUF Server]   cmd: {' '.join(cmd)}")
 
-        creationflags = 0x08000000
-        process = subprocess.Popen(
-            cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=creationflags
-        )
-        _assign_to_job(process)
+    creationflags = 0x08000000
+    process = subprocess.Popen(
+        cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=creationflags
+    )
+    _assign_to_job(process)
 
-        start_wait = time.time()
-        backoff = 0.05
-        while time.time() - start_wait < 60:
-            if is_server_ready(port):
-                logger.info(f"[GGUF Server] {role.capitalize()} готов!")
+    # Шаг 3: poll loop БЕЗ lock
+    start_wait = time.time()
+    backoff = 0.05
+    while time.time() - start_wait < 60:
+        if is_server_ready(port):
+            logger.info(f"[GGUF Server] {role.capitalize()} готов!")
+            # Шаг 4: запись результата под lock
+            with _lock:
                 _server_processes[gguf_path] = process
                 _server_ports[gguf_path] = port
                 _server_configs[gguf_path] = current_config
                 _server_roles[gguf_path] = role
-                return f"http://127.0.0.1:{port}"
+            return f"http://127.0.0.1:{port}"
 
-            if process.poll() is not None:
-                raise RuntimeError(f"{role.capitalize()} сервер упал при запуске")
-            time.sleep(backoff)
-            backoff = min(backoff * 2, 1.0)
+        if process.poll() is not None:
+            raise RuntimeError(f"{role.capitalize()} сервер упал при запуске")
+        time.sleep(backoff)
+        backoff = min(backoff * 2, 1.0)
 
-        process.terminate()
-        raise TimeoutError(f"{role.capitalize()} сервер не ответил за 60 секунд")
+    process.terminate()
+    raise TimeoutError(f"{role.capitalize()} сервер не ответил за 60 секунд")
 
 
 def get_active_embedding_parallel(gguf_path: str = None) -> int:
