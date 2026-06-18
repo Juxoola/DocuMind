@@ -10,6 +10,8 @@ import threading
 import time
 import uuid as _uuid
 
+import aiofiles
+import aiofiles.os
 import cv2
 from fastapi import APIRouter, File, HTTPException, Query, UploadFile
 from fastapi.responses import JSONResponse, StreamingResponse
@@ -36,7 +38,9 @@ async def get_files(notebook_id: str):
     notebook_id = validate_nb_id(notebook_id)
     paths = config.get_notebook_paths(notebook_id)
     if os.path.exists(paths["data"]):
-        files_list = [f for f in os.listdir(paths["data"]) if not f.endswith(".json")]
+        files_list = [
+            f for f in await aiofiles.os.listdir(paths["data"]) if not f.endswith(".json")
+        ]
     else:
         files_list = []
     return {"files": files_list}
@@ -344,25 +348,28 @@ async def delete_file(filename: str, notebook_id: str):
             finally:
                 cap.release()
         gc.collect()
-        for i in range(10):
-            try:
-                os.remove(file_path)
-                break
-            except PermissionError:
-                if i < 4:
-                    time.sleep(1)
-                    continue
-                # Fallback: переименовываем и удаляем (обходит лок Windows)
+
+        def _sync_remove_with_retry(fp: str):
+            for i in range(10):
                 try:
-                    tmp = file_path + f".del{i}"
-                    os.rename(file_path, tmp)
-                    os.remove(tmp)
-                    break
-                except Exception:
-                    if i == 9:
-                        logger.error(f"Не удалось удалить {filename}: файл заблокирован")
-                        raise
-                    time.sleep(1)
+                    os.remove(fp)
+                    return
+                except PermissionError:
+                    if i < 4:
+                        time.sleep(1)
+                        continue
+                    # Fallback: переименовываем и удаляем (обходит лок Windows)
+                    try:
+                        tmp = fp + f".del{i}"
+                        os.rename(fp, tmp)
+                        os.remove(tmp)
+                        return
+                    except Exception:
+                        if i == 9:
+                            raise
+                        time.sleep(1)
+
+        await asyncio.to_thread(_sync_remove_with_retry, file_path)
     from src.rag.indexing import get_vector_store
 
     def _delete_chromadb_entries():
@@ -409,13 +416,16 @@ async def get_video_metadata(filename: str, notebook_id: str):
     paths = config.get_notebook_paths(notebook_id)
     json_path = os.path.join(paths["data"], f"{filename}.json")
 
-    def read_json():
-        if os.path.exists(json_path):
-            with open(json_path, encoding="utf-8") as f:
-                return json.load(f)
-        return None
+    async def _async_read_json():
+        import orjson
 
-    data = await asyncio.to_thread(read_json)
+        if not os.path.exists(json_path):
+            return None
+        async with aiofiles.open(json_path, "rb") as f:
+            raw = await f.read()
+        return orjson.loads(raw)
+
+    data = await _async_read_json()
     if data is not None:
         return JSONResponse(content=data, headers={"Cache-Control": "public, max-age=300"})
     return {"error": "Метаданные не найдены"}
