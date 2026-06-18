@@ -1,5 +1,6 @@
 """Роутер: настройки RAG и GGUF."""
 
+import asyncio
 import logging
 
 from fastapi import APIRouter
@@ -30,7 +31,7 @@ class UpdateModelDirsRequest(BaseModel):
 async def update_model_dirs(req: UpdateModelDirsRequest):
     with _config_lock:
         config.GGUF_SEARCH_DIRS = req.dirs
-        config.save_rag_config()
+        await asyncio.to_thread(config.save_rag_config)
     config.resolve_model_path.cache_clear()
     try:
         from src.gguf.scanner import invalidate_scan_cache
@@ -73,7 +74,7 @@ async def update_rag_config(req: UpdateRagConfigRequest):
         config.RAG_RERANK_POOL = req.rerank_pool
         config.RAG_FINAL_TOP_N = req.final_top_n
         config.USE_RERANKER = req.use_reranker
-        config.save_rag_config()
-        unload_rag_models()
+        await asyncio.to_thread(config.save_rag_config)
+        await asyncio.to_thread(unload_rag_models)
     config.resolve_model_path.cache_clear()
     return {"status": "ok"}
