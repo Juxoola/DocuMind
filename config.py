@@ -95,7 +95,7 @@ GGUF_SEARCH_DIRS = os.getenv("GGUF_SEARCH_DIRS", "F:/llm;" + os.path.join(BASE_D
 GGUF_SERVER_PORT = int(os.getenv("GGUF_SERVER_PORT", 8081))
 GGUF_SERVER_HOST = os.getenv("GGUF_SERVER_HOST", "127.0.0.1")
 GGUF_THREADS = int(os.getenv("GGUF_THREADS", 0))
-GGUF_CTX_SIZE = int(os.getenv("GGUF_CTX_SIZE", 16384))
+GGUF_CTX_SIZE = int(os.getenv("GGUF_CTX_SIZE", 32768))
 GGUF_CTX_EMBED_CHARS = int(os.getenv("GGUF_CTX_EMBED_CHARS", 4096))
 GGUF_GPU_LAYERS = int(os.getenv("GGUF_GPU_LAYERS", -1))
 
