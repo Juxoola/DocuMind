@@ -97,14 +97,14 @@ async def delete_notebook(nb_id: str):
         raise HTTPException(status_code=404, detail="Блокнот не найден")
 
     try:
-        from src.rag_pipeline import close_notebook_client
+        from src.rag.indexing import close_notebook_client
 
         close_notebook_client(nb_id)
     except Exception as e:
         logger.debug(f"[delete_notebook] close_notebook_client: {e}")
 
     try:
-        from src.rag_pipeline import cancel_bm25_rebuild
+        from src.rag.bm25 import cancel_bm25_rebuild
 
         cancel_bm25_rebuild(nb_id)
     except Exception as e:

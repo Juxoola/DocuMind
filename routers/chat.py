@@ -67,7 +67,8 @@ async def chat(request: ChatRequest):
 
         return StreamingResponse(no_files(), media_type="text/event-stream")
 
-    from src.rag_pipeline import build_file_context, retrieve_nodes
+    from src.rag.prompt import build_file_context
+    from src.rag.retrieval import retrieve_nodes
 
     query_for_rag = request.query
     nodes = []

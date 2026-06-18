@@ -174,7 +174,7 @@ async def upload_file(
             prog(5, "Файл сохранён, подготовка...")
             is_last_in_batch = current_idx >= total_count
             from src.ingestion import ingest_file
-            from src.rag_pipeline import build_index
+            from src.rag.indexing import build_index
 
             nodes = ingest_file(
                 file_path,
@@ -208,7 +208,7 @@ async def upload_file(
                 except Exception as whisper_err:
                     logger.error(f"[INGESTION] Ошибка выгрузки WhisperX: {whisper_err}")
                 try:
-                    from src.rag_pipeline import flush_bm25_rebuild
+                    from src.rag.bm25 import flush_bm25_rebuild
 
                     flush_bm25_rebuild(notebook_id)
                 except Exception as bm25_err:
@@ -257,7 +257,7 @@ async def upload_file(
             except Exception:
                 logger.debug("cancel: ошибка при чистке images")
             try:
-                from src.rag_pipeline import get_vector_store
+                from src.rag.indexing import get_vector_store
 
                 vector_store = get_vector_store(notebook_id)
                 collection = vector_store._collection
@@ -351,7 +351,7 @@ async def delete_file(filename: str, notebook_id: str):
                         logger.error(f"Не удалось удалить {filename}: файл заблокирован")
                         raise
                     time.sleep(1)
-    from src.rag_pipeline import get_vector_store
+    from src.rag.indexing import get_vector_store
 
     def _delete_chromadb_entries():
         vs = get_vector_store(notebook_id)
@@ -375,7 +375,7 @@ async def delete_file(filename: str, notebook_id: str):
 async def get_source_content(filename: str, notebook_id: str):
     filename = safe_filename(filename)
     try:
-        from src.rag_pipeline import get_vector_store
+        from src.rag.indexing import get_vector_store
 
         vector_store = await asyncio.to_thread(get_vector_store, notebook_id)
         collection = vector_store._collection
@@ -408,7 +408,7 @@ async def get_video_metadata(filename: str, notebook_id: str):
 
 @router.delete("/api/clear")
 async def clear_notebook(notebook_id: str):
-    from src.rag_pipeline import close_all_clients as _close_all
+    from src.rag.indexing import close_all_clients as _close_all
 
     def _clear_data():
         _close_all()

@@ -166,7 +166,7 @@ def _start_llm_server_sync(gguf_path: str, mmproj_path: str, current_config: dic
 def unload_rag_models_safe():
 
     try:
-        from src.rag_pipeline import unload_rag_models
+        from src.rag.models import unload_rag_models
 
         unload_rag_models(hard=False)
     except Exception:

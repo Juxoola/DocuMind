@@ -86,7 +86,7 @@ async def lifespan(app: FastAPI):
 
 def preload_all_models():
     try:
-        from src.rag_pipeline import preload_all_models as _preload
+        from src.rag.models import preload_all_models as _preload
 
         _preload()
     except Exception as e:

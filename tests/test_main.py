@@ -4,7 +4,7 @@
 Используем TestClient + комбинацию подходов:
 - Внешние пакеты (torch, chromadb, llama_index) — patch.dict(sys.modules, ...),
   т.к. они импортируются на уровне модулей src.* до того, как @patch может вмешаться.
-- Проектные модули (src.rag_pipeline, src.gguf.*, etc.) — импортируем и
+- Проектные модули (src.rag.*, src.gguf.*, etc.) — импортируем и
   назначаем атрибуты напрямую, без sys.modules.
 """
 
@@ -61,18 +61,22 @@ def client():
     # ── 2. Внешние пакеты — только sys.modules ──
     with patch.dict(sys.modules, _HEAVY_PACKAGES, clear=False):
         # ── 3. Проектные модули — импортируем и назначаем атрибуты ──
-        import src.rag_pipeline
+        import src.rag.bm25
+        import src.rag.indexing
+        import src.rag.models
+        import src.rag.prompt
+        import src.rag.retrieval
 
-        src.rag_pipeline.retrieve_nodes = MagicMock(return_value=[])
-        src.rag_pipeline.build_file_context = MagicMock(return_value=([], ""))
-        src.rag_pipeline.make_prompt = MagicMock(return_value="prompt")
-        src.rag_pipeline.build_index = MagicMock()
-        src.rag_pipeline.close_all_clients = MagicMock()
-        src.rag_pipeline.preload_all_models = MagicMock()
-        src.rag_pipeline.unload_rag_models = MagicMock()
-        src.rag_pipeline.get_vector_store = MagicMock()
-        src.rag_pipeline.get_embedding_url = MagicMock()
-        src.rag_pipeline.flush_bm25_rebuild = MagicMock()
+        src.rag.retrieval.retrieve_nodes = MagicMock(return_value=[])
+        src.rag.prompt.build_file_context = MagicMock(return_value=([], ""))
+        src.rag.prompt.make_prompt = MagicMock(return_value="prompt")
+        src.rag.indexing.build_index = MagicMock()
+        src.rag.indexing.close_all_clients = MagicMock()
+        src.rag.models.preload_all_models = MagicMock()
+        src.rag.models.unload_rag_models = MagicMock()
+        src.rag.indexing.get_vector_store = MagicMock()
+        src.rag.prompt.get_embedding_url = MagicMock()
+        src.rag.bm25.flush_bm25_rebuild = MagicMock()
 
         import src.gguf.server
 

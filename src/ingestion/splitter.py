@@ -17,7 +17,7 @@ def _get_splitter():
         from llama_index.core.node_parser import SemanticSplitterNodeParser
         from llama_index.embeddings.openai import OpenAIEmbedding
 
-        from src.rag_pipeline import get_embedding_url
+        from src.rag.prompt import get_embedding_url
 
         url = get_embedding_url()
         if url:

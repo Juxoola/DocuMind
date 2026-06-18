@@ -62,7 +62,7 @@ class UpdateRagConfigRequest(BaseModel):
 
 @router.post("/api/update-rag-config")
 async def update_rag_config(req: UpdateRagConfigRequest):
-    from src.rag_pipeline import unload_rag_models
+    from src.rag.models import unload_rag_models
 
     with config._config_lock:
         config.EMBEDDING_MODEL_NAME = req.embedding_model

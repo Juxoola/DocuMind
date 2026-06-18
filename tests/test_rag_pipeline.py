@@ -126,14 +126,14 @@ class TestRrfFuseAcrossFiles:
     """RRF между файлами — каждый файл имеет равный голос."""
 
     def test_empty_input(self, mock_llama_index):
-        from src.rag_pipeline import _rrf_fuse_across_files
+        from src.rag.retrieval import _rrf_fuse_across_files
 
         assert _rrf_fuse_across_files([]) == []
 
     def test_single_file(self, mock_llama_index):
         from llama_index.core.schema import NodeWithScore, TextNode
 
-        from src.rag_pipeline import _rrf_fuse_across_files
+        from src.rag.retrieval import _rrf_fuse_across_files
 
         nodes = [
             NodeWithScore(node=TextNode(text="A", id_="a1"), score=0.9),
@@ -145,7 +145,7 @@ class TestRrfFuseAcrossFiles:
     def test_two_files_equal_weight(self, mock_llama_index):
         from llama_index.core.schema import NodeWithScore, TextNode
 
-        from src.rag_pipeline import _rrf_fuse_across_files
+        from src.rag.retrieval import _rrf_fuse_across_files
 
         big = [
             NodeWithScore(
