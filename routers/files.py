@@ -10,6 +10,7 @@ import threading
 import time
 import uuid as _uuid
 
+import cv2
 from fastapi import APIRouter, File, HTTPException, Query, UploadFile
 from fastapi.responses import JSONResponse, StreamingResponse
 
@@ -316,8 +317,6 @@ async def cancel_upload(notebook_id: str = Query(...), task_id: str = Query(None
 
 @router.delete("/api/files/{filename}")
 async def delete_file(filename: str, notebook_id: str):
-    import cv2
-
     from routers.notebooks import validate_nb_id
 
     notebook_id = validate_nb_id(notebook_id)
