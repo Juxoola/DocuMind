@@ -1,1 +1,1 @@
-"""DocuMind — core logic."""
+"""DocuMind — основная логика."""

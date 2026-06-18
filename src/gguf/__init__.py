@@ -1,4 +1,4 @@
-"""GGUF subsystem: server lifecycle, scanning, streaming, model detection."""
+"""GGUF-подсистема: жизненный цикл сервера, сканирование, стриминг, определение моделей."""
 
 from src.gguf.models import detect_model_family
 from src.gguf.server import (

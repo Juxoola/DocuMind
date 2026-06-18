@@ -1,1 +1,1 @@
-"""RAG subsystem: embedding, indexing, retrieval, BM25, reranking, prompts."""
+"""RAG-подсистема: эмбеддинг, индексация, поиск, BM25, переранжирование, промпты."""

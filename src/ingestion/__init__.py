@@ -1,4 +1,4 @@
-"""Ingestion subsystem: file parsing, audio/video processing, OCR, chunking."""
+"""Подсистема загрузки данных: разбор файлов, обработка аудио/видео, OCR, разбиение на фрагменты."""
 
 from src.ingestion.audio_video import (
     _whisper_lock,
