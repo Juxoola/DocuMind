@@ -147,7 +147,9 @@ def process_image(
     if shared_llm_url:
         if progress_cb:
             progress_cb(30, f"Анализ изображения: {file_name}...")
-        desc = describe_image_with_lmstudio(dest_path, llm_settings, shared_llm_url)
+        desc = describe_image_with_lmstudio(
+            dest_path, llm_settings, shared_llm_url, cancel_check=cancel_check
+        )
         if desc and "Изображение без описания" not in desc:
             full_text = f"Изображение {file_name}: {desc}"
             splitter = _get_splitter()

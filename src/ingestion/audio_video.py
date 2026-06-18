@@ -338,7 +338,13 @@ def process_audio_video(
 
         with ThreadPoolExecutor(max_workers=v_conc) as executor:
             futures = [
-                executor.submit(describe_image_with_lmstudio, path, llm_settings, shared_llm_url)
+                executor.submit(
+                    describe_image_with_lmstudio,
+                    path,
+                    llm_settings,
+                    shared_llm_url,
+                    cancel_check=cancel_check,
+                )
                 for path, t in frame_list
             ]
             splitter = _get_splitter()

@@ -90,7 +90,9 @@ def _clean_think_tags(text):
     return text.strip()
 
 
-def describe_image_with_lmstudio(image_path, llm_settings=None, existing_llm_url=None):
+def describe_image_with_lmstudio(
+    image_path, llm_settings=None, existing_llm_url=None, cancel_check=None
+):
 
     prompt = """Проведи детальный анализ изображения. 
 
@@ -112,6 +114,9 @@ def describe_image_with_lmstudio(image_path, llm_settings=None, existing_llm_url
 
     if existing_llm_url:
         for attempt in range(2):
+            if cancel_check and cancel_check():
+                logger.info("[Ingestion] Отмена: vision запрос пропущен")
+                return "Изображение без описания."
             try:
                 v_temp = float(llm_settings.get("vision_temperature") or config.VISION_TEMPERATURE)
                 v_max = int(llm_settings.get("vision_max_tokens") or 4096)

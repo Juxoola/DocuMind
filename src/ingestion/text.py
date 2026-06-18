@@ -163,7 +163,11 @@ def process_pdf(
                 with ThreadPoolExecutor(max_workers=v_conc) as executor:
                     futures = {
                         executor.submit(
-                            describe_image_with_lmstudio, f["path"], llm_settings, shared_llm_url
+                            describe_image_with_lmstudio,
+                            f["path"],
+                            llm_settings,
+                            shared_llm_url,
+                            cancel_check=cancel_check,
                         ): f
                         for f in frame_list
                     }
