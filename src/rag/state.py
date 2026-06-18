@@ -15,6 +15,7 @@ _init_lock = threading.Lock()
 
 _model_cache: dict = {}
 _client_cache: dict = {}
+_client_cache_lock = threading.Lock()
 
 # Выделенный пул потоков для RAG-операций (ChromaDB + BM25 + reranking).
 # Отдельный от default executor чтобы не блокировать другие async-задачи.
@@ -40,5 +41,6 @@ _bm25_pending_timers: dict = {}
 _bm25_pending_dbpath: dict = {}
 _bm25_pending_lock = threading.Lock()
 _bm25_rebuilding: set = set()
+_bm25_rebuilding_lock = threading.Lock()
 _bm25_node_cache: dict[str, list] = {}
 _bm25_pending_nodes: dict[str, list] = {}

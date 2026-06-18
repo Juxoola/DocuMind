@@ -11,7 +11,7 @@ from llama_index.vector_stores.chroma import ChromaVectorStore
 import config
 from src.rag.bm25 import _schedule_bm25_rebuild
 from src.rag.models import init_settings
-from src.rag.state import _client_cache
+from src.rag.state import _client_cache, _client_cache_lock
 
 logger = logging.getLogger(__name__)
 
@@ -36,22 +36,24 @@ def get_vector_store(notebook_id: str):
     db_path = paths["chroma_db"]
     os.makedirs(db_path, exist_ok=True)
 
-    if db_path not in _client_cache:
-        _client_cache[db_path] = chromadb.PersistentClient(path=db_path)
+    with _client_cache_lock:
+        if db_path not in _client_cache:
+            _client_cache[db_path] = chromadb.PersistentClient(path=db_path)
+        db = _client_cache[db_path]
 
-    db = _client_cache[db_path]
     chroma_collection = db.get_or_create_collection("multimodal_rag")
     return ChromaVectorStore(chroma_collection=chroma_collection)
 
 
 def close_all_clients():
     global _client_cache
-    for path, client in _client_cache.items():
-        try:
-            client.close()
-        except Exception as e:
-            logger.debug(f"Ошибка закрытия ChromaDB клиента {path}: {e}")
-    _client_cache.clear()
+    with _client_cache_lock:
+        for path, client in _client_cache.items():
+            try:
+                client.close()
+            except Exception as e:
+                logger.debug(f"Ошибка закрытия ChromaDB клиента {path}: {e}")
+        _client_cache.clear()
 
 
 def close_notebook_client(notebook_id: str):
@@ -59,7 +61,8 @@ def close_notebook_client(notebook_id: str):
     from config import get_notebook_paths
 
     db_path = get_notebook_paths(notebook_id)["chroma_db"]
-    client = _client_cache.pop(db_path, None)
+    with _client_cache_lock:
+        client = _client_cache.pop(db_path, None)
     if client is not None:
         try:
             try:

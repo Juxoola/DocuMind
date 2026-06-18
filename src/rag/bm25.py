@@ -15,6 +15,7 @@ from src.rag.state import (
     _bm25_pending_nodes,
     _bm25_pending_timers,
     _bm25_rebuilding,
+    _bm25_rebuilding_lock,
 )
 
 logger = logging.getLogger(__name__)
@@ -111,11 +112,13 @@ def _schedule_bm25_rebuild(notebook_id: str, db_path: str, new_nodes: list = Non
                 pending = _bm25_pending_nodes.pop(notebook_id, [])
             if path is None:
                 return
-            _bm25_rebuilding.add(notebook_id)
+            with _bm25_rebuilding_lock:
+                _bm25_rebuilding.add(notebook_id)
             try:
                 _rebuild_bm25_bg(notebook_id, path, new_nodes=pending)
             finally:
-                _bm25_rebuilding.discard(notebook_id)
+                with _bm25_rebuilding_lock:
+                    _bm25_rebuilding.discard(notebook_id)
 
         t = threading.Timer(_BM25_DEBOUNCE_SEC, _fire)
         t.daemon = True
@@ -162,21 +165,25 @@ def flush_bm25_rebuild(
     if path is None:
         return
     if not wait:
-        _bm25_rebuilding.add(notebook_id)
+        with _bm25_rebuilding_lock:
+            _bm25_rebuilding.add(notebook_id)
 
         def _bg():
             try:
                 _rebuild_bm25_bg(notebook_id, path, new_nodes=pending)
             finally:
-                _bm25_rebuilding.discard(notebook_id)
+                with _bm25_rebuilding_lock:
+                    _bm25_rebuilding.discard(notebook_id)
 
         threading.Thread(target=_bg, daemon=True, name=f"bm25-flush-{notebook_id}").start()
         return
-    _bm25_rebuilding.add(notebook_id)
+    with _bm25_rebuilding_lock:
+        _bm25_rebuilding.add(notebook_id)
     try:
         _rebuild_bm25_bg(notebook_id, path, new_nodes=pending)
     finally:
-        _bm25_rebuilding.discard(notebook_id)
+        with _bm25_rebuilding_lock:
+            _bm25_rebuilding.discard(notebook_id)
 
 
 def is_bm25_ready(notebook_id: str) -> bool:
@@ -185,5 +192,6 @@ def is_bm25_ready(notebook_id: str) -> bool:
     exists = os.path.exists(os.path.join(bm25_dir, "retriever.json"))
     with _bm25_pending_lock:
         has_pending = notebook_id in _bm25_pending_timers
-    is_rebuilding = notebook_id in _bm25_rebuilding
+    with _bm25_rebuilding_lock:
+        is_rebuilding = notebook_id in _bm25_rebuilding
     return exists and not has_pending and not is_rebuilding
