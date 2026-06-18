@@ -34,3 +34,11 @@ node_modules/
 AGENTS.md
 bin/
 libreoffice/
+*.log
+*.swp
+*.swo
+.idea/
+.vscode/
+*.env.local
+*.env.production
+*.env.development

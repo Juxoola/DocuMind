@@ -5,14 +5,15 @@ import os
 import threading
 import time
 import uuid
+from collections import OrderedDict
 
 import orjson
 
 import config
 
 logger = logging.getLogger(__name__)
-
-_write_locks: dict = {}
+_WRITE_LOCKS_MAXSIZE = 50
+_write_locks: OrderedDict = OrderedDict()
 _locks_guard = threading.Lock()
 
 
@@ -21,7 +22,11 @@ def _lock_for(notebook_id: str) -> threading.Lock:
         lock = _write_locks.get(notebook_id)
         if lock is None:
             lock = threading.Lock()
+            if len(_write_locks) >= _WRITE_LOCKS_MAXSIZE:
+                _write_locks.popitem(last=False)
             _write_locks[notebook_id] = lock
+        else:
+            _write_locks.move_to_end(notebook_id)
         return lock
 
 

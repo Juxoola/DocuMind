@@ -225,7 +225,7 @@ class TestUploadValidation:
             "/api/upload?notebook_id=test",
             files={"file": ("doc.pdf", b"%PDF-1.4 test", "application/pdf")},
         )
-        assert resp.status_code in (200, 400, 500)
+        assert resp.status_code == 200
 
 
 class TestBookmarkEndpoints:

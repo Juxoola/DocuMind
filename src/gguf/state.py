@@ -1,8 +1,11 @@
 """Глобальное состояние GGUF-подсистемы."""
 
+from __future__ import annotations
+
 import ctypes
 import logging
 import os
+import subprocess
 import threading
 from ctypes import wintypes
 
@@ -12,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 SERVER_EXE = os.path.join(config.BASE_DIR, "bin", "llama-server.exe")
 
-_server_processes: dict[str, "subprocess.Popen"] = {}
+_server_processes: dict[str, subprocess.Popen] = {}
 _server_ports: dict[str, int] = {}
 _server_configs: dict[str, dict] = {}
 _server_roles: dict[str, str] = {}

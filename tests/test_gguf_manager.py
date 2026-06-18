@@ -85,7 +85,7 @@ class TestScanGgufDirs:
             # Добавляем файл
             (subdir / "new_model.gguf").write_text("dummy2")
             # Ждём чтобы mtime изменился
-            time.sleep(0.1)
+            time.sleep(1.1)
 
             invalidate_scan_cache()
             r2 = scan_gguf_dirs()
@@ -188,7 +188,7 @@ class TestDirMtime:
         from src.gguf.scanner import _dir_mtime
 
         before = _dir_mtime(str(tmp_path))
-        time.sleep(0.1)
+        time.sleep(1.1)
         (tmp_path / "new_file.txt").write_text("test")
         # refresh dir mtime
         after = _dir_mtime(str(tmp_path))
@@ -202,15 +202,14 @@ class TestInvalidateCache:
         """invalidate_scan_cache удаляет файл кеша."""
         from src.gguf.scanner import invalidate_scan_cache
 
-        # Создаём фейковый кеш файл
-        cache_path = os.path.join(config.BASE_DIR, "_gguf_scan_cache.json")
-        if not os.path.exists(cache_path):
-            # Создаём пустой
-            with open(cache_path, "w") as f:
-                f.write("{}")
+        # Создаём фейковый кеш файл во временном каталоге
+        fake_cache = str(tmp_path / "_gguf_scan_cache.json")
+        with open(fake_cache, "w") as f:
+            f.write("{}")
 
-        invalidate_scan_cache()
-        assert not os.path.exists(cache_path)
+        with patch("src.gguf.scanner._GGUF_CACHE_FILE", fake_cache):
+            invalidate_scan_cache()
+            assert not os.path.exists(fake_cache)
 
     def test_invalidate_no_cache_file(self):
         """invalidate_scan_cache без файла не падает."""

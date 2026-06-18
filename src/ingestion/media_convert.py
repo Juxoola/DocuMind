@@ -91,7 +91,7 @@ def ensure_720p_video(file_path, prog_cb=None, cancel_check=None, notebook_id=No
         if notebook_id is not None:
             register_subprocess(notebook_id, proc)
         try:
-            proc.wait()
+            proc.wait(timeout=3600)
         finally:
             if notebook_id is not None:
                 unregister_subprocess(notebook_id, proc)
@@ -167,7 +167,7 @@ def ensure_720p_video(file_path, prog_cb=None, cancel_check=None, notebook_id=No
                                     prog_cb(overall, f"Сегмент {idx + 1}/{num_workers}: {pct}%")
                         except (ValueError, ZeroDivisionError):
                             pass
-                proc.wait()
+                proc.wait(timeout=3600)
             finally:
                 if notebook_id is not None:
                     unregister_subprocess(notebook_id, proc)
@@ -218,7 +218,7 @@ def ensure_720p_video(file_path, prog_cb=None, cancel_check=None, notebook_id=No
         if notebook_id is not None:
             register_subprocess(notebook_id, merge_proc)
         try:
-            merge_proc.wait()
+            merge_proc.wait(timeout=3600)
         finally:
             if notebook_id is not None:
                 unregister_subprocess(notebook_id, merge_proc)
@@ -262,7 +262,7 @@ def ensure_mp3_audio(file_path, prog_cb=None):
         "128k",
         temp_path,
     ]
-    result = subprocess.run(cmd, capture_output=True)
+    result = subprocess.run(cmd, capture_output=True, timeout=300)
     if result.returncode == 0 and os.path.exists(temp_path) and os.path.getsize(temp_path) > 1000:
         os.remove(file_path)
         logger.info(f"[media_convert] {os.path.basename(file_path)} → mp3")

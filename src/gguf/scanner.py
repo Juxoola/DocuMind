@@ -64,6 +64,11 @@ def scan_gguf_dirs() -> list[dict]:
         cached = None
         try:
             if os.path.exists(_GGUF_CACHE_FILE):
+                # NOTE: sync open() inside lock is acceptable here —
+                # this is a small JSON cache file (typically <1 MB),
+                # called rarely (background scan), and the lock is
+                # short-lived. An async redesign would add complexity
+                # for negligible benefit given the usage pattern.
                 with open(_GGUF_CACHE_FILE, encoding="utf-8") as f:
                     cached = orjson.loads(f.read())
         except Exception:

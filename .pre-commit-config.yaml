@@ -19,14 +19,14 @@ repos:
 
       - id: pytest-backend
         name: pytest (backend)
-        entry: C:/Users/Burger/AppData/Local/Programs/Python/Python313/python.exe -m pytest tests/ -q
+        entry: python -m pytest tests/ -q
         language: system
         pass_filenames: false
         stages: [pre-commit]
 
       - id: vitest-frontend
         name: vitest (frontend)
-        entry: cmd /c "cd frontend && npx vitest run"
+        entry: bash -c "cd frontend && npx vitest run"
         language: system
         pass_filenames: false
         files: ^frontend/

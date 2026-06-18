@@ -1,19 +1,20 @@
 """Асинхронный стриминг чат-ответов через llama-server API."""
 
+from __future__ import annotations
+
 import logging
 
+import httpx
 import orjson
 
 logger = logging.getLogger(__name__)
 
-_stream_client: "httpx.AsyncClient | None" = None
+_stream_client: httpx.AsyncClient | None = None
 
 
-async def get_stream_client() -> "httpx.AsyncClient":
+async def get_stream_client() -> httpx.AsyncClient:
     global _stream_client
     if _stream_client is None or _stream_client.is_closed:
-        import httpx
-
         _stream_client = httpx.AsyncClient(timeout=60.0)
     return _stream_client
 

@@ -11,7 +11,7 @@ requires-python = ">=3.11"
 dependencies = [
     # ── Core RAG & LLM ──
     "llama-index-core==0.14.21",
-    "llama-index-readers-file",
+    "llama-index-readers-file==0.5.0",
     "llama-index-llms-openai==0.7.5",
     "llama-index-vector-stores-chroma==0.5.5",
     "llama-index-retrievers-bm25==0.7.1",
@@ -46,7 +46,6 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     "pytest==9.0.3",
-    "pytest-asyncio==1.4.0",
     "pytest-cov==7.1.0",
     "httpx==0.28.1",
     "ruff==0.15.16",
@@ -71,13 +70,12 @@ select = [
 ignore = [
     "E402",  # module import not at top (circular dep avoidance)
     "E501",  # line too long (line-length handles this)
-    "F841",  # unused variable (pre-existing)
+    "F841",  # F841: pre-existing unused vars — clean up incrementally
     "RUF001", # ambiguous char in string (русский текст)
     "RUF002", # ambiguous char in docstring (русский текст)
     "RUF003", # ambiguous char in comment (русский текст)
     "RUF013", # implicit Optional (pre-existing)
     "W291",  # trailing whitespace (pre-existing in strings)
-    "F821",   # undefined name (lazy imports)
 ]
 
 [tool.ruff.format]
