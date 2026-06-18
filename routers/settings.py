@@ -7,7 +7,7 @@ from fastapi import APIRouter
 from pydantic import BaseModel
 
 import config
-from src.config_manager import _config_lock
+from src.config_manager import save_rag_config
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["settings"])
@@ -29,9 +29,9 @@ class UpdateModelDirsRequest(BaseModel):
 
 @router.post("/api/update-model-dirs")
 async def update_model_dirs(req: UpdateModelDirsRequest):
-    with _config_lock:
-        config.GGUF_SEARCH_DIRS = req.dirs
-        await asyncio.to_thread(config.save_rag_config)
+    config.GGUF_SEARCH_DIRS = req.dirs
+    data = config._collect_rag_config()
+    await save_rag_config(config.RAG_CONFIG_FILE, data)
     config.resolve_model_path.cache_clear()
     try:
         from src.gguf.scanner import invalidate_scan_cache
@@ -67,14 +67,14 @@ class UpdateRagConfigRequest(BaseModel):
 async def update_rag_config(req: UpdateRagConfigRequest):
     from src.rag.models import unload_rag_models
 
-    with _config_lock:
-        config.EMBEDDING_MODEL_NAME = req.embedding_model
-        config.RERANKER_MODEL_NAME = req.reranker_model
-        config.RAG_TOP_K_PER_FILE = req.top_k_per_file
-        config.RAG_RERANK_POOL = req.rerank_pool
-        config.RAG_FINAL_TOP_N = req.final_top_n
-        config.USE_RERANKER = req.use_reranker
-        await asyncio.to_thread(config.save_rag_config)
-        await asyncio.to_thread(unload_rag_models)
+    config.EMBEDDING_MODEL_NAME = req.embedding_model
+    config.RERANKER_MODEL_NAME = req.reranker_model
+    config.RAG_TOP_K_PER_FILE = req.top_k_per_file
+    config.RAG_RERANK_POOL = req.rerank_pool
+    config.RAG_FINAL_TOP_N = req.final_top_n
+    config.USE_RERANKER = req.use_reranker
+    data = config._collect_rag_config()
+    await save_rag_config(config.RAG_CONFIG_FILE, data)
+    await asyncio.to_thread(unload_rag_models)
     config.resolve_model_path.cache_clear()
     return {"status": "ok"}

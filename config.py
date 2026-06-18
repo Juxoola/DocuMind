@@ -112,8 +112,8 @@ CHAT_MIN_P = float(os.getenv("CHAT_MIN_P", 0.05))
 
 RAG_CONFIG_FILE = os.path.join(BASE_DIR, "rag_config.json")
 
-from src.config_manager import load_rag_config as _cm_load
-from src.config_manager import save_rag_config as _cm_save
+from src.config_manager import load_rag_config_sync as _cm_load
+from src.config_manager import save_rag_config_sync as _cm_save
 
 
 def _apply_rag_config(data: dict) -> None:
