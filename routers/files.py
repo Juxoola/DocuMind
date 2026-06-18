@@ -88,7 +88,7 @@ async def upload_file(
         )
     paths = config.get_notebook_paths(notebook_id)
     await aiofiles.os.makedirs(paths["data"], exist_ok=True)
-    file_path = os.path.join(paths["data"], file.filename)
+    file_path = os.path.join(paths["data"], safe_filename(file.filename))
 
     async def save_upload():
         written = 0
@@ -100,7 +100,7 @@ async def upload_file(
                 written += len(chunk)
                 if written > config.UPLOAD_MAX_SIZE_BYTES:
                     try:
-                        os.remove(file_path)
+                        await aiofiles.os.remove(file_path)
                     except Exception:
                         logger.debug("upload: не удалось удалить недописанный файл")
                     raise HTTPException(
@@ -295,9 +295,12 @@ async def upload_file(
             q.put({"type": "error", "msg": str(e)})
         finally:
             upload_cancel_flags.pop(task_id, None)
-            from src.ingestion import cleanup_gpu
+            try:
+                from src.ingestion import cleanup_gpu
 
-            cleanup_gpu()
+                cleanup_gpu()
+            except Exception:
+                logger.debug("finally: не удалось вызвать cleanup_gpu")
 
     _task = asyncio.create_task(asyncio.to_thread(process_task))
     _background_tasks.add(_task)
@@ -412,7 +415,7 @@ async def get_source_content(filename: str, notebook_id: str):
             return {"text": full_text}
         return {"text": "Содержимое документа не найдено в базе данных."}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Внутренняя ошибка сервера")
 
 
 @router.get("/api/video_metadata")

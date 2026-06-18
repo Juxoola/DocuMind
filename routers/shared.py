@@ -9,6 +9,8 @@ import shutil
 import stat
 import subprocess
 import sys
+import tempfile
+import threading
 import time
 from ctypes import wintypes
 
@@ -34,19 +36,21 @@ _http_session = make_http_session(config.HTTP_POOL_SIZE_MAIN)
 
 # Асинхронная HTTP-сессия — для async-эндпоинтов (chat streaming, vision OCR)
 _async_http: httpx.AsyncClient | None = None
+_http_lock = threading.Lock()
 
 
 def get_async_http() -> httpx.AsyncClient:
     global _async_http
-    if _async_http is None or _async_http.is_closed:
-        _async_http = httpx.AsyncClient(
-            timeout=httpx.Timeout(config.LM_STUDIO_HTTP_TIMEOUT),
-            limits=httpx.Limits(
-                max_connections=config.HTTP_POOL_SIZE_MAIN,
-                max_keepalive_connections=config.HTTP_POOL_SIZE_MAIN,
-            ),
-        )
-    return _async_http
+    with _http_lock:
+        if _async_http is None or _async_http.is_closed:
+            _async_http = httpx.AsyncClient(
+                timeout=httpx.Timeout(config.LM_STUDIO_HTTP_TIMEOUT),
+                limits=httpx.Limits(
+                    max_connections=config.HTTP_POOL_SIZE_MAIN,
+                    max_keepalive_connections=config.HTTP_POOL_SIZE_MAIN,
+                ),
+            )
+        return _async_http
 
 
 ingestion_status: dict = {}
@@ -103,6 +107,14 @@ def _schedule_delete_on_reboot(path: str) -> None:
 
 
 def robust_rmtree(path: str, max_retries: int = 3, delay: float = 0.5) -> tuple:
+    path = os.path.normpath(path)
+    allowed_roots = [
+        os.path.normpath(config.NOTEBOOKS_DIR),
+        os.path.normpath(tempfile.gettempdir()),
+    ]
+    if not any(path.startswith(r) for r in allowed_roots):
+        raise ValueError(f"robust_rmtree: путь вне допустимых каталогов: {path!r}")
+
     if not os.path.exists(path):
         return True, None
 
@@ -121,7 +133,8 @@ def robust_rmtree(path: str, max_retries: int = 3, delay: float = 0.5) -> tuple:
     last_err = None
     for i in range(max_retries):
         try:
-            gc.collect()
+            if i > 0:
+                gc.collect()
             shutil.rmtree(path)
             return True, None
         except PermissionError as e:

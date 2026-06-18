@@ -2,9 +2,10 @@
 
 import asyncio
 import logging
+import os
 
 from fastapi import APIRouter
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, field_validator
 
 import config
 from src.config_manager import save_rag_config
@@ -23,8 +24,23 @@ async def api_get_gguf_config():
     }
 
 
+# Валидация пути поиска моделей GGUF
 class UpdateModelDirsRequest(BaseModel):
-    dirs: str
+    dirs: str = Field(..., min_length=1, max_length=2000)
+
+    @field_validator("dirs")
+    @classmethod
+    def validate_dirs(cls, v: str) -> str:
+        parts = [p.strip() for p in v.split(";")]
+        parts = [p for p in parts if p]
+        if len(parts) > 20:
+            raise ValueError("максимум 20 каталогов")
+        for part in parts:
+            if ".." in part:
+                raise ValueError(f"запрещён path traversal: {part}")
+            if os.path.isabs(part):
+                raise ValueError(f"абсолютные пути запрещены: {part}")
+        return v
 
 
 @router.post("/api/update-model-dirs")
@@ -54,13 +70,25 @@ async def get_rag_config():
     }
 
 
+# Валидация параметров конфигурации RAG
 class UpdateRagConfigRequest(BaseModel):
-    embedding_model: str
-    reranker_model: str
-    top_k_per_file: int
-    rerank_pool: int
-    final_top_n: int
+    embedding_model: str = Field(..., min_length=1, max_length=256)
+    reranker_model: str = Field(..., min_length=1, max_length=256)
+    top_k_per_file: int = Field(..., ge=1, le=100)
+    rerank_pool: int = Field(..., ge=1, le=200)
+    final_top_n: int = Field(..., ge=1, le=50)
     use_reranker: bool
+
+    @field_validator("embedding_model", "reranker_model")
+    @classmethod
+    def validate_model_name(cls, v: str) -> str:
+        if "/" in v:
+            raise ValueError("имя модели не должно содержать '/'")
+        if ".." in v:
+            raise ValueError("имя модели не должно содержать '..'")
+        if os.path.isabs(v):
+            raise ValueError("абсолютные пути запрещены")
+        return v
 
 
 @router.post("/api/update-rag-config")

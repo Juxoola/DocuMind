@@ -2,12 +2,17 @@
 
 import logging
 import os
+import threading
 from functools import lru_cache
 
 # Отключаем онлайн-проверки Hugging Face (используем только локальный кэш)
 os.environ["HF_HUB_OFFLINE"] = os.getenv("HF_HUB_OFFLINE", "1")
 
 logger = logging.getLogger(__name__)
+
+import orjson
+
+_config_lock = threading.Lock()
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 NOTEBOOKS_DIR = os.path.join(BASE_DIR, "notebooks")
@@ -26,7 +31,7 @@ def get_notebook_paths(notebook_id: str):
     }
 
 
-HOST = os.getenv("HOST", "0.0.0.0")
+HOST = os.getenv("HOST", "127.0.0.1")
 PORT = int(os.getenv("PORT", 8000))
 RELOAD = os.getenv("RELOAD", "false").lower() in ("1", "true", "yes")
 CORS_ORIGINS = [
@@ -116,25 +121,26 @@ RAG_CONFIG_FILE = os.path.join(BASE_DIR, "rag_config.json")
 
 
 def _apply_rag_config(data: dict) -> None:
-    global \
-        EMBEDDING_MODEL_NAME, \
-        RERANKER_MODEL_NAME, \
-        RAG_TOP_K_PER_FILE, \
-        RAG_RERANK_POOL, \
-        RAG_FINAL_TOP_N, \
-        USE_RERANKER, \
-        GGUF_SEARCH_DIRS, \
-        RAG_QUERY_EXPANSION, \
-        RERANK_SCORE_THRESHOLD
-    EMBEDDING_MODEL_NAME = data.get("embedding_model", EMBEDDING_MODEL_NAME)
-    RERANKER_MODEL_NAME = data.get("reranker_model", RERANKER_MODEL_NAME)
-    RAG_TOP_K_PER_FILE = data.get("top_k_per_file", RAG_TOP_K_PER_FILE)
-    RAG_RERANK_POOL = data.get("rerank_pool", RAG_RERANK_POOL)
-    RAG_FINAL_TOP_N = data.get("final_top_n", RAG_FINAL_TOP_N)
-    USE_RERANKER = data.get("use_reranker", USE_RERANKER)
-    GGUF_SEARCH_DIRS = data.get("gguf_search_dirs", GGUF_SEARCH_DIRS)
-    RAG_QUERY_EXPANSION = data.get("query_expansion", RAG_QUERY_EXPANSION)
-    RERANK_SCORE_THRESHOLD = float(data.get("rerank_score_threshold", RERANK_SCORE_THRESHOLD))
+    with _config_lock:
+        global \
+            EMBEDDING_MODEL_NAME, \
+            RERANKER_MODEL_NAME, \
+            RAG_TOP_K_PER_FILE, \
+            RAG_RERANK_POOL, \
+            RAG_FINAL_TOP_N, \
+            USE_RERANKER, \
+            GGUF_SEARCH_DIRS, \
+            RAG_QUERY_EXPANSION, \
+            RERANK_SCORE_THRESHOLD
+        EMBEDDING_MODEL_NAME = data.get("embedding_model", EMBEDDING_MODEL_NAME)
+        RERANKER_MODEL_NAME = data.get("reranker_model", RERANKER_MODEL_NAME)
+        RAG_TOP_K_PER_FILE = data.get("top_k_per_file", RAG_TOP_K_PER_FILE)
+        RAG_RERANK_POOL = data.get("rerank_pool", RAG_RERANK_POOL)
+        RAG_FINAL_TOP_N = data.get("final_top_n", RAG_FINAL_TOP_N)
+        USE_RERANKER = data.get("use_reranker", USE_RERANKER)
+        GGUF_SEARCH_DIRS = data.get("gguf_search_dirs", GGUF_SEARCH_DIRS)
+        RAG_QUERY_EXPANSION = data.get("query_expansion", RAG_QUERY_EXPANSION)
+        RERANK_SCORE_THRESHOLD = float(data.get("rerank_score_threshold", RERANK_SCORE_THRESHOLD))
 
 
 def _collect_rag_config() -> dict:
@@ -155,8 +161,6 @@ def _collect_rag_config() -> dict:
 def _load_config_sync():
     try:
         if os.path.exists(RAG_CONFIG_FILE):
-            import orjson
-
             with open(RAG_CONFIG_FILE, "rb") as f:
                 data = orjson.loads(f.read())
             _apply_rag_config(data)

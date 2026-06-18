@@ -7,7 +7,7 @@ import time
 import orjson
 from fastapi import APIRouter
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 import config
 from src.rag.prompts import get_system_prompt
@@ -45,7 +45,7 @@ class ChatRequest(BaseModel):
     gguf_ubatch_size: int | None = 256
     gguf_flash_attn: str | None = "true"
     thinking_budget: int | None = 1024
-    history: list[dict] = []
+    history: list[dict] = Field(default_factory=list)
     context_strategy: str | None = "sliding"
     mtp_enabled: bool | None = False
 
@@ -76,9 +76,8 @@ async def chat(request: ChatRequest):
     sources = []
     context = ""
     loop = asyncio.get_running_loop()
-    skip_initial_rag = (
-        request.image_base64 and request.use_gguf == "true" and request.gguf_model_path
-    )
+    _use_gguf = request.use_gguf == "true"
+    skip_initial_rag = request.image_base64 and _use_gguf and request.gguf_model_path
 
     if query_for_rag.strip() and not skip_initial_rag:
         logger.debug(f"DEBUG: Запуск RAG поиска для: {query_for_rag[:50]}...")
@@ -92,7 +91,7 @@ async def chat(request: ChatRequest):
 
     active_llm = None
     use_direct_gguf = False
-    if request.use_gguf == "true" and request.gguf_model_path:
+    if _use_gguf and request.gguf_model_path:
         use_direct_gguf = True
         from src.gguf.server import get_gguf_llm
 
@@ -116,7 +115,7 @@ async def chat(request: ChatRequest):
                 mtp_enabled=request.mtp_enabled,
             )
         except Exception as e:
-            error_msg = f"Ошибка загрузки LLM: {e!s}"
+            error_msg = f"Ошибка загрузки LLM: {type(e).__name__}"
 
             async def error_gen():
                 yield f"data: {orjson.dumps({'type': 'error', 'text': error_msg}).decode()}\n\n"
@@ -325,10 +324,10 @@ async def chat(request: ChatRequest):
             yield "data: [DONE]\n\n"
         except Exception as e:
             logger.error("Ошибка при обработке чата", exc_info=True)
-            yield f"data: {orjson.dumps({'type': 'error', 'text': str(e)}).decode()}\n\n"
+            error_text = "Внутренняя ошибка сервера. Попробуйте позже."
+            yield f"data: {orjson.dumps({'type': 'error', 'text': error_text}).decode()}\n\n"
             yield "data: [DONE]\n\n"
         finally:
-            if use_direct_gguf and active_llm:
-                pass
+            pass
 
     return StreamingResponse(generate(), media_type="text/event-stream")
