@@ -105,6 +105,8 @@ def process_pdf(
 
     # Один проход: анализ страницы + построение узлов + рендер pixmap
     # в одном ThreadPoolExecutor — вместо двух последовательных пулов.
+    # Батчами по BATCH_SIZE чтобы не держать всеPixmap в памяти.
+    BATCH_SIZE = 16
     if n_workers <= 1:
         for page_num in range(total_pages):
             if _is_cancelled():
@@ -116,29 +118,29 @@ def process_pdf(
             if image_path:
                 frame_list.append({"page": pn + 1, "path": image_path})
     else:
-        with ThreadPoolExecutor(max_workers=n_workers) as ex:
-            cancel_check_every = max(1, total_pages // (n_workers * 4))
-            futures = []
-            for page_num in range(total_pages):
-                if page_num % cancel_check_every == 0 and _is_cancelled():
-                    ex.shutdown(wait=False, cancel_futures=True)
-                    raise IngestionCancelled(f"Cancelled at page {page_num + 1}")
-                futures.append(
-                    ex.submit(
-                        _analyze_and_build_page, page_num, doc, images_dir, file_name, splitter
+        for batch_start in range(0, total_pages, BATCH_SIZE):
+            if _is_cancelled():
+                raise IngestionCancelled(f"Cancelled at page {batch_start + 1}")
+            batch_end = min(batch_start + BATCH_SIZE, total_pages)
+            with ThreadPoolExecutor(max_workers=n_workers) as ex:
+                futures = []
+                for page_num in range(batch_start, batch_end):
+                    futures.append(
+                        ex.submit(
+                            _analyze_and_build_page, page_num, doc, images_dir, file_name, splitter
+                        )
                     )
-                )
-            artifacts = [None] * total_pages
-            for fut in as_completed(futures):
-                if _is_cancelled():
-                    ex.shutdown(wait=False, cancel_futures=True)
-                    raise IngestionCancelled("Cancelled during page processing")
-                pn, local_nodes, image_path = fut.result()
-                artifacts[pn] = (local_nodes, image_path)
-            for pn, (local_nodes, image_path) in enumerate(artifacts):
-                nodes.extend(local_nodes)
-                if image_path:
-                    frame_list.append({"page": pn + 1, "path": image_path})
+                artifacts = [None] * len(futures)
+                for i, fut in enumerate(as_completed(futures)):
+                    if _is_cancelled():
+                        ex.shutdown(wait=False, cancel_futures=True)
+                        raise IngestionCancelled("Cancelled during page processing")
+                    pn, local_nodes, image_path = fut.result()
+                    artifacts[i] = (pn, local_nodes, image_path)
+                for page_num_result, local_nodes, image_path in artifacts:
+                    nodes.extend(local_nodes)
+                    if image_path:
+                        frame_list.append({"page": page_num_result + 1, "path": image_path})
 
     if frame_list:
         if shared_llm_url is None:
