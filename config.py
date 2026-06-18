@@ -114,24 +114,27 @@ CHAT_MIN_P = float(os.getenv("CHAT_MIN_P", 0.05))
 
 RAG_CONFIG_FILE = os.path.join(BASE_DIR, "rag_config.json")
 
+_config_lock = threading.RLock()
+
 
 def save_rag_config():
-    config_data = {
-        "embedding_model": EMBEDDING_MODEL_NAME,
-        "reranker_model": RERANKER_MODEL_NAME,
-        "top_k_per_file": RAG_TOP_K_PER_FILE,
-        "rerank_pool": RAG_RERANK_POOL,
-        "final_top_n": RAG_FINAL_TOP_N,
-        "use_reranker": USE_RERANKER,
-        "gguf_search_dirs": GGUF_SEARCH_DIRS,
-        "query_expansion": RAG_QUERY_EXPANSION,
-        "rerank_score_threshold": RERANK_SCORE_THRESHOLD,
-    }
-    try:
-        with open(RAG_CONFIG_FILE, "w", encoding="utf-8") as f:
-            json.dump(config_data, f, indent=2, ensure_ascii=False)
-    except Exception as e:
-        logger.warning(f"Не удалось сохранить RAG config: {e}")
+    with _config_lock:
+        config_data = {
+            "embedding_model": EMBEDDING_MODEL_NAME,
+            "reranker_model": RERANKER_MODEL_NAME,
+            "top_k_per_file": RAG_TOP_K_PER_FILE,
+            "rerank_pool": RAG_RERANK_POOL,
+            "final_top_n": RAG_FINAL_TOP_N,
+            "use_reranker": USE_RERANKER,
+            "gguf_search_dirs": GGUF_SEARCH_DIRS,
+            "query_expansion": RAG_QUERY_EXPANSION,
+            "rerank_score_threshold": RERANK_SCORE_THRESHOLD,
+        }
+        try:
+            with open(RAG_CONFIG_FILE, "w", encoding="utf-8") as f:
+                json.dump(config_data, f, indent=2, ensure_ascii=False)
+        except Exception as e:
+            logger.warning(f"Не удалось сохранить RAG config: {e}")
 
 
 def load_rag_config():
@@ -145,23 +148,24 @@ def load_rag_config():
         GGUF_SEARCH_DIRS, \
         RAG_QUERY_EXPANSION, \
         RERANK_SCORE_THRESHOLD
-    try:
-        if os.path.exists(RAG_CONFIG_FILE):
-            with open(RAG_CONFIG_FILE, encoding="utf-8") as f:
-                data = json.load(f)
-                EMBEDDING_MODEL_NAME = data.get("embedding_model", EMBEDDING_MODEL_NAME)
-                RERANKER_MODEL_NAME = data.get("reranker_model", RERANKER_MODEL_NAME)
-                RAG_TOP_K_PER_FILE = data.get("top_k_per_file", RAG_TOP_K_PER_FILE)
-                RAG_RERANK_POOL = data.get("rerank_pool", RAG_RERANK_POOL)
-                RAG_FINAL_TOP_N = data.get("final_top_n", RAG_FINAL_TOP_N)
-                USE_RERANKER = data.get("use_reranker", USE_RERANKER)
-                GGUF_SEARCH_DIRS = data.get("gguf_search_dirs", GGUF_SEARCH_DIRS)
-                RAG_QUERY_EXPANSION = data.get("query_expansion", RAG_QUERY_EXPANSION)
-                RERANK_SCORE_THRESHOLD = float(
-                    data.get("rerank_score_threshold", RERANK_SCORE_THRESHOLD)
-                )
-    except Exception as e:
-        logger.warning(f"Не удалось загрузить RAG config: {e}")
+    with _config_lock:
+        try:
+            if os.path.exists(RAG_CONFIG_FILE):
+                with open(RAG_CONFIG_FILE, encoding="utf-8") as f:
+                    data = json.load(f)
+                    EMBEDDING_MODEL_NAME = data.get("embedding_model", EMBEDDING_MODEL_NAME)
+                    RERANKER_MODEL_NAME = data.get("reranker_model", RERANKER_MODEL_NAME)
+                    RAG_TOP_K_PER_FILE = data.get("top_k_per_file", RAG_TOP_K_PER_FILE)
+                    RAG_RERANK_POOL = data.get("rerank_pool", RAG_RERANK_POOL)
+                    RAG_FINAL_TOP_N = data.get("final_top_n", RAG_FINAL_TOP_N)
+                    USE_RERANKER = data.get("use_reranker", USE_RERANKER)
+                    GGUF_SEARCH_DIRS = data.get("gguf_search_dirs", GGUF_SEARCH_DIRS)
+                    RAG_QUERY_EXPANSION = data.get("query_expansion", RAG_QUERY_EXPANSION)
+                    RERANK_SCORE_THRESHOLD = float(
+                        data.get("rerank_score_threshold", RERANK_SCORE_THRESHOLD)
+                    )
+        except Exception as e:
+            logger.warning(f"Не удалось загрузить RAG config: {e}")
 
 
 load_rag_config()
@@ -199,9 +203,6 @@ def resolve_model_path(path_or_filename: str) -> str:
                 return os.path.normpath(full_path).lower()
 
     return path_or_filename
-
-
-_config_lock = threading.RLock()
 
 
 def validate_gguf_path(name: str) -> bool:
