@@ -144,8 +144,11 @@ def describe_image_with_lmstudio(
                     "frequency_penalty": v_freq,
                 }
                 r = _http_session.post(
-                    f"{existing_llm_url}/v1/chat/completions", json=payload, timeout=300
+                    f"{existing_llm_url}/v1/chat/completions", json=payload, timeout=30
                 )
+                if cancel_check and cancel_check():
+                    logger.info("[Ingestion] Отмена: vision запрос прерван")
+                    return "Изображение без описания."
                 if r.status_code == 200:
                     res = r.json()
                     if "choices" in res:
@@ -168,6 +171,8 @@ def describe_image_with_lmstudio(
         return "Ошибка анализа после всех попыток"
 
     api_url = (llm_settings.get("llm_url") if llm_settings else None) or config.LM_STUDIO_URL
+    if cancel_check and cancel_check():
+        return "Изображение без описания."
     api_key = (
         llm_settings.get("llm_api_key") if llm_settings else None
     ) or config.LLM_DEFAULT_API_KEY

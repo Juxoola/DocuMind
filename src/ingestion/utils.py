@@ -59,7 +59,7 @@ def kill_subprocesses(notebook_id):
     for p in procs:
         try:
             if p.poll() is None:
-                p.terminate()
+                p.kill()  # SIGKILL — мгновенное завершение
         except Exception:
             pass
     return len(procs)
