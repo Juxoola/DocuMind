@@ -31,6 +31,7 @@ async def update_model_dirs(req: UpdateModelDirsRequest):
     with _config_lock:
         config.GGUF_SEARCH_DIRS = req.dirs
         config.save_rag_config()
+    config.resolve_model_path.cache_clear()
     try:
         from src.gguf.scanner import invalidate_scan_cache
 
@@ -74,4 +75,5 @@ async def update_rag_config(req: UpdateRagConfigRequest):
         config.USE_RERANKER = req.use_reranker
         config.save_rag_config()
         unload_rag_models()
+    config.resolve_model_path.cache_clear()
     return {"status": "ok"}
