@@ -27,6 +27,18 @@ from src.rag.state import _INDEX_CACHE_MAXSIZE, _index_cache, _index_cache_lock,
 logger = logging.getLogger(__name__)
 
 
+# Обёртка над BM25Retriever: фильтрует результаты по списку файлов
+# до передачи в RRF-фьюжен, чтобы отключённые файлы не влияли на ранжирование
+class _FilteredBM25:
+    def __init__(self, base, allowed_files):
+        self._base = base
+        self._allowed = set(allowed_files)
+
+    def retrieve(self, query, **kwargs):
+        results = self._base.retrieve(query, **kwargs)
+        return [r for r in results if r.node.metadata.get("file_name") in self._allowed]
+
+
 def invalidate_index_cache(notebook_id: str = None):
     with _index_cache_lock:
         if notebook_id:
@@ -200,7 +212,7 @@ def _hybrid_search(index, query: str, allowed_files, bm25_retriever, qe_llm):
                     index.as_retriever(similarity_top_k=top_k_per_file, filters=_file_filter(fname))
                 )
             if bm25_retriever:
-                per_file_retrievers.append(bm25_retriever)
+                per_file_retrievers.append(_FilteredBM25(bm25_retriever, allowed_files))
 
             fusion_retriever = QueryFusionRetriever(
                 per_file_retrievers,
