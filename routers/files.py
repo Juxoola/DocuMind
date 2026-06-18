@@ -99,7 +99,6 @@ async def upload_file(
                     break
                 written += len(chunk)
                 if written > config.UPLOAD_MAX_SIZE_BYTES:
-                    await f.close()
                     try:
                         os.remove(file_path)
                     except Exception:
@@ -108,7 +107,7 @@ async def upload_file(
                         status_code=413,
                         detail=f"Файл превысил {config.UPLOAD_MAX_SIZE_MB} МБ во время записи.",
                     )
-                f.write(chunk)
+                await f.write(chunk)
 
     await save_upload()
 
