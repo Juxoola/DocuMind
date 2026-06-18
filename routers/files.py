@@ -18,6 +18,7 @@ import config
 
 from .shared import (
     _background_tasks,
+    _cleanup_ingestion_status,
     ingestion_status,
     robust_rmtree,
     safe_filename,
@@ -160,6 +161,7 @@ async def upload_file(
             "total_files": total_count,
             "status": "Подготовка...",
             "task_id": task_id,
+            "updated_at": time.time(),
         }
         try:
             from src.ingestion import IngestionCancelled
@@ -214,7 +216,7 @@ async def upload_file(
                     flush_bm25_rebuild(notebook_id)
                 except Exception as bm25_err:
                     logger.info(f"[INGESTION] Не удалось форсировать BM25 rebuild: {bm25_err}")
-                ingestion_status[notebook_id] = {"is_uploading": False}
+                ingestion_status[notebook_id] = {"is_uploading": False, "updated_at": time.time()}
             else:
                 ingestion_status[notebook_id].update(
                     {
@@ -265,11 +267,19 @@ async def upload_file(
                 collection.delete(where={"file_name": file.filename})
             except Exception:
                 logger.debug("cancel: не удалось очистить векторные индексы для %s", file.filename)
-            ingestion_status[notebook_id] = {"is_uploading": False, "cancelled": True}
+            ingestion_status[notebook_id] = {
+                "is_uploading": False,
+                "cancelled": True,
+                "updated_at": time.time(),
+            }
             q.put({"type": "cancelled", "filename": file.filename})
         except Exception as e:
             logger.error("Ошибка при обработке загрузки", exc_info=True)
-            ingestion_status[notebook_id] = {"is_uploading": False, "error": str(e)}
+            ingestion_status[notebook_id] = {
+                "is_uploading": False,
+                "error": str(e),
+                "updated_at": time.time(),
+            }
             q.put({"type": "error", "msg": str(e)})
         finally:
             upload_cancel_flags.pop(task_id, None)
@@ -424,4 +434,5 @@ async def clear_notebook(notebook_id: str):
 
 @router.get("/api/ingestion_status")
 async def get_ingestion_status(notebook_id: str):
+    _cleanup_ingestion_status()
     return ingestion_status.get(notebook_id, {"is_uploading": False})
