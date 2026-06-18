@@ -10,6 +10,7 @@ from fastapi import APIRouter
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
+from src.gguf.scanner import scan_gguf_dirs
 from src.gguf.server import (
     count_running_servers,
     get_llm_status,
@@ -18,7 +19,6 @@ from src.gguf.server import (
     preload_gguf_llm,
     unload_all_models,
 )
-from src.gguf_manager import scan_gguf_dirs
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["gguf"])

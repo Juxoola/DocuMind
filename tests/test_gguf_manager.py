@@ -23,12 +23,12 @@ class TestScanGgufDirs:
 
     def test_empty_dirs(self, tmp_path):
         """Пустая директория → пустой результат."""
-        from src.gguf_manager import scan_gguf_dirs
+        from src.gguf.scanner import scan_gguf_dirs
 
         # Перенаправляем GGUF_SEARCH_DIRS во временную пустую папку
         with patch.object(config, "GGUF_SEARCH_DIRS", str(tmp_path)):
             # Сбрасываем кеш
-            from src.gguf_manager import invalidate_scan_cache
+            from src.gguf.scanner import invalidate_scan_cache
 
             invalidate_scan_cache()
             results = scan_gguf_dirs()
@@ -36,7 +36,7 @@ class TestScanGgufDirs:
 
     def test_finds_gguf_files(self, tmp_path):
         """Директория с .gguf → результат с gguf_files."""
-        from src.gguf_manager import invalidate_scan_cache, scan_gguf_dirs
+        from src.gguf.scanner import invalidate_scan_cache, scan_gguf_dirs
 
         subdir = tmp_path / "models"
         subdir.mkdir()
@@ -55,7 +55,7 @@ class TestScanGgufDirs:
 
     def test_cache_hit(self, tmp_path):
         """Повторный вызов без изменений возвращает кеш."""
-        from src.gguf_manager import invalidate_scan_cache, scan_gguf_dirs
+        from src.gguf.scanner import invalidate_scan_cache, scan_gguf_dirs
 
         subdir = tmp_path / "models"
         subdir.mkdir()
@@ -71,7 +71,7 @@ class TestScanGgufDirs:
 
     def test_cache_invalidation(self, tmp_path):
         """После invalidate и изменения mtime кеш перестраивается."""
-        from src.gguf_manager import invalidate_scan_cache, scan_gguf_dirs
+        from src.gguf.scanner import invalidate_scan_cache, scan_gguf_dirs
 
         subdir = tmp_path / "models"
         subdir.mkdir()
@@ -95,7 +95,7 @@ class TestScanGgufDirs:
 
     def test_scan_nonexistent_dir(self):
         """Несуществующая директория не вызывает ошибку."""
-        from src.gguf_manager import invalidate_scan_cache, scan_gguf_dirs
+        from src.gguf.scanner import invalidate_scan_cache, scan_gguf_dirs
 
         with patch.object(config, "GGUF_SEARCH_DIRS", "/nonexistent/path"):
             invalidate_scan_cache()
@@ -104,7 +104,7 @@ class TestScanGgufDirs:
 
     def test_multiple_search_dirs(self, tmp_path):
         """Поиск в нескольких директориях, разделённых ;"""
-        from src.gguf_manager import invalidate_scan_cache, scan_gguf_dirs
+        from src.gguf.scanner import invalidate_scan_cache, scan_gguf_dirs
 
         d1 = tmp_path / "dir1"
         d2 = tmp_path / "dir2"
@@ -128,7 +128,7 @@ class TestFindGgufByName:
 
     def test_find_existing(self, tmp_path):
         """Поиск существующего файла возвращает полный путь."""
-        from src.gguf_manager import find_gguf_by_name, invalidate_scan_cache
+        from src.gguf.scanner import find_gguf_by_name, invalidate_scan_cache
 
         (tmp_path / "target.gguf").write_text("data")
 
@@ -140,7 +140,7 @@ class TestFindGgufByName:
 
     def test_find_nonexistent(self, tmp_path):
         """Поиск несуществующего → None."""
-        from src.gguf_manager import find_gguf_by_name, invalidate_scan_cache
+        from src.gguf.scanner import find_gguf_by_name, invalidate_scan_cache
 
         with patch.object(config, "GGUF_SEARCH_DIRS", str(tmp_path)):
             invalidate_scan_cache()
@@ -148,14 +148,14 @@ class TestFindGgufByName:
 
     def test_find_empty_name(self, tmp_path):
         """Пустое имя → None."""
-        from src.gguf_manager import find_gguf_by_name
+        from src.gguf.scanner import find_gguf_by_name
 
         assert find_gguf_by_name("") is None
         assert find_gguf_by_name(None) is None
 
     def test_find_mmproj(self, tmp_path):
         """Поиск mmproj-файла."""
-        from src.gguf_manager import find_gguf_by_name, invalidate_scan_cache
+        from src.gguf.scanner import find_gguf_by_name, invalidate_scan_cache
 
         (tmp_path / "mmproj-model.Q4_K_M.gguf").write_text("data")
 
@@ -171,7 +171,7 @@ class TestDirMtime:
 
     def test_existing_dir(self, tmp_path):
         """Существующая директория возвращает float > 0."""
-        from src.gguf_manager import _dir_mtime
+        from src.gguf.scanner import _dir_mtime
 
         mtime = _dir_mtime(str(tmp_path))
         assert isinstance(mtime, float)
@@ -179,13 +179,13 @@ class TestDirMtime:
 
     def test_nonexistent_dir(self):
         """Несуществующий путь → 0.0."""
-        from src.gguf_manager import _dir_mtime
+        from src.gguf.scanner import _dir_mtime
 
         assert _dir_mtime("/nonexistent_path_xyz") == 0.0
 
     def test_dir_mtime_changes_on_modification(self, tmp_path):
         """После создания файла mtime меняется."""
-        from src.gguf_manager import _dir_mtime
+        from src.gguf.scanner import _dir_mtime
 
         before = _dir_mtime(str(tmp_path))
         time.sleep(0.1)
@@ -200,7 +200,7 @@ class TestInvalidateCache:
 
     def test_invalidate_removes_cache_file(self, tmp_path):
         """invalidate_scan_cache удаляет файл кеша."""
-        from src.gguf_manager import invalidate_scan_cache
+        from src.gguf.scanner import invalidate_scan_cache
 
         # Создаём фейковый кеш файл
         cache_path = os.path.join(config.BASE_DIR, "_gguf_scan_cache.json")
@@ -214,6 +214,6 @@ class TestInvalidateCache:
 
     def test_invalidate_no_cache_file(self):
         """invalidate_scan_cache без файла не падает."""
-        from src.gguf_manager import invalidate_scan_cache
+        from src.gguf.scanner import invalidate_scan_cache
 
         invalidate_scan_cache()  # не должно упасть

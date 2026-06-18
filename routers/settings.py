@@ -32,7 +32,7 @@ async def update_model_dirs(req: UpdateModelDirsRequest):
         config.GGUF_SEARCH_DIRS = req.dirs
         config.save_rag_config()
     try:
-        from src.gguf_manager import invalidate_scan_cache
+        from src.gguf.scanner import invalidate_scan_cache
 
         invalidate_scan_cache()
     except Exception:

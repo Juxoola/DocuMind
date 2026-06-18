@@ -95,9 +95,9 @@ def client():
         src.gguf.streaming = MagicMock()
         src.gguf.streaming.stream_gguf_chat = MagicMock()
 
-        import src.gguf_manager
+        import src.gguf.scanner
 
-        src.gguf_manager.scan_gguf_dirs = MagicMock(return_value=[])
+        src.gguf.scanner.scan_gguf_dirs = MagicMock(return_value=[])
 
         import src.ingestion
 

@@ -178,7 +178,7 @@ def resolve_model_path(path_or_filename: str) -> str:
         return os.path.normpath(path_or_filename).lower()
 
     try:
-        from src.gguf_manager import find_gguf_by_name
+        from src.gguf.scanner import find_gguf_by_name
 
         hit = find_gguf_by_name(path_or_filename)
         if hit:
