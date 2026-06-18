@@ -190,6 +190,9 @@ async def upload_file(
             )
             prog(90, "Построение индекса (ChromaDB)...")
             build_index(nodes, notebook_id)
+            from src.rag.retrieval import invalidate_index_cache
+
+            invalidate_index_cache(notebook_id)
 
             elapsed = time.time() - start_time
             mins = int(elapsed // 60)
@@ -367,6 +370,9 @@ async def delete_file(filename: str, notebook_id: str):
         vs._collection.delete(where={"file_name": filename})
 
     await asyncio.to_thread(_delete_chromadb_entries)
+    from src.rag.retrieval import invalidate_index_cache
+
+    invalidate_index_cache(notebook_id)
     try:
         from src.bookmarks import mark_stale_for_file
 

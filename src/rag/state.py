@@ -19,6 +19,10 @@ _CLIENT_CACHE_MAXSIZE = 20
 _client_cache: OrderedDict = OrderedDict()
 _client_cache_lock = threading.Lock()
 
+# Кеш VectorStoreIndex — не пересоздаётся при каждом запросе
+_index_cache: dict = {}
+_index_cache_lock = threading.Lock()
+
 # Выделенный пул потоков для RAG-операций (ChromaDB + BM25 + reranking).
 # Отдельный от default executor чтобы не блокировать другие async-задачи.
 RAG_POOL = ThreadPoolExecutor(max_workers=4, thread_name_prefix="rag")

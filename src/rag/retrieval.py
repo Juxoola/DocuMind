@@ -21,9 +21,18 @@ import config
 from src.rag.bm25 import flush_bm25_rebuild, is_bm25_ready
 from src.rag.indexing import get_vector_store
 from src.rag.models import init_settings
-from src.rag.state import _get_rerank_session, _model_cache
+from src.rag.state import _get_rerank_session, _index_cache, _index_cache_lock, _model_cache
 
 logger = logging.getLogger(__name__)
+
+
+def invalidate_index_cache(notebook_id: str = None):
+    """Сбрасывает кеш VectorStoreIndex для конкретного или всех ноутбуков."""
+    with _index_cache_lock:
+        if notebook_id:
+            _index_cache.pop(notebook_id, None)
+        else:
+            _index_cache.clear()
 
 
 def _file_filter(file_names: str | list[str]):
@@ -136,7 +145,11 @@ def _rrf_fuse_across_files(file_results, k: int = None):
 def retrieve_nodes(query: str, notebook_id: str, allowed_files=None, max_tokens=1024):
     init_settings(max_tokens=max_tokens)
     vector_store = get_vector_store(notebook_id)
-    index = VectorStoreIndex.from_vector_store(vector_store)
+
+    with _index_cache_lock:
+        if notebook_id not in _index_cache:
+            _index_cache[notebook_id] = VectorStoreIndex.from_vector_store(vector_store)
+        index = _index_cache[notebook_id]
 
     if not allowed_files:
         return []
