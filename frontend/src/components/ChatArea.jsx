@@ -537,7 +537,7 @@ const MessageItem = React.memo(({
             </div>
           )}
 
-          {msg.role === 'ai' && !msg.loading && msg.content && notebook && (
+          {msg.role === 'ai' && !msg.loading && msg.content && notebook && !msg.system && (
             <div data-copy-skip="1" className="mt-3 pt-2 border-t border-border/20 flex items-center gap-2">
               {msg._savedAt ? (
                 <span className="flex items-center gap-1.5 text-[10px] font-bold text-amber-400/80">
@@ -1243,7 +1243,7 @@ export default function ChatArea({ notebook, selectedSources, onOpenSource, llmS
   const clearChat = () => {
     if (abortController) abortController.abort();
     abortControllerRef.current = null;
-    setMessages([{ role: 'ai', content: 'Чат очищен. Какой новый вопрос?' }]);
+    setMessages([{ role: 'ai', content: 'Чат очищен. Какой новый вопрос?', system: true }]);
     setStats(null);
     setIsLoading(false);
   };
