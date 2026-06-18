@@ -39,6 +39,8 @@ dependencies = [
     "python-pptx==1.0.2",
     # ── Utils ──
     "watchfiles==1.1.1",
+    "aiofiles==25.1.0",
+    "orjson==3.11.8",
 ]
 
 [project.optional-dependencies]
