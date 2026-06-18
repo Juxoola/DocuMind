@@ -243,11 +243,11 @@ async def upload_file(
         except IngestionCancelled:
             logger.info(f"[INGESTION] Загрузка отменена пользователем: {file.filename}")
             try:
-                from src.gguf.server import unload_all_models
+                from src.gguf.server import kill_stray_servers
 
-                unload_all_models()
+                kill_stray_servers()
             except Exception:
-                logger.debug("cancel: не удалось выгрузить модели")
+                logger.debug("cancel: не удалось убить llama-server")
             try:
                 if os.path.exists(file_path):
                     os.remove(file_path)
