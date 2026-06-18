@@ -8,6 +8,7 @@ import sys
 import threading
 import time
 
+import httpx
 import torch
 
 import config
@@ -27,10 +28,7 @@ logger = logging.getLogger(__name__)
 
 
 def is_server_ready(port: int) -> bool:
-
     try:
-        import httpx
-
         with httpx.Client(timeout=1) as client:
             r = client.get(f"http://127.0.0.1:{port}/health")
             return r.status_code == 200
@@ -44,6 +42,7 @@ def is_server_ready(port: int) -> bool:
 def _start_llm_server_sync(gguf_path: str, mmproj_path: str, current_config: dict) -> str:
 
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     s.bind(("", 0))
     port = s.getsockname()[1]
     s.close()
@@ -291,6 +290,7 @@ def get_gguf_llm(
                 "phase": "starting",
             }
         )
+        _server_configs[gguf_path] = current_config
         unload_rag_models_safe()
         unload_all_models(role="llm")
 
@@ -315,6 +315,7 @@ def get_gguf_llm(
         return url
     except Exception as e:
         with _lock:
+            _server_configs.pop(gguf_path, None)
             _llm_load_state.update({"state": "error", "error": str(e)[:300], "phase": None})
         raise
 
@@ -385,42 +386,49 @@ def preload_gguf_llm(
                 )
                 return {"status": "ready", "port": _server_ports[gguf_path], "task_id": task_id}
 
-    _llm_load_state.update(
-        {
-            "state": "loading",
-            "model": gguf_path,
-            "port": None,
-            "task_id": task_id,
-            "started_at": time.time(),
-            "ready_at": None,
-            "error": None,
-            "phase": "freeing",
-        }
-    )
+    with _lock:
+        _llm_load_state.update(
+            {
+                "state": "loading",
+                "model": gguf_path,
+                "port": None,
+                "task_id": task_id,
+                "started_at": time.time(),
+                "ready_at": None,
+                "error": None,
+                "phase": "freeing",
+            }
+        )
+        _server_configs[gguf_path] = current_config
 
     def _worker():
         try:
-            _llm_load_state["phase"] = "starting"
+            with _lock:
+                _llm_load_state["phase"] = "starting"
             unload_rag_models_safe()
             unload_all_models(role="llm")
             if not os.path.exists(gguf_path):
                 raise FileNotFoundError(f"GGUF модель не найдена: {gguf_path}")
-            _llm_load_state["phase"] = "loading_model"
+            with _lock:
+                _llm_load_state["phase"] = "loading_model"
             url = _start_llm_server_sync(gguf_path, mmproj_path, current_config)
             elapsed = time.time() - _llm_load_state["started_at"]
-            _llm_load_state.update(
-                {
-                    "state": "ready",
-                    "port": _server_ports.get(gguf_path),
-                    "ready_at": time.time(),
-                    "last_load_seconds": elapsed,
-                    "phase": "ready",
-                    "error": None,
-                }
-            )
+            with _lock:
+                _llm_load_state.update(
+                    {
+                        "state": "ready",
+                        "port": _server_ports.get(gguf_path),
+                        "ready_at": time.time(),
+                        "last_load_seconds": elapsed,
+                        "phase": "ready",
+                        "error": None,
+                    }
+                )
             logger.info(f"[preload] OK: loaded in {elapsed:.1f}s")
         except Exception as e:
-            _llm_load_state.update({"state": "error", "error": str(e)[:300], "phase": None})
+            with _lock:
+                _server_configs.pop(gguf_path, None)
+                _llm_load_state.update({"state": "error", "error": str(e)[:300], "phase": None})
             logger.info(f"[preload] ERROR: {e}")
 
     thread = threading.Thread(target=_worker, daemon=True, name=f"preload-llm-{task_id}")
@@ -484,6 +492,7 @@ def get_gguf_embedding_url(
             raise FileNotFoundError(f"GGUF модель не найдена: {gguf_path}")
 
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     s.bind(("", 0))
     port = s.getsockname()[1]
     s.close()

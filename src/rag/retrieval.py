@@ -6,6 +6,7 @@ import re
 import statistics as _stats
 import time as _time
 
+import numpy as np
 from llama_index.core import QueryBundle, Settings, VectorStoreIndex
 from llama_index.core.retrievers import QueryFusionRetriever
 from llama_index.core.schema import NodeWithScore
@@ -21,7 +22,7 @@ import config
 from src.rag.bm25 import flush_bm25_rebuild, is_bm25_ready
 from src.rag.indexing import get_vector_store
 from src.rag.models import init_settings
-from src.rag.state import _index_cache, _index_cache_lock, _model_cache
+from src.rag.state import _INDEX_CACHE_MAXSIZE, _index_cache, _index_cache_lock, _model_cache
 
 logger = logging.getLogger(__name__)
 
@@ -246,10 +247,14 @@ def _hybrid_search(index, query: str, allowed_files, bm25_retriever, qe_llm):
                             valid = []
                             for q in queries:
                                 q_emb = embed.get_text_embedding(q)
-                                dot = sum(a * b for a, b in zip(orig_emb, q_emb))
-                                norm_o = sum(a * a for a in orig_emb) ** 0.5
-                                norm_q = sum(b * b for b in q_emb) ** 0.5
-                                sim = dot / (norm_o * norm_q) if norm_o * norm_q > 0 else 0
+                                orig_arr = np.asarray(orig_emb, dtype=np.float32)
+                                q_arr = np.asarray(q_emb, dtype=np.float32)
+                                norm_product = np.linalg.norm(orig_arr) * np.linalg.norm(q_arr)
+                                sim = (
+                                    float(np.dot(orig_arr, q_arr) / norm_product)
+                                    if norm_product > 0
+                                    else 0.0
+                                )
                                 if sim >= 0.6:
                                     valid.append(q)
                                 else:
@@ -267,6 +272,8 @@ def _hybrid_search(index, query: str, allowed_files, bm25_retriever, qe_llm):
                         logger.warning(f"Ошибка генерации запросов в custom_get_queries: {qe_err}")
                         return []
 
+                # Intentional monkey-patch: override _get_queries for QE customization
+                # (adds cosine-similarity filtering of generated queries)
                 fusion_retriever._get_queries = custom_get_queries
 
             if num_q > 1 and qe_llm:
@@ -400,22 +407,20 @@ def _rerank_nodes(all_nodes, query: str):
         try:
             _rerank_start = _time.time()
             scores = [0.0] * len(all_nodes)
-
             import httpx
 
-            http = httpx.Client(timeout=120)
-            resp = http.post(
-                f"{url}/v1/rerank",
-                json={
-                    "model": "gguf-reranker",
-                    "query": query,
-                    "documents": documents,
-                    "top_n": len(documents),
-                },
-            )
-            resp.raise_for_status()
-            results = resp.json().get("results", [])
-            http.close()
+            with httpx.Client(timeout=60) as http:
+                resp = http.post(
+                    f"{url}/v1/rerank",
+                    json={
+                        "model": "gguf-reranker",
+                        "query": query,
+                        "documents": documents,
+                        "top_n": len(documents),
+                    },
+                )
+                resp.raise_for_status()
+                results = resp.json().get("results", [])
             if not results:
                 logger.debug("[RAG] Реранкер вернул пустой results")
             for r in results:
@@ -503,7 +508,10 @@ def retrieve_nodes(query: str, notebook_id: str, allowed_files=None, max_tokens=
 
     with _index_cache_lock:
         if notebook_id not in _index_cache:
+            if len(_index_cache) >= _INDEX_CACHE_MAXSIZE:
+                _index_cache.popitem(last=False)
             _index_cache[notebook_id] = VectorStoreIndex.from_vector_store(vector_store)
+        _index_cache.move_to_end(notebook_id)
         index = _index_cache[notebook_id]
 
     if not allowed_files:

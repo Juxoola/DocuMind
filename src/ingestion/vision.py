@@ -13,9 +13,23 @@ from src.ingestion.utils import _http_session, cleanup_gpu
 logger = logging.getLogger(__name__)
 
 
-def get_image_base64(image_path):
-    with open(image_path, "rb") as image_file:
-        return base64.b64encode(image_file.read()).decode("utf-8")
+def get_image_base64(image_path, max_dimension=1568):
+    try:
+        import io
+
+        from PIL import Image
+
+        with Image.open(image_path) as img:
+            if max(img.size) > max_dimension:
+                ratio = max_dimension / max(img.size)
+                new_size = (int(img.width * ratio), int(img.height * ratio))
+                img = img.resize(new_size, Image.LANCZOS)
+            buf = io.BytesIO()
+            img.save(buf, format="JPEG", quality=85)
+            return base64.b64encode(buf.getvalue()).decode("utf-8")
+    except ImportError:
+        with open(image_path, "rb") as image_file:
+            return base64.b64encode(image_file.read()).decode("utf-8")
 
 
 def make_vision_message(base64_data: str, text: str = "") -> list:

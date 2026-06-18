@@ -131,7 +131,7 @@ def save_high_res_frame(video_path, time_sec, output_path):
             "4",
             output_path,
         ]
-        subprocess.run(cmd, capture_output=True)
+        subprocess.run(cmd, capture_output=True, timeout=30)
     except Exception as e:
         logger.warning(f"Ошибка FFmpeg при сохранении кадра: {e}")
 
@@ -249,7 +249,7 @@ def process_audio_video(
             "pipe:1",
         ]
 
-        process = subprocess.Popen(cmd, stdout=subprocess.PIPE, bufsize=10**8)
+        process = subprocess.Popen(cmd, stdout=subprocess.PIPE, bufsize=10**7)
         if notebook_id is not None:
             register_subprocess(notebook_id, process)
         frame_list = []
@@ -267,7 +267,7 @@ def process_audio_video(
                         f"[Ingestion] Отмена во время извлечения кадров видео ({format_seconds(current_sec)})"
                     )
                     try:
-                        process.terminate()
+                        process.kill()
                     except Exception:
                         pass
                     raise IngestionCancelled(
@@ -322,8 +322,8 @@ def process_audio_video(
                     )
         finally:
             process.stdout.close()
-            process.terminate()
-            process.wait()
+            process.kill()
+            process.wait(timeout=30)
             if notebook_id is not None:
                 unregister_subprocess(notebook_id, process)
 

@@ -20,7 +20,8 @@ _client_cache: OrderedDict = OrderedDict()
 _client_cache_lock = threading.Lock()
 
 # Кеш VectorStoreIndex — не пересоздаётся при каждом запросе
-_index_cache: dict = {}
+_INDEX_CACHE_MAXSIZE = 50
+_index_cache: OrderedDict = OrderedDict()
 _index_cache_lock = threading.Lock()
 
 # Выделенный пул потоков для RAG-операций (ChromaDB + BM25 + reranking).
