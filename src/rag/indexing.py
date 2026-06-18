@@ -39,26 +39,27 @@ def get_vector_store(notebook_id: str):
     with _client_cache_lock:
         if db_path in _client_cache:
             _client_cache.move_to_end(db_path)
-            db = _client_cache[db_path]
+            _, vector_store = _client_cache[db_path]
+            return vector_store
         else:
             if len(_client_cache) >= _CLIENT_CACHE_MAXSIZE:
-                _oldest_path, _oldest_client = _client_cache.popitem(last=False)
+                _oldest_path, (_oldest_client, _) = _client_cache.popitem(last=False)
                 try:
                     _oldest_client.close()
                 except Exception:
                     pass
                 logger.debug(f"LRU eviction: закрыт ChromaDB клиент {_oldest_path}")
             db = chromadb.PersistentClient(path=db_path)
-            _client_cache[db_path] = db
-
-    chroma_collection = db.get_or_create_collection("multimodal_rag")
-    return ChromaVectorStore(chroma_collection=chroma_collection)
+            chroma_collection = db.get_or_create_collection("multimodal_rag")
+            vector_store = ChromaVectorStore(chroma_collection=chroma_collection)
+            _client_cache[db_path] = (db, vector_store)
+            return vector_store
 
 
 def close_all_clients():
     global _client_cache
     with _client_cache_lock:
-        for path, client in _client_cache.items():
+        for path, (client, _) in _client_cache.items():
             try:
                 client.close()
             except Exception as e:
@@ -72,8 +73,9 @@ def close_notebook_client(notebook_id: str):
 
     db_path = get_notebook_paths(notebook_id)["chroma_db"]
     with _client_cache_lock:
-        client = _client_cache.pop(db_path, None)
-    if client is not None:
+        entry = _client_cache.pop(db_path, None)
+    if entry is not None:
+        client, _ = entry
         try:
             try:
                 col = client.get_collection("multimodal_rag")

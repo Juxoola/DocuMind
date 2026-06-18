@@ -6,6 +6,7 @@ import re
 import statistics as _stats
 import time as _time
 
+import httpx
 import numpy as np
 from llama_index.core import QueryBundle, Settings, VectorStoreIndex
 from llama_index.core.retrievers import QueryFusionRetriever
@@ -25,6 +26,29 @@ from src.rag.models import init_settings
 from src.rag.state import _INDEX_CACHE_MAXSIZE, _index_cache, _index_cache_lock, _model_cache
 
 logger = logging.getLogger(__name__)
+
+# Reusable httpx client for reranking (avoids new TCP connection per call)
+_rerank_http = httpx.Client(timeout=60)
+
+# Health-check cache: url -> (is_healthy, timestamp)
+_qe_health_cache: dict[str, tuple[bool, float]] = {}
+_QE_HEALTH_TTL = 30.0
+
+
+def _is_llm_healthy(url: str) -> bool:
+    """Check LLM health with 30-second TTL cache to avoid per-request overhead."""
+    now = _time.time()
+    cached = _qe_health_cache.get(url)
+    if cached and (now - cached[1]) < _QE_HEALTH_TTL:
+        return cached[0]
+    try:
+        import requests as _req
+        _req.get(url.replace("/v1", "").rstrip("/") + "/health", timeout=1)
+        result = True
+    except Exception:
+        result = False
+    _qe_health_cache[url] = (result, now)
+    return result
 
 
 # Обёртка над BM25Retriever: фильтрует результаты по списку файлов
@@ -92,11 +116,7 @@ def _get_qe_llm():
     else:
         url = config.LM_STUDIO_URL
         logger.debug(f"[QE] GGUF LLM не найден, пробуем LM Studio: {url}")
-    try:
-        import requests as _req
-
-        _req.get(url.replace("/v1", "").rstrip("/") + "/health", timeout=1)
-    except Exception:
+    if not _is_llm_healthy(url):
         logger.debug("[QE] LLM-сервер недоступен, Query Expansion пропускается")
         return None
 
@@ -255,24 +275,23 @@ def _hybrid_search(index, query: str, allowed_files, bm25_retriever, qe_llm):
 
                         if queries:
                             embed = Settings.embed_model
-                            orig_emb = embed.get_text_embedding(original_query)
+                            # Батч-эмбеддинг: один запрос вместо N
+                            all_texts = [original_query, *queries]
+                            try:
+                                all_embs = embed.get_text_embedding_batch(all_texts)
+                            except AttributeError:
+                                all_embs = [embed.get_text_embedding(t) for t in all_texts]
+                            orig_emb = np.asarray(all_embs[0], dtype=np.float32)
+                            orig_norm = np.linalg.norm(orig_emb)
                             valid = []
-                            for q in queries:
-                                q_emb = embed.get_text_embedding(q)
-                                orig_arr = np.asarray(orig_emb, dtype=np.float32)
-                                q_arr = np.asarray(q_emb, dtype=np.float32)
-                                norm_product = np.linalg.norm(orig_arr) * np.linalg.norm(q_arr)
-                                sim = (
-                                    float(np.dot(orig_arr, q_arr) / norm_product)
-                                    if norm_product > 0
-                                    else 0.0
-                                )
+                            for i, q in enumerate(queries):
+                                q_emb = np.asarray(all_embs[i + 1], dtype=np.float32)
+                                norm_product = orig_norm * np.linalg.norm(q_emb)
+                                sim = float(np.dot(orig_emb, q_emb) / norm_product) if norm_product > 0 else 0.0
                                 if sim >= 0.6:
                                     valid.append(q)
                                 else:
-                                    logger.debug(
-                                        f"[QE] Запрос отфильтрован по cos-sim={sim:.3f}: {q}"
-                                    )
+                                    logger.debug(f"[QE] Запрос отфильтрован по cos-sim={sim:.3f}: {q}")
                             if valid:
                                 logger.info(
                                     f"  [RAG] QE валидация: {len(queries)}→{len(valid)} запросов (порог 0.6)"
@@ -419,20 +438,18 @@ def _rerank_nodes(all_nodes, query: str):
         try:
             _rerank_start = _time.time()
             scores = [0.0] * len(all_nodes)
-            import httpx
 
-            with httpx.Client(timeout=60) as http:
-                resp = http.post(
-                    f"{url}/v1/rerank",
-                    json={
-                        "model": "gguf-reranker",
-                        "query": query,
-                        "documents": documents,
-                        "top_n": len(documents),
-                    },
-                )
-                resp.raise_for_status()
-                results = resp.json().get("results", [])
+            resp = _rerank_http.post(
+                f"{url}/v1/rerank",
+                json={
+                    "model": "gguf-reranker",
+                    "query": query,
+                    "documents": documents,
+                    "top_n": len(documents),
+                },
+            )
+            resp.raise_for_status()
+            results = resp.json().get("results", [])
             if not results:
                 logger.debug("[RAG] Реранкер вернул пустой results")
             for r in results:
@@ -518,13 +535,26 @@ def retrieve_nodes(query: str, notebook_id: str, allowed_files=None, max_tokens=
     init_settings(max_tokens=max_tokens)
     vector_store = get_vector_store(notebook_id)
 
+    # Fast path: check cache without lock
     with _index_cache_lock:
-        if notebook_id not in _index_cache:
-            if len(_index_cache) >= _INDEX_CACHE_MAXSIZE:
-                _index_cache.popitem(last=False)
-            _index_cache[notebook_id] = VectorStoreIndex.from_vector_store(vector_store)
-        _index_cache.move_to_end(notebook_id)
-        index = _index_cache[notebook_id]
+        index = _index_cache.get(notebook_id)
+        if index is not None:
+            _index_cache.move_to_end(notebook_id)
+
+    # Slow path: create index if not cached
+    if index is None:
+        new_index = VectorStoreIndex.from_vector_store(vector_store)
+        with _index_cache_lock:
+            # Re-check: another thread may have created it while we were building
+            index = _index_cache.get(notebook_id)
+            if index is None:
+                if len(_index_cache) >= _INDEX_CACHE_MAXSIZE:
+                    _index_cache.popitem(last=False)
+                _index_cache[notebook_id] = new_index
+                _index_cache.move_to_end(notebook_id)
+                index = new_index
+            else:
+                _index_cache.move_to_end(notebook_id)
 
     if not allowed_files:
         return []
