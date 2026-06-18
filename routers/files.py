@@ -2,7 +2,6 @@
 
 import asyncio
 import gc
-import json
 import logging
 import os
 import queue
@@ -13,6 +12,7 @@ import uuid as _uuid
 import aiofiles
 import aiofiles.os
 import cv2
+import orjson
 from fastapi import APIRouter, File, HTTPException, Query, UploadFile
 from fastapi.responses import JSONResponse, StreamingResponse
 
@@ -87,19 +87,19 @@ async def upload_file(
             detail=f"Тип файла '{_ext}' не поддерживается. Разрешено: {', '.join(sorted(config.ALLOWED_UPLOAD_EXTENSIONS))}.",
         )
     paths = config.get_notebook_paths(notebook_id)
-    os.makedirs(paths["data"], exist_ok=True)
+    await aiofiles.os.makedirs(paths["data"], exist_ok=True)
     file_path = os.path.join(paths["data"], file.filename)
 
-    def save_upload():
+    async def save_upload():
         written = 0
-        with open(file_path, "wb") as f:
+        async with aiofiles.open(file_path, "wb") as f:
             while True:
-                chunk = file.file.read(1024 * 1024)
+                chunk = await file.read(1024 * 1024)
                 if not chunk:
                     break
                 written += len(chunk)
                 if written > config.UPLOAD_MAX_SIZE_BYTES:
-                    f.close()
+                    await f.close()
                     try:
                         os.remove(file_path)
                     except Exception:
@@ -110,7 +110,7 @@ async def upload_file(
                     )
                 f.write(chunk)
 
-    await asyncio.to_thread(save_upload)
+    await save_upload()
 
     q = queue.Queue()
     effective_llm_url = llm_url
@@ -302,7 +302,7 @@ async def upload_file(
         loop = asyncio.get_running_loop()
         while True:
             msg = await loop.run_in_executor(None, q.get)
-            yield f"data: {json.dumps(msg, ensure_ascii=False)}\n\n"
+            yield f"data: {orjson.dumps(msg).decode()}\n\n"
             if msg["type"] in ("done", "error", "cancelled"):
                 break
 
@@ -417,8 +417,6 @@ async def get_video_metadata(filename: str, notebook_id: str):
     json_path = os.path.join(paths["data"], f"{filename}.json")
 
     async def _async_read_json():
-        import orjson
-
         if not os.path.exists(json_path):
             return None
         async with aiofiles.open(json_path, "rb") as f:

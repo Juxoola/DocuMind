@@ -1,10 +1,10 @@
 """Роутер: чат-эндпоинт (SSE-стриминг)."""
 
 import asyncio
-import json
 import logging
 import time
 
+import orjson
 from fastapi import APIRouter
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
@@ -62,8 +62,8 @@ async def chat(request: ChatRequest):
     if not request.allowed_files:
 
         async def no_files():
-            yield f"data: {json.dumps({'type': 'sources', 'sources': []})}\n\n"
-            yield f"data: {json.dumps({'type': 'chunk', 'text': 'Пожалуйста, выберите хотя бы один источник.'})}\n\n"
+            yield f"data: {orjson.dumps({'type': 'sources', 'sources': []}).decode()}\n\n"
+            yield f"data: {orjson.dumps({'type': 'chunk', 'text': 'Пожалуйста, выберите хотя бы один источник.'}).decode()}\n\n"
             yield "data: [DONE]\n\n"
 
         return StreamingResponse(no_files(), media_type="text/event-stream")
@@ -119,7 +119,7 @@ async def chat(request: ChatRequest):
             error_msg = f"Ошибка загрузки LLM: {e!s}"
 
             async def error_gen():
-                yield f"data: {json.dumps({'type': 'error', 'text': error_msg}, ensure_ascii=False)}\n\n"
+                yield f"data: {orjson.dumps({'type': 'error', 'text': error_msg}).decode()}\n\n"
                 yield "data: [DONE]\n\n"
 
             return StreamingResponse(error_gen(), media_type="text/event-stream")
@@ -191,7 +191,7 @@ async def chat(request: ChatRequest):
             if not query_for_rag or not query_for_rag.strip():
                 query_for_rag = request.query or "Опиши содержимое"
 
-            yield f"data: {json.dumps({'type': 'sources', 'sources': sources}, ensure_ascii=False)}\n\n"
+            yield f"data: {orjson.dumps({'type': 'sources', 'sources': sources}).decode()}\n\n"
 
             if use_direct_gguf:
                 from src.gguf.models import detect_model_family
@@ -245,14 +245,14 @@ async def chat(request: ChatRequest):
                         if OPEN_TAG in buf:
                             if request.thinking_mode:
                                 buf = buf[buf.index(OPEN_TAG) + len(OPEN_TAG) :]
-                                yield f"data: {json.dumps({'type': 'thinking_start'}, ensure_ascii=False)}\n\n"
+                                yield f"data: {orjson.dumps({'type': 'thinking_start'}).decode()}\n\n"
                                 phase = "thinking"
                             else:
                                 buf = buf[buf.index(OPEN_TAG) + len(OPEN_TAG) :]
                                 phase = "thinking_ignore"
                         elif len(buf) > 10:
                             phase = "answer"
-                            yield f"data: {json.dumps({'type': 'chunk', 'text': buf}, ensure_ascii=False)}\n\n"
+                            yield f"data: {orjson.dumps({'type': 'chunk', 'text': buf}).decode()}\n\n"
                             buf = ""
                     if phase == "thinking_ignore":
                         if CLOSE_TAG in buf:
@@ -267,26 +267,26 @@ async def chat(request: ChatRequest):
                         if CLOSE_TAG in buf:
                             think_part, _, rest = buf.partition(CLOSE_TAG)
                             if think_part:
-                                yield f"data: {json.dumps({'type': 'thinking_chunk', 'text': think_part}, ensure_ascii=False)}\n\n"
-                            yield f"data: {json.dumps({'type': 'thinking_done'}, ensure_ascii=False)}\n\n"
+                                yield f"data: {orjson.dumps({'type': 'thinking_chunk', 'text': think_part}).decode()}\n\n"
+                            yield f"data: {orjson.dumps({'type': 'thinking_done'}).decode()}\n\n"
                             phase = "answer"
                             buf = rest.lstrip("\n")
                             if buf:
-                                yield f"data: {json.dumps({'type': 'chunk', 'text': buf}, ensure_ascii=False)}\n\n"
+                                yield f"data: {orjson.dumps({'type': 'chunk', 'text': buf}).decode()}\n\n"
                                 buf = ""
                         else:
                             safe = buf[: -len(CLOSE_TAG)] if len(buf) > len(CLOSE_TAG) else ""
                             if safe:
-                                yield f"data: {json.dumps({'type': 'thinking_chunk', 'text': safe}, ensure_ascii=False)}\n\n"
+                                yield f"data: {orjson.dumps({'type': 'thinking_chunk', 'text': safe}).decode()}\n\n"
                                 buf = buf[len(safe) :]
                     elif phase == "answer":
-                        yield f"data: {json.dumps({'type': 'chunk', 'text': buf}, ensure_ascii=False)}\n\n"
+                        yield f"data: {orjson.dumps({'type': 'chunk', 'text': buf}).decode()}\n\n"
                         buf = ""
                 if buf and phase == "thinking":
-                    yield f"data: {json.dumps({'type': 'thinking_chunk', 'text': buf}, ensure_ascii=False)}\n\n"
-                    yield f"data: {json.dumps({'type': 'thinking_done'}, ensure_ascii=False)}\n\n"
+                    yield f"data: {orjson.dumps({'type': 'thinking_chunk', 'text': buf}).decode()}\n\n"
+                    yield f"data: {orjson.dumps({'type': 'thinking_done'}).decode()}\n\n"
                 elif buf and phase == "answer":
-                    yield f"data: {json.dumps({'type': 'chunk', 'text': buf}, ensure_ascii=False)}\n\n"
+                    yield f"data: {orjson.dumps({'type': 'chunk', 'text': buf}).decode()}\n\n"
             else:
                 sys_prompt = (
                     get_system_prompt(request.answer_mode) + f"\n\nДоступные источники:\n{context}"
@@ -297,7 +297,7 @@ async def chat(request: ChatRequest):
                         chat_messages.append({"role": h_msg["role"], "content": h_msg["content"]})
                 chat_messages.append({"role": "user", "content": request.query})
                 if active_llm is None:
-                    yield f"data: {json.dumps({'type': 'error', 'text': 'LLM не инициализирован. Настройте URL API-модели или загрузите GGUF-модель.'}, ensure_ascii=False)}\n\n"
+                    yield f"data: {orjson.dumps({'type': 'error', 'text': 'LLM не инициализирован. Настройте URL API-модели или загрузите GGUF-модель.'}).decode()}\n\n"
                     yield "data: [DONE]\n\n"
                     return
 
@@ -318,14 +318,14 @@ async def chat(request: ChatRequest):
                     if delta is None:
                         break
                     token_count += 1
-                    yield f"data: {json.dumps({'type': 'chunk', 'text': delta}, ensure_ascii=False)}\n\n"
+                    yield f"data: {orjson.dumps({'type': 'chunk', 'text': delta}).decode()}\n\n"
 
             elapsed = time.time() - global_start_time
-            yield f"data: {json.dumps({'type': 'stats', 'elapsed_sec': round(elapsed, 2), 'total_tokens': token_count, 'tokens_per_sec': round(token_count / elapsed, 1) if elapsed > 0 else 0})}\n\n"
+            yield f"data: {orjson.dumps({'type': 'stats', 'elapsed_sec': round(elapsed, 2), 'total_tokens': token_count, 'tokens_per_sec': round(token_count / elapsed, 1) if elapsed > 0 else 0}).decode()}\n\n"
             yield "data: [DONE]\n\n"
         except Exception as e:
             logger.error("Ошибка при обработке чата", exc_info=True)
-            yield f"data: {json.dumps({'type': 'error', 'text': str(e)}, ensure_ascii=False)}\n\n"
+            yield f"data: {orjson.dumps({'type': 'error', 'text': str(e)}).decode()}\n\n"
             yield "data: [DONE]\n\n"
         finally:
             if use_direct_gguf and active_llm:

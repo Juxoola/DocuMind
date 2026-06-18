@@ -1,10 +1,10 @@
 """Роутер: управление GGUF-моделями, VRAM, предзагрузка LLM."""
 
 import asyncio
-import json
 import logging
 import os
 
+import orjson
 from fastapi import APIRouter
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
@@ -280,7 +280,7 @@ async def api_llm_status_stream():
                 st = get_llm_status()
                 key = (st.get("state"), st.get("phase"), st.get("port"), st.get("error"))
                 if key != last_key:
-                    payload = json.dumps(st, ensure_ascii=False)
+                    payload = orjson.dumps(st).decode()
                     yield f"data: {payload}\n\n"
                     last_key = key
                 await asyncio.sleep(0.5)
