@@ -29,6 +29,7 @@ notebooks/*/images/
 # Инструментальные кеши
 .pytest_cache/
 .ruff_cache/
+.mypy_cache/
 node_modules/
 .DS_Store
 AGENTS.md

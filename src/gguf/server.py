@@ -615,53 +615,54 @@ def count_running_servers() -> int:
 
 def unload_all_models(role: str = None):
 
-    if not _server_processes:
-        return
+    with _lock:
+        if not _server_processes:
+            return
 
-    to_remove = []
-    for path, process in _server_processes.items():
-        if role is not None and _server_roles.get(path) != role:
-            continue
+        to_remove = []
+        for path, process in _server_processes.items():
+            if role is not None and _server_roles.get(path) != role:
+                continue
 
-        logger.info(
-            f"[GGUF Server] Выгрузка модели ({_server_roles.get(path, 'unknown')}): {os.path.basename(path)}"
-        )
-        to_remove.append(path)
+            logger.info(
+                f"[GGUF Server] Выгрузка модели ({_server_roles.get(path, 'unknown')}): {os.path.basename(path)}"
+            )
+            to_remove.append(path)
 
-        if process.poll() is None:
-            try:
-                port = _server_ports.get(path)
-                if port:
-                    try:
-                        import httpx
-
-                        with httpx.Client(timeout=0.5) as client:
-                            client.post(f"http://127.0.0.1:{port}/slots/0/clear")
-                    except Exception:
-                        pass
-            except Exception:
-                pass
-            try:
-                if sys.platform == "win32":
-                    subprocess.run(
-                        ["taskkill", "/F", "/T", "/PID", str(process.pid)],
-                        capture_output=True,
-                        timeout=5,
-                    )
-                else:
-                    process.kill()
+            if process.poll() is None:
                 try:
-                    process.wait(timeout=5)
+                    port = _server_ports.get(path)
+                    if port:
+                        try:
+                            with httpx.Client(timeout=0.5) as client:
+                                client.post(f"http://127.0.0.1:{port}/slots/0/clear")
+                        except Exception:
+                            pass
                 except Exception:
                     pass
-            except Exception as e:
-                logger.error(f"[GGUF Server] Ошибка при остановке {os.path.basename(path)}: {e}")
+                try:
+                    if sys.platform == "win32":
+                        subprocess.run(
+                            ["taskkill", "/F", "/T", "/PID", str(process.pid)],
+                            capture_output=True,
+                            timeout=5,
+                        )
+                    else:
+                        process.kill()
+                    try:
+                        process.wait(timeout=5)
+                    except Exception:
+                        pass
+                except Exception as e:
+                    logger.error(
+                        f"[GGUF Server] Ошибка при остановке {os.path.basename(path)}: {e}"
+                    )
 
-    for path in to_remove:
-        _server_processes.pop(path, None)
-        _server_ports.pop(path, None)
-        _server_configs.pop(path, None)
-        _server_roles.pop(path, None)
+        for path in to_remove:
+            _server_processes.pop(path, None)
+            _server_ports.pop(path, None)
+            _server_configs.pop(path, None)
+            _server_roles.pop(path, None)
 
     from src.ingestion.utils import cleanup_gpu
 
@@ -675,8 +676,10 @@ def unload_all_models(role: str = None):
 
 
 def get_loaded_models():
-
-    return [path for path in _server_processes.keys() if _server_roles.get(path, "llm") == "llm"]
+    with _lock:
+        return [
+            path for path in _server_processes.keys() if _server_roles.get(path, "llm") == "llm"
+        ]
 
 
 def get_active_llm_url() -> str | None:

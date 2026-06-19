@@ -2,20 +2,23 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 
 import httpx
 import orjson
 
 logger = logging.getLogger(__name__)
-
 _stream_client: httpx.AsyncClient | None = None
+_stream_client_lock = asyncio.Lock()
 
 
 async def get_stream_client() -> httpx.AsyncClient:
     global _stream_client
     if _stream_client is None or _stream_client.is_closed:
-        _stream_client = httpx.AsyncClient(timeout=60.0)
+        async with _stream_client_lock:
+            if _stream_client is None or _stream_client.is_closed:
+                _stream_client = httpx.AsyncClient(timeout=60.0)
     return _stream_client
 
 

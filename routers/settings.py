@@ -45,8 +45,9 @@ class UpdateModelDirsRequest(BaseModel):
 
 @router.post("/api/update-model-dirs")
 async def update_model_dirs(req: UpdateModelDirsRequest):
-    config.GGUF_SEARCH_DIRS = req.dirs
-    data = config._collect_rag_config()
+    with config._config_lock:
+        config.GGUF_SEARCH_DIRS = req.dirs
+        data = config._collect_rag_config()
     await save_rag_config(config.RAG_CONFIG_FILE, data)
     config.resolve_model_path.cache_clear()
     try:
@@ -95,13 +96,14 @@ class UpdateRagConfigRequest(BaseModel):
 async def update_rag_config(req: UpdateRagConfigRequest):
     from src.rag.models import unload_rag_models
 
-    config.EMBEDDING_MODEL_NAME = req.embedding_model
-    config.RERANKER_MODEL_NAME = req.reranker_model
-    config.RAG_TOP_K_PER_FILE = req.top_k_per_file
-    config.RAG_RERANK_POOL = req.rerank_pool
-    config.RAG_FINAL_TOP_N = req.final_top_n
-    config.USE_RERANKER = req.use_reranker
-    data = config._collect_rag_config()
+    with config._config_lock:
+        config.EMBEDDING_MODEL_NAME = req.embedding_model
+        config.RERANKER_MODEL_NAME = req.reranker_model
+        config.RAG_TOP_K_PER_FILE = req.top_k_per_file
+        config.RAG_RERANK_POOL = req.rerank_pool
+        config.RAG_FINAL_TOP_N = req.final_top_n
+        config.USE_RERANKER = req.use_reranker
+        data = config._collect_rag_config()
     await save_rag_config(config.RAG_CONFIG_FILE, data)
     await asyncio.to_thread(unload_rag_models)
     config.resolve_model_path.cache_clear()

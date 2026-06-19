@@ -25,6 +25,7 @@ dependencies = [
     "fastapi==0.136.1",
     "uvicorn==0.46.0",
     "requests==2.33.1",
+    "httpx==0.28.1",
     "pydantic==2.13.3",
     "pydantic-settings==2.14.0",
     "python-dotenv==1.2.2",
@@ -46,6 +47,7 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     "pytest==9.0.3",
+    "pytest-asyncio==1.0.0",
     "pytest-cov==7.1.0",
     "httpx==0.28.1",
     "ruff==0.15.16",

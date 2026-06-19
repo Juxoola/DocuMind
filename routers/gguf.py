@@ -4,8 +4,9 @@ import asyncio
 import logging
 import os
 
+import config
 import orjson
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
@@ -28,10 +29,8 @@ async def api_scan_gguf_models():
     try:
         models = await asyncio.to_thread(scan_gguf_dirs)
         return {"models": models}
-    except Exception as e:
-        from fastapi import HTTPException
-
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception:
+        raise HTTPException(status_code=500, detail="Ошибка сканирования GGUF-моделей")
 
 
 @router.get("/api/gguf-loaded")
@@ -49,17 +48,18 @@ async def api_gguf_status():
 def _get_gguf_servers_info() -> list:
     servers = []
     try:
-        from src.gguf.state import _server_ports, _server_processes, _server_roles
+        from src.gguf.state import _lock, _server_ports, _server_processes, _server_roles
 
-        for path, proc in _server_processes.items():
-            servers.append(
-                {
-                    "model": os.path.basename(path),
-                    "role": _server_roles.get(path, "?"),
-                    "port": _server_ports.get(path),
-                    "alive": proc.poll() is None,
-                }
-            )
+        with _lock:
+            for path, proc in _server_processes.items():
+                servers.append(
+                    {
+                        "model": os.path.basename(path),
+                        "role": _server_roles.get(path, "?"),
+                        "port": _server_ports.get(path),
+                        "alive": proc.poll() is None,
+                    }
+                )
     except Exception:
         logger.debug("gguf: не удалось получить информацию о серверах")
     return servers
@@ -185,6 +185,8 @@ class PreloadLlmRequest(BaseModel):
 
 @router.post("/api/preload-llm")
 async def api_preload_llm(request: PreloadLlmRequest):
+    if not config.validate_gguf_path(request.gguf_model_path):
+        raise HTTPException(status_code=400, detail="Некорректный путь GGUF-модели")
     try:
         result = await asyncio.to_thread(
             preload_gguf_llm,
@@ -204,10 +206,11 @@ async def api_preload_llm(request: PreloadLlmRequest):
             n_ubatch=request.gguf_ubatch_size,
         )
         return result
-    except FileNotFoundError as e:
-        return {"status": "error", "error": str(e)}
+    except FileNotFoundError:
+        return {"status": "error", "error": "Файл модели не найден"}
     except Exception as e:
-        return {"status": "error", "error": str(e)[:300]}
+        logger.error(f"Ошибка предзагрузки LLM: {e}")
+        return {"status": "error", "error": "Ошибка загрузки модели"}
 
 
 @router.get("/api/llm-status")

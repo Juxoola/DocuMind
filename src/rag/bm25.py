@@ -10,6 +10,7 @@ import config
 from src.rag.state import (
     _BM25_DEBOUNCE_SEC,
     _bm25_node_cache,
+    _bm25_node_cache_lock,
     _bm25_pending_dbpath,
     _bm25_pending_lock,
     _bm25_pending_nodes,
@@ -29,7 +30,8 @@ def _rebuild_bm25_bg(notebook_id: str, db_path: str, new_nodes: list = None):
         os.makedirs(bm25_dir, exist_ok=True)
 
         new_nodes = new_nodes or []
-        old_nodes = _bm25_node_cache.get(notebook_id, [])
+        with _bm25_node_cache_lock:
+            old_nodes = _bm25_node_cache.get(notebook_id, [])
 
         if old_nodes or new_nodes:
             full_corpus = old_nodes + new_nodes
@@ -84,7 +86,8 @@ def _rebuild_bm25_bg(notebook_id: str, db_path: str, new_nodes: list = None):
                 language="russian",
             )
             retriever.persist(bm25_dir)
-            _bm25_node_cache[notebook_id] = full_corpus
+            with _bm25_node_cache_lock:
+                _bm25_node_cache[notebook_id] = full_corpus
             logger.info(f"[RAG] ✅ BM25 обновлён: {len(full_corpus)} узлов.")
     except Exception as e:
         logger.warning(f"[RAG] Ошибка фоновой сборки BM25: {e}")

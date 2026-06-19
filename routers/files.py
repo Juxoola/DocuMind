@@ -21,6 +21,7 @@ import config
 from .shared import (
     _background_tasks,
     _cleanup_ingestion_status,
+    _ingestion_lock,
     ingestion_status,
     robust_rmtree,
     safe_filename,
@@ -156,16 +157,17 @@ async def upload_file(
         start_time = time.time()
         cancel_event = upload_cancel_flags.setdefault(task_id, threading.Event())
         cancel_event.clear()
-        ingestion_status[notebook_id] = {
-            "is_uploading": True,
-            "progress": 0,
-            "batch_progress": (current_idx - 1) / total_count * 100,
-            "current_file": current_idx,
-            "total_files": total_count,
-            "status": "Подготовка...",
-            "task_id": task_id,
-            "updated_at": time.time(),
-        }
+        with _ingestion_lock:
+            ingestion_status[notebook_id] = {
+                "is_uploading": True,
+                "progress": 0,
+                "batch_progress": (current_idx - 1) / total_count * 100,
+                "current_file": current_idx,
+                "total_files": total_count,
+                "status": "Подготовка...",
+                "task_id": task_id,
+                "updated_at": time.time(),
+            }
         try:
             from src.ingestion import IngestionCancelled
         except ImportError:
@@ -174,8 +176,9 @@ async def upload_file(
 
             def prog(pct, msg):
                 q.put({"type": "progress", "pct": pct, "msg": msg})
-                if notebook_id in ingestion_status:
-                    ingestion_status[notebook_id].update({"progress": pct, "status": msg})
+                with _ingestion_lock:
+                    if notebook_id in ingestion_status:
+                        ingestion_status[notebook_id].update({"progress": pct, "status": msg})
 
             prog(5, "Файл сохранён, подготовка...")
             is_last_in_batch = current_idx >= total_count
@@ -222,14 +225,19 @@ async def upload_file(
                     flush_bm25_rebuild(notebook_id)
                 except Exception as bm25_err:
                     logger.info(f"[INGESTION] Не удалось форсировать BM25 rebuild: {bm25_err}")
-                ingestion_status[notebook_id] = {"is_uploading": False, "updated_at": time.time()}
-            else:
-                ingestion_status[notebook_id].update(
-                    {
-                        "batch_progress": current_idx / total_count * 100,
-                        "status": f"Готово: {file.filename}",
+                with _ingestion_lock:
+                    ingestion_status[notebook_id] = {
+                        "is_uploading": False,
+                        "updated_at": time.time(),
                     }
-                )
+            else:
+                with _ingestion_lock:
+                    ingestion_status[notebook_id].update(
+                        {
+                            "batch_progress": current_idx / total_count * 100,
+                            "status": f"Готово: {file.filename}",
+                        }
+                    )
 
             q.put(
                 {
@@ -279,20 +287,22 @@ async def upload_file(
                 collection.delete(where={"file_name": file.filename})
             except Exception:
                 logger.debug("cancel: не удалось очистить векторные индексы для %s", file.filename)
-            ingestion_status[notebook_id] = {
-                "is_uploading": False,
-                "cancelled": True,
-                "updated_at": time.time(),
-            }
+            with _ingestion_lock:
+                ingestion_status[notebook_id] = {
+                    "is_uploading": False,
+                    "cancelled": True,
+                    "updated_at": time.time(),
+                }
             q.put({"type": "cancelled", "filename": file.filename})
         except Exception as e:
             logger.error("Ошибка при обработке загрузки", exc_info=True)
-            ingestion_status[notebook_id] = {
-                "is_uploading": False,
-                "error": str(e),
-                "updated_at": time.time(),
-            }
-            q.put({"type": "error", "msg": str(e)})
+            with _ingestion_lock:
+                ingestion_status[notebook_id] = {
+                    "is_uploading": False,
+                    "error": "Внутренняя ошибка обработки файла",
+                    "updated_at": time.time(),
+                }
+            q.put({"type": "error", "msg": "Ошибка обработки файла"})
         finally:
             upload_cancel_flags.pop(task_id, None)
             try:
@@ -457,4 +467,5 @@ async def clear_notebook(notebook_id: str):
 @router.get("/api/ingestion_status")
 async def get_ingestion_status(notebook_id: str):
     _cleanup_ingestion_status()
-    return ingestion_status.get(notebook_id, {"is_uploading": False})
+    with _ingestion_lock:
+        return ingestion_status.get(notebook_id, {"is_uploading": False})

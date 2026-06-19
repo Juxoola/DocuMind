@@ -19,7 +19,7 @@ _server_processes: dict[str, subprocess.Popen] = {}
 _server_ports: dict[str, int] = {}
 _server_configs: dict[str, dict] = {}
 _server_roles: dict[str, str] = {}
-_lock = threading.Lock()
+_lock = threading.RLock()
 
 _llm_load_state: dict = {
     "state": "idle",

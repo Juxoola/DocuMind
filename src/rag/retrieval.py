@@ -5,6 +5,7 @@ import logging
 import os
 import re
 import statistics as _stats
+import threading
 import time as _time
 
 import httpx
@@ -24,7 +25,13 @@ import config
 from src.rag.bm25 import flush_bm25_rebuild, is_bm25_ready
 from src.rag.indexing import get_vector_store
 from src.rag.models import init_settings
-from src.rag.state import _INDEX_CACHE_MAXSIZE, _index_cache, _index_cache_lock, _model_cache
+from src.rag.state import (
+    _INDEX_CACHE_MAXSIZE,
+    _index_cache,
+    _index_cache_lock,
+    _model_cache,
+    _model_cache_lock,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -34,13 +41,15 @@ _async_rerank_http = httpx.AsyncClient(timeout=60)
 
 # Health-check cache: url -> (is_healthy, timestamp)
 _qe_health_cache: dict[str, tuple[bool, float]] = {}
+_qe_health_cache_lock = threading.Lock()
 _QE_HEALTH_TTL = 30.0
 
 
 def _is_llm_healthy(url: str) -> bool:
     """Check LLM health with 30-second TTL cache to avoid per-request overhead."""
     now = _time.time()
-    cached = _qe_health_cache.get(url)
+    with _qe_health_cache_lock:
+        cached = _qe_health_cache.get(url)
     if cached and (now - cached[1]) < _QE_HEALTH_TTL:
         return cached[0]
     try:
@@ -50,7 +59,8 @@ def _is_llm_healthy(url: str) -> bool:
         result = True
     except Exception:
         result = False
-    _qe_health_cache[url] = (result, now)
+    with _qe_health_cache_lock:
+        _qe_health_cache[url] = (result, now)
     return result
 
 
@@ -433,17 +443,18 @@ async def _rerank_nodes(all_nodes, query: str):
         )
 
     if reranker_available:
-        if "reranker" not in _model_cache:
-            logger.info(f"  [RAG] Загрузка GGUF реранкера: {reranker_name}")
-            from src.gguf.server import get_gguf_embedding_url
+        with _model_cache_lock:
+            if "reranker" not in _model_cache:
+                logger.info(f"  [RAG] Загрузка GGUF реранкера: {reranker_name}")
+                from src.gguf.server import get_gguf_embedding_url
 
-            model_path = config.resolve_model_path(reranker_name)
-            url = await asyncio.to_thread(
-                get_gguf_embedding_url, model_path, is_reranker=True, n_parallel=1
-            )
-            _model_cache["reranker"] = url
+                model_path = config.resolve_model_path(reranker_name)
+                url = await asyncio.to_thread(
+                    get_gguf_embedding_url, model_path, is_reranker=True, n_parallel=1
+                )
+                _model_cache["reranker"] = url
 
-        url = _model_cache["reranker"]
+            url = _model_cache["reranker"]
 
         def _rerank_doc(nws):
             meta = nws.node.metadata or {}

@@ -15,6 +15,7 @@ logger = logging.getLogger(__name__)
 _init_lock = threading.Lock()
 
 _model_cache: dict = {}
+_model_cache_lock = threading.Lock()
 _CLIENT_CACHE_MAXSIZE = 20
 _client_cache: OrderedDict = OrderedDict()
 _client_cache_lock = threading.Lock()
@@ -50,4 +51,5 @@ _bm25_pending_lock = threading.Lock()
 _bm25_rebuilding: set = set()
 _bm25_rebuilding_lock = threading.Lock()
 _bm25_node_cache: dict[str, list] = {}
+_bm25_node_cache_lock = threading.Lock()
 _bm25_pending_nodes: dict[str, list] = {}

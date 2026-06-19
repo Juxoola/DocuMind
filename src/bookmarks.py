@@ -38,7 +38,7 @@ def _bookmarks_path(notebook_id: str) -> str:
 
 async def _read_bookmarks(notebook_id: str) -> list:
     path = _bookmarks_path(notebook_id)
-    if not os.path.exists(path):
+    if not await aiofiles.os.path.exists(path):
         return []
     try:
         async with aiofiles.open(path, encoding="utf-8") as f:
@@ -58,7 +58,7 @@ async def _write_bookmarks(notebook_id: str, bookmarks: list) -> None:
     tmp = path + ".tmp"
     async with aiofiles.open(tmp, "w", encoding="utf-8") as f:
         await f.write(orjson.dumps(bookmarks, option=orjson.OPT_INDENT_2).decode())
-    os.replace(tmp, path)
+    await aiofiles.os.replace(tmp, path)
 
 
 async def list_bookmarks(notebook_id: str) -> list:

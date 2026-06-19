@@ -55,19 +55,22 @@ def get_async_http() -> httpx.AsyncClient:
 
 ingestion_status: dict = {}
 upload_cancel_flags: dict = {}
+_ingestion_lock = threading.Lock()
 _background_tasks: "set[asyncio.Task]" = set()
 _INGESTION_STATUS_TTL_SEC = 3600  # 1 час
 
 
 def _cleanup_ingestion_status():
     now = time.time()
-    expired = [
-        k
-        for k, v in ingestion_status.items()
-        if not v.get("is_uploading") and now - v.get("updated_at", 0) > _INGESTION_STATUS_TTL_SEC
-    ]
-    for k in expired:
-        ingestion_status.pop(k, None)
+    with _ingestion_lock:
+        expired = [
+            k
+            for k, v in ingestion_status.items()
+            if not v.get("is_uploading")
+            and now - v.get("updated_at", 0) > _INGESTION_STATUS_TTL_SEC
+        ]
+        for k in expired:
+            ingestion_status.pop(k, None)
 
 
 def safe_filename(filename: str) -> str:

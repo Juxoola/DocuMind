@@ -10,7 +10,7 @@ from src.ingestion.audio_video import (
 )
 from src.ingestion.media_convert import ensure_720p_video, ensure_mp3_audio
 from src.ingestion.orchestrator import ingest_file
-from src.ingestion.splitter import _SEMANTIC_SPLITTER_CACHE, _get_splitter
+from src.ingestion.splitter import _get_splitter
 from src.ingestion.text import (
     _analyze_page_for_vision,
     process_docx,
@@ -34,7 +34,6 @@ from src.ingestion.vision import (
 )
 
 __all__ = [
-    "_SEMANTIC_SPLITTER_CACHE",
     "IngestionCancelled",
     "_active_subprocesses",
     "_analyze_page_for_vision",

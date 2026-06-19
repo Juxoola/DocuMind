@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 
 import orjson
 
-_config_lock = threading.Lock()
+_config_lock = threading.RLock()
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 NOTEBOOKS_DIR = os.path.join(BASE_DIR, "notebooks")
@@ -144,17 +144,18 @@ def _apply_rag_config(data: dict) -> None:
 
 
 def _collect_rag_config() -> dict:
-    return {
-        "embedding_model": EMBEDDING_MODEL_NAME,
-        "reranker_model": RERANKER_MODEL_NAME,
-        "top_k_per_file": RAG_TOP_K_PER_FILE,
-        "rerank_pool": RAG_RERANK_POOL,
-        "final_top_n": RAG_FINAL_TOP_N,
-        "use_reranker": USE_RERANKER,
-        "gguf_search_dirs": GGUF_SEARCH_DIRS,
-        "query_expansion": RAG_QUERY_EXPANSION,
-        "rerank_score_threshold": RERANK_SCORE_THRESHOLD,
-    }
+    with _config_lock:
+        return {
+            "embedding_model": EMBEDDING_MODEL_NAME,
+            "reranker_model": RERANKER_MODEL_NAME,
+            "top_k_per_file": RAG_TOP_K_PER_FILE,
+            "rerank_pool": RAG_RERANK_POOL,
+            "final_top_n": RAG_FINAL_TOP_N,
+            "use_reranker": USE_RERANKER,
+            "gguf_search_dirs": GGUF_SEARCH_DIRS,
+            "query_expansion": RAG_QUERY_EXPANSION,
+            "rerank_score_threshold": RERANK_SCORE_THRESHOLD,
+        }
 
 
 # Sync загрузка при старте (до async event loop)

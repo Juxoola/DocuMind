@@ -5,7 +5,7 @@ import logging
 import time
 
 import orjson
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
@@ -119,6 +119,25 @@ async def chat(request: ChatRequest):
 
             return StreamingResponse(error_gen(), media_type="text/event-stream")
     elif request.llm_url:
+        from urllib.parse import urlparse
+
+        parsed = urlparse(request.llm_url)
+        hostname = parsed.hostname or ""
+        if (
+            hostname in ("localhost", "127.0.0.1", "::1")
+            or hostname.startswith("192.168.")
+            or hostname.startswith("10.")
+            or hostname.startswith("172.")
+        ):
+            pass
+        elif not hostname:
+            raise HTTPException(status_code=400, detail="Некорректный URL LLM-сервера")
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail="Внешние URL LLM-сервера запрещены из соображений безопасности",
+            )
+
         from llama_index.llms.openai import OpenAI
 
         active_llm = OpenAI(

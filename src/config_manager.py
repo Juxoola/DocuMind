@@ -2,18 +2,17 @@
 
 import logging
 import os
-from asyncio import Lock
 
 import aiofiles
 import orjson
 
-logger = logging.getLogger(__name__)
+from config import _config_lock
 
-_config_lock = Lock()
+logger = logging.getLogger(__name__)
 
 
 async def save_rag_config(rag_config_file: str, config_data: dict) -> None:
-    async with _config_lock:
+    with _config_lock:
         try:
             async with aiofiles.open(rag_config_file, "wb") as f:
                 await f.write(orjson.dumps(config_data, option=orjson.OPT_INDENT_2))
@@ -22,7 +21,7 @@ async def save_rag_config(rag_config_file: str, config_data: dict) -> None:
 
 
 async def load_rag_config(rag_config_file: str, defaults: dict) -> dict:
-    async with _config_lock:
+    with _config_lock:
         try:
             if os.path.exists(rag_config_file):
                 async with aiofiles.open(rag_config_file, "rb") as f:

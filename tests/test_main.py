@@ -234,7 +234,7 @@ class TestBookmarkEndpoints:
     """Закладки."""
 
     def test_list_bookmarks(self, client):
-        resp = client.get("/api/bookmarks?notebook_id=test")
+        resp = client.get("/api/bookmarks?notebook_id=deadbeef")
         assert resp.status_code == 200
         assert resp.json() == {"bookmarks": []}
 
@@ -242,7 +242,7 @@ class TestBookmarkEndpoints:
         resp = client.post(
             "/api/bookmarks",
             json={
-                "notebook_id": "test",
+                "notebook_id": "deadbeef",
                 "question": "What is RAG?",
                 "answer": "Retrieval Augmented Generation",
             },
