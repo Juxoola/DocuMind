@@ -67,27 +67,29 @@ def client():
         import src.rag.prompt
         import src.rag.retrieval
 
+        from unittest.mock import AsyncMock
+
         src.rag.retrieval.retrieve_nodes = MagicMock(return_value=[])
         src.rag.prompt.build_file_context = MagicMock(return_value=([], ""))
         src.rag.prompt.make_prompt = MagicMock(return_value="prompt")
-        src.rag.indexing.build_index = MagicMock()
+        src.rag.indexing.build_index = AsyncMock()
         src.rag.indexing.close_all_clients = MagicMock()
         src.rag.models.preload_all_models = MagicMock()
-        src.rag.models.unload_rag_models = MagicMock()
-        src.rag.indexing.get_vector_store = MagicMock()
+        src.rag.models.unload_rag_models = AsyncMock()
+        src.rag.indexing.get_vector_store = AsyncMock()
         src.rag.prompt.get_embedding_url = MagicMock()
-        src.rag.bm25.flush_bm25_rebuild = MagicMock()
+        src.rag.bm25.flush_bm25_rebuild = AsyncMock()
 
         import src.gguf.server
 
         src.gguf.server.get_gguf_llm = MagicMock(return_value="http://127.0.0.1:49152")
         src.gguf.server.get_gguf_embedding_url = MagicMock(return_value="http://127.0.0.1:49153")
-        src.gguf.server.preload_gguf_llm = MagicMock(
+        src.gguf.server.preload_gguf_llm = AsyncMock(
             return_value={"status": "ready", "port": 49152}
         )
         src.gguf.server.get_llm_status = MagicMock(return_value={"state": "idle", "port": None})
-        src.gguf.server.unload_all_models = MagicMock()
-        src.gguf.server.kill_stray_servers = MagicMock()
+        src.gguf.server.unload_all_models = AsyncMock()
+        src.gguf.server.kill_stray_servers = AsyncMock()
         src.gguf.server.count_running_servers = MagicMock(return_value=0)
         src.gguf.server.get_loaded_models = MagicMock(return_value=[])
         src.gguf.models = MagicMock()
@@ -97,7 +99,11 @@ def client():
 
         import src.gguf.scanner
 
-        src.gguf.scanner.scan_gguf_dirs = MagicMock(return_value=[])
+        src.gguf.scanner.scan_gguf_dirs = AsyncMock(return_value=[])
+
+        import src.config_manager
+
+        src.config_manager.save_rag_config = AsyncMock()
 
         import src.ingestion
 
@@ -105,8 +111,6 @@ def client():
         src.ingestion.unload_whisper_model = MagicMock()
         src.ingestion.kill_subprocesses = MagicMock(return_value=0)
         src.ingestion.IngestionCancelled = RuntimeError
-
-        from unittest.mock import AsyncMock
 
         import src.bookmarks
 

@@ -18,7 +18,7 @@ from src.ingestion.vision import describe_image_with_lmstudio, get_vision_url
 logger = logging.getLogger(__name__)
 
 
-def ingest_file(
+async def ingest_file(
     file_path,
     notebook_id,
     progress_cb=None,
@@ -40,18 +40,18 @@ def ingest_file(
         raise IngestionCancelled("Cancelled before media conversion")
 
     if ext in [".mp4", ".avi", ".mkv", ".mov"]:
-        file_path = ensure_720p_video(
+        file_path = await ensure_720p_video(
             file_path, progress_cb, cancel_check=cancel_check, notebook_id=notebook_id
         )
     elif ext in [".mp3", ".wav", ".m4a"]:
-        file_path = ensure_mp3_audio(file_path, progress_cb)
+        file_path = await ensure_mp3_audio(file_path, progress_cb)
         ext = ".mp3"
 
     if _is_cancelled():
         raise IngestionCancelled("Cancelled after media conversion")
 
     if ext in [".mp4", ".avi", ".mkv", ".mov", ".mp3"]:
-        return process_audio_video(
+        return await process_audio_video(
             file_path,
             images_dir,
             ext != ".mp3",
@@ -65,7 +65,7 @@ def ingest_file(
 
     shared_llm_url = None
     if ext == ".pdf":
-        nodes = process_pdf(
+        nodes = await process_pdf(
             file_path,
             images_dir,
             llm_settings,
@@ -75,7 +75,7 @@ def ingest_file(
             keep_vision_alive=keep_vision_alive,
         )
     elif ext == ".pptx":
-        nodes = process_pptx(
+        nodes = await process_pptx(
             file_path,
             images_dir,
             llm_settings,
@@ -85,7 +85,7 @@ def ingest_file(
             keep_vision_alive=keep_vision_alive,
         )
     elif ext == ".docx":
-        nodes = process_docx(
+        nodes = await process_docx(
             file_path,
             images_dir,
             llm_settings,
@@ -95,7 +95,7 @@ def ingest_file(
             keep_vision_alive=keep_vision_alive,
         )
     elif ext in [".jpg", ".jpeg", ".png", ".webp"]:
-        nodes = process_image(
+        nodes = await process_image(
             file_path,
             images_dir,
             llm_settings,
@@ -115,7 +115,7 @@ def ingest_file(
     return nodes
 
 
-def process_image(
+async def process_image(
     file_path,
     images_dir,
     llm_settings=None,
@@ -145,7 +145,7 @@ def process_image(
     if shared_llm_url:
         if progress_cb:
             progress_cb(30, f"Анализ изображения: {file_name}...")
-        desc = describe_image_with_lmstudio(
+        desc = await describe_image_with_lmstudio(
             dest_path, llm_settings, shared_llm_url, cancel_check=cancel_check
         )
         if desc and "Изображение без описания" not in desc:

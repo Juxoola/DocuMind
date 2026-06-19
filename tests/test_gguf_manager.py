@@ -8,6 +8,7 @@
 - _dir_mtime: вычисление mtime
 """
 
+import asyncio
 import os
 import sys
 import time
@@ -30,8 +31,8 @@ class TestScanGgufDirs:
             # Сбрасываем кеш
             from src.gguf.scanner import invalidate_scan_cache
 
-            invalidate_scan_cache()
-            results = scan_gguf_dirs()
+            asyncio.run(invalidate_scan_cache())
+            results = asyncio.run(scan_gguf_dirs())
             assert results == []
 
     def test_finds_gguf_files(self, tmp_path):
@@ -44,8 +45,8 @@ class TestScanGgufDirs:
         (subdir / "model.mmproj.q4_k_m.gguf").write_text("dummy")
 
         with patch.object(config, "GGUF_SEARCH_DIRS", str(tmp_path)):
-            invalidate_scan_cache()
-            results = scan_gguf_dirs()
+            asyncio.run(invalidate_scan_cache())
+            results = asyncio.run(scan_gguf_dirs())
 
             # Должна быть одна запись с моделью в gguf_files и mmproj в mmproj_files
             assert len(results) == 1
@@ -62,11 +63,11 @@ class TestScanGgufDirs:
         (subdir / "model.gguf").write_text("dummy")
 
         with patch.object(config, "GGUF_SEARCH_DIRS", str(tmp_path)):
-            invalidate_scan_cache()
-            r1 = scan_gguf_dirs()
+            asyncio.run(invalidate_scan_cache())
+            r1 = asyncio.run(scan_gguf_dirs())
 
             # Не меняем файлы — второй вызов должен вернуть кеш
-            r2 = scan_gguf_dirs()
+            r2 = asyncio.run(scan_gguf_dirs())
             assert r1 == r2
 
     def test_cache_invalidation(self, tmp_path):
@@ -78,8 +79,8 @@ class TestScanGgufDirs:
         (subdir / "model.gguf").write_text("dummy")
 
         with patch.object(config, "GGUF_SEARCH_DIRS", str(tmp_path)):
-            invalidate_scan_cache()
-            r1 = scan_gguf_dirs()
+            asyncio.run(invalidate_scan_cache())
+            r1 = asyncio.run(scan_gguf_dirs())
             assert len(r1) == 1
 
             # Добавляем файл
@@ -87,8 +88,8 @@ class TestScanGgufDirs:
             # Ждём чтобы mtime изменился
             time.sleep(1.1)
 
-            invalidate_scan_cache()
-            r2 = scan_gguf_dirs()
+            asyncio.run(invalidate_scan_cache())
+            r2 = asyncio.run(scan_gguf_dirs())
             assert len(r2) == 1
             # Новый файл должен быть виден
             assert "new_model.gguf" in r2[0]["gguf_files"]
@@ -98,8 +99,8 @@ class TestScanGgufDirs:
         from src.gguf.scanner import invalidate_scan_cache, scan_gguf_dirs
 
         with patch.object(config, "GGUF_SEARCH_DIRS", "/nonexistent/path"):
-            invalidate_scan_cache()
-            results = scan_gguf_dirs()
+            asyncio.run(invalidate_scan_cache())
+            results = asyncio.run(scan_gguf_dirs())
             assert results == []
 
     def test_multiple_search_dirs(self, tmp_path):
@@ -114,8 +115,8 @@ class TestScanGgufDirs:
         (d2 / "b.gguf").write_text("b")
 
         with patch.object(config, "GGUF_SEARCH_DIRS", f"{d1};{d2}"):
-            invalidate_scan_cache()
-            results = scan_gguf_dirs()
+            asyncio.run(invalidate_scan_cache())
+            results = asyncio.run(scan_gguf_dirs())
             assert len(results) == 2
             all_files = []
             for r in results:
@@ -133,8 +134,8 @@ class TestFindGgufByName:
         (tmp_path / "target.gguf").write_text("data")
 
         with patch.object(config, "GGUF_SEARCH_DIRS", str(tmp_path)):
-            invalidate_scan_cache()
-            result = find_gguf_by_name("target.gguf")
+            asyncio.run(invalidate_scan_cache())
+            result = asyncio.run(find_gguf_by_name("target.gguf"))
             assert result is not None
             assert result.endswith("target.gguf")
 
@@ -143,15 +144,15 @@ class TestFindGgufByName:
         from src.gguf.scanner import find_gguf_by_name, invalidate_scan_cache
 
         with patch.object(config, "GGUF_SEARCH_DIRS", str(tmp_path)):
-            invalidate_scan_cache()
-            assert find_gguf_by_name("no_such_file.gguf") is None
+            asyncio.run(invalidate_scan_cache())
+            assert asyncio.run(find_gguf_by_name("no_such_file.gguf")) is None
 
     def test_find_empty_name(self, tmp_path):
         """Пустое имя → None."""
         from src.gguf.scanner import find_gguf_by_name
 
-        assert find_gguf_by_name("") is None
-        assert find_gguf_by_name(None) is None
+        assert asyncio.run(find_gguf_by_name("")) is None
+        assert asyncio.run(find_gguf_by_name(None)) is None
 
     def test_find_mmproj(self, tmp_path):
         """Поиск mmproj-файла."""
@@ -160,8 +161,8 @@ class TestFindGgufByName:
         (tmp_path / "mmproj-model.Q4_K_M.gguf").write_text("data")
 
         with patch.object(config, "GGUF_SEARCH_DIRS", str(tmp_path)):
-            invalidate_scan_cache()
-            result = find_gguf_by_name("mmproj-model.Q4_K_M.gguf")
+            asyncio.run(invalidate_scan_cache())
+            result = asyncio.run(find_gguf_by_name("mmproj-model.Q4_K_M.gguf"))
             assert result is not None
             assert "mmproj" in result
 
@@ -173,7 +174,7 @@ class TestDirMtime:
         """Существующая директория возвращает float > 0."""
         from src.gguf.scanner import _dir_mtime
 
-        mtime = _dir_mtime(str(tmp_path))
+        mtime = asyncio.run(_dir_mtime(str(tmp_path)))
         assert isinstance(mtime, float)
         assert mtime > 0
 
@@ -181,17 +182,17 @@ class TestDirMtime:
         """Несуществующий путь → 0.0."""
         from src.gguf.scanner import _dir_mtime
 
-        assert _dir_mtime("/nonexistent_path_xyz") == 0.0
+        assert asyncio.run(_dir_mtime("/nonexistent_path_xyz")) == 0.0
 
     def test_dir_mtime_changes_on_modification(self, tmp_path):
         """После создания файла mtime меняется."""
         from src.gguf.scanner import _dir_mtime
 
-        before = _dir_mtime(str(tmp_path))
+        before = asyncio.run(_dir_mtime(str(tmp_path)))
         time.sleep(1.1)
         (tmp_path / "new_file.txt").write_text("test")
         # refresh dir mtime
-        after = _dir_mtime(str(tmp_path))
+        after = asyncio.run(_dir_mtime(str(tmp_path)))
         assert after >= before
 
 
@@ -208,11 +209,11 @@ class TestInvalidateCache:
             f.write("{}")
 
         with patch("src.gguf.scanner._GGUF_CACHE_FILE", fake_cache):
-            invalidate_scan_cache()
+            asyncio.run(invalidate_scan_cache())
             assert not os.path.exists(fake_cache)
 
     def test_invalidate_no_cache_file(self):
         """invalidate_scan_cache без файла не падает."""
         from src.gguf.scanner import invalidate_scan_cache
 
-        invalidate_scan_cache()  # не должно упасть
+        asyncio.run(invalidate_scan_cache())  # не должно упасть

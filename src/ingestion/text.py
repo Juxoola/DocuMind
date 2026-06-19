@@ -1,10 +1,9 @@
 """Обработка текстовых документов: PDF, PPTX, DOCX."""
 
+import asyncio
 import logging
 import os
-import subprocess
 import uuid
-from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import fitz
 import orjson
@@ -19,68 +18,114 @@ from src.ingestion.vision import describe_image_with_lmstudio, get_vision_url
 logger = logging.getLogger(__name__)
 
 
-def _analyze_page_for_vision(page):
+async def _analyze_page_for_vision(page):
 
-    text = page.get_text()
-    images = page.get_images()
-    drawings = page.get_drawings()
-    has_real_graphics = bool(len(images) > 0)
-    if not has_real_graphics:
-        graphics_weight = 0
-        horizontal_lines = 0
-        vertical_lines = 0
-        for d in drawings:
-            items = d.get("items", [])
-            if any(i[0] in ["c", "q"] for i in items) or len(items) > 12:
-                has_real_graphics = True
-                break
-            rect = d.get("rect")
-            fill = d.get("fill")
-            is_page_background = (
-                len(items) == 1
-                and items[0][0] == "re"
-                and fill is not None
-                and all(c >= 0.99 for c in fill)
-                and rect is not None
-                and (rect.x1 - rect.x0) > 200
-                and (rect.y1 - rect.y0) > 200
-            )
-            if is_page_background:
-                continue
-            if rect is not None:
-                w, h = rect.x1 - rect.x0, rect.y1 - rect.y0
-                if w > 30 and h < 3:
-                    horizontal_lines += 1
-                elif w < 3 and h > 30:
-                    vertical_lines += 1
-            graphics_weight += 1
+    def _sync_analyze():
+        text = page.get_text()
+        images = page.get_images()
+        drawings = page.get_drawings()
+        has_real_graphics = bool(len(images) > 0)
         if not has_real_graphics:
-            if (
-                graphics_weight > 8
-                or (horizontal_lines >= 3 and vertical_lines >= 1)
-                or (horizontal_lines + vertical_lines >= 6)
-            ):
-                has_real_graphics = True
-    return text, has_real_graphics
+            graphics_weight = 0
+            horizontal_lines = 0
+            vertical_lines = 0
+            for d in drawings:
+                items = d.get("items", [])
+                if any(i[0] in ["c", "q"] for i in items) or len(items) > 12:
+                    has_real_graphics = True
+                    break
+                rect = d.get("rect")
+                fill = d.get("fill")
+                is_page_background = (
+                    len(items) == 1
+                    and items[0][0] == "re"
+                    and fill is not None
+                    and all(c >= 0.99 for c in fill)
+                    and rect is not None
+                    and (rect.x1 - rect.x0) > 200
+                    and (rect.y1 - rect.y0) > 200
+                )
+                if is_page_background:
+                    continue
+                if rect is not None:
+                    w, h = rect.x1 - rect.x0, rect.y1 - rect.y0
+                    if w > 30 and h < 3:
+                        horizontal_lines += 1
+                    elif w < 3 and h > 30:
+                        vertical_lines += 1
+                graphics_weight += 1
+            if not has_real_graphics:
+                if (
+                    graphics_weight > 8
+                    or (horizontal_lines >= 3 and vertical_lines >= 1)
+                    or (horizontal_lines + vertical_lines >= 6)
+                ):
+                    has_real_graphics = True
+        return text, has_real_graphics
+
+    return await asyncio.to_thread(_sync_analyze)
 
 
-def _analyze_and_build_page(page_num, doc, images_dir, file_name, splitter):
+async def _analyze_and_build_page(page_num, doc, images_dir, file_name, splitter):
 
-    page = doc.load_page(page_num)
-    text, has_real_graphics = _analyze_page_for_vision(page)
-    local_nodes = []
-    image_path = None
-    if text and text.strip():
-        local_nodes = splitter.get_nodes_from_documents(
-            [TextNode(text=text, metadata={"file_name": file_name, "page": page_num + 1})]
-        )
-    if has_real_graphics and page is not None:
-        image_path = os.path.join(images_dir, f"p_{page_num + 1}_{uuid.uuid4().hex[:6]}.png")
-        page.get_pixmap(dpi=150).save(image_path)
-    return page_num, local_nodes, image_path
+    def _sync_build():
+        page = doc.load_page(page_num)
+        text = page.get_text()
+        images = page.get_images()
+        drawings = page.get_drawings()
+        has_real_graphics = bool(len(images) > 0)
+        if not has_real_graphics:
+            graphics_weight = 0
+            horizontal_lines = 0
+            vertical_lines = 0
+            for d in drawings:
+                items = d.get("items", [])
+                if any(i[0] in ["c", "q"] for i in items) or len(items) > 12:
+                    has_real_graphics = True
+                    break
+                rect = d.get("rect")
+                fill = d.get("fill")
+                is_page_background = (
+                    len(items) == 1
+                    and items[0][0] == "re"
+                    and fill is not None
+                    and all(c >= 0.99 for c in fill)
+                    and rect is not None
+                    and (rect.x1 - rect.x0) > 200
+                    and (rect.y1 - rect.y0) > 200
+                )
+                if is_page_background:
+                    continue
+                if rect is not None:
+                    w, h = rect.x1 - rect.x0, rect.y1 - rect.y0
+                    if w > 30 and h < 3:
+                        horizontal_lines += 1
+                    elif w < 3 and h > 30:
+                        vertical_lines += 1
+                graphics_weight += 1
+            if not has_real_graphics:
+                if (
+                    graphics_weight > 8
+                    or (horizontal_lines >= 3 and vertical_lines >= 1)
+                    or (horizontal_lines + vertical_lines >= 6)
+                ):
+                    has_real_graphics = True
+
+        local_nodes = []
+        image_path = None
+        if text and text.strip():
+            local_nodes = splitter.get_nodes_from_documents(
+                [TextNode(text=text, metadata={"file_name": file_name, "page": page_num + 1})]
+            )
+        if has_real_graphics and page is not None:
+            image_path = os.path.join(images_dir, f"p_{page_num + 1}_{uuid.uuid4().hex[:6]}.png")
+            page.get_pixmap(dpi=150).save(image_path)
+        return page_num, local_nodes, image_path
+
+    return await asyncio.to_thread(_sync_build)
 
 
-def process_pdf(
+async def process_pdf(
     file_path,
     images_dir,
     llm_settings=None,
@@ -109,7 +154,7 @@ def process_pdf(
             for page_num in range(total_pages):
                 if _is_cancelled():
                     raise IngestionCancelled(f"Cancelled at page {page_num + 1}")
-                pn, local_nodes, image_path = _analyze_and_build_page(
+                pn, local_nodes, image_path = await _analyze_and_build_page(
                     page_num, doc, images_dir, file_name, splitter
                 )
                 nodes.extend(local_nodes)
@@ -120,30 +165,22 @@ def process_pdf(
                 if _is_cancelled():
                     raise IngestionCancelled(f"Cancelled at page {batch_start + 1}")
                 batch_end = min(batch_start + BATCH_SIZE, total_pages)
-                with ThreadPoolExecutor(max_workers=n_workers) as ex:
-                    futures = []
+
+                async def _process_batch_pages(batch_start, batch_end):
+                    tasks = []
                     for page_num in range(batch_start, batch_end):
-                        futures.append(
-                            ex.submit(
-                                _analyze_and_build_page,
-                                page_num,
-                                doc,
-                                images_dir,
-                                file_name,
-                                splitter,
+                        tasks.append(
+                            _analyze_and_build_page(
+                                page_num, doc, images_dir, file_name, splitter
                             )
                         )
-                    artifacts = [None] * len(futures)
-                    for i, fut in enumerate(as_completed(futures)):
-                        if _is_cancelled():
-                            ex.shutdown(wait=False, cancel_futures=True)
-                            raise IngestionCancelled("Cancelled during page processing")
-                        pn, local_nodes, image_path = fut.result()
-                        artifacts[i] = (pn, local_nodes, image_path)
-                    for page_num_result, local_nodes, image_path in artifacts:
-                        nodes.extend(local_nodes)
-                        if image_path:
-                            frame_list.append({"page": page_num_result + 1, "path": image_path})
+                    return await asyncio.gather(*tasks)
+
+                page_results = await _process_batch_pages(batch_start, batch_end)
+                for page_num_result, local_nodes, image_path in page_results:
+                    nodes.extend(local_nodes)
+                    if image_path:
+                        frame_list.append({"page": page_num_result + 1, "path": image_path})
 
         if frame_list:
             if shared_llm_url is None:
@@ -157,43 +194,52 @@ def process_pdf(
                         f"Анализ {n} страниц PDF ({'параллельно' if v_conc > 1 else 'последовательно'})...",
                     )
 
-                with ThreadPoolExecutor(max_workers=v_conc) as executor:
-                    futures = {
-                        executor.submit(
+                sem = asyncio.Semaphore(v_conc)
+                done_count = 0
+                results = []
+
+                async def _describe_frame(frame_info):
+                    nonlocal done_count
+                    if _is_cancelled():
+                        raise IngestionCancelled(f"Cancelled during OCR ({done_count}/{n})")
+                    async with sem:
+                        desc = await asyncio.to_thread(
                             describe_image_with_lmstudio,
-                            f["path"],
+                            frame_info["path"],
                             llm_settings,
                             shared_llm_url,
                             cancel_check=cancel_check,
-                        ): f
-                        for f in frame_list
-                    }
-                    done_count = 0
-                    results = []
-                    try:
-                        for future in as_completed(futures):
-                            if _is_cancelled():
-                                executor.shutdown(wait=False, cancel_futures=True)
-                                raise IngestionCancelled(f"Cancelled during OCR ({done_count}/{n})")
-                            frame_info = futures[future]
-                            desc = future.result()
-                            done_count += 1
-                            results.append((frame_info, desc))
-                            if progress_cb:
-                                progress_cb(
-                                    65 + int(done_count / n * 25), f"Описание PDF: {done_count}/{n}"
-                                )
-                    except IngestionCancelled:
-                        raise
-
-                    results.sort(key=lambda x: x[0]["page"])
-                    for frame_info, desc in results:
-                        if desc and "Изображение без описания" not in desc:
-                            full_text = (
-                                f"Изображение PDF {file_name} стр {frame_info['page']}: {desc}"
+                        )
+                        done_count += 1
+                        results.append((frame_info, desc))
+                        if progress_cb:
+                            progress_cb(
+                                65 + int(done_count / n * 25), f"Описание PDF: {done_count}/{n}"
                             )
-                            if len(full_text) <= config.GGUF_CTX_EMBED_CHARS:
-                                nodes.append(
+
+                tasks = [_describe_frame(f) for f in frame_list]
+                await asyncio.gather(*tasks)
+
+                results.sort(key=lambda x: x[0]["page"])
+                for frame_info, desc in results:
+                    if desc and "Изображение без описания" not in desc:
+                        full_text = (
+                            f"Изображение PDF {file_name} стр {frame_info['page']}: {desc}"
+                        )
+                        if len(full_text) <= config.GGUF_CTX_EMBED_CHARS:
+                            nodes.append(
+                                TextNode(
+                                    text=full_text,
+                                    metadata={
+                                        "file_name": file_name,
+                                        "image_path": frame_info["path"],
+                                        "page": frame_info["page"],
+                                    },
+                                )
+                            )
+                        else:
+                            desc_nodes = splitter.get_nodes_from_documents(
+                                [
                                     TextNode(
                                         text=full_text,
                                         metadata={
@@ -202,33 +248,21 @@ def process_pdf(
                                             "page": frame_info["page"],
                                         },
                                     )
-                                )
-                            else:
-                                desc_nodes = splitter.get_nodes_from_documents(
-                                    [
-                                        TextNode(
-                                            text=full_text,
-                                            metadata={
-                                                "file_name": file_name,
-                                                "image_path": frame_info["path"],
-                                                "page": frame_info["page"],
-                                            },
-                                        )
-                                    ]
-                                )
-                                nodes.extend(desc_nodes)
-                            frame_data.append(
-                                {
-                                    "page": frame_info["page"],
-                                    "image_path": frame_info["path"],
-                                    "description": desc,
-                                }
+                                ]
                             )
-                        else:
-                            try:
-                                os.remove(frame_info["path"])
-                            except Exception:
-                                pass
+                            nodes.extend(desc_nodes)
+                        frame_data.append(
+                            {
+                                "page": frame_info["page"],
+                                "image_path": frame_info["path"],
+                                "description": desc,
+                            }
+                        )
+                    else:
+                        try:
+                            os.remove(frame_info["path"])
+                        except Exception:
+                            pass
 
             if shared_llm_url and not keep_vision_alive:
                 unload_all_models(role="llm")
@@ -241,10 +275,14 @@ def process_pdf(
                 "transcript": [],
                 "frames": frame_data,
             }
-            with open(
-                os.path.join(os.path.dirname(file_path), f"{file_name}.json"), "w", encoding="utf-8"
-            ) as f:
-                f.write(orjson.dumps(metadata_json, option=orjson.OPT_INDENT_2).decode())
+
+            def _write_metadata():
+                with open(
+                    os.path.join(os.path.dirname(file_path), f"{file_name}.json"), "w", encoding="utf-8"
+                ) as f:
+                    f.write(orjson.dumps(metadata_json, option=orjson.OPT_INDENT_2).decode())
+
+            await asyncio.to_thread(_write_metadata)
     finally:
         doc.close()
     return nodes
@@ -266,7 +304,7 @@ def _find_soffice():
     return None
 
 
-def _convert_via_libreoffice(file_path):
+async def _convert_via_libreoffice(file_path):
     soffice = _find_soffice()
     if not soffice:
         raise FileNotFoundError("LibreOffice не найден. Установите или скачайте через setup.ps1")
@@ -281,9 +319,14 @@ def _convert_via_libreoffice(file_path):
         out_dir,
         os.path.abspath(file_path),
     ]
-    result = subprocess.run(cmd, capture_output=True, timeout=120)
+    proc = await asyncio.create_subprocess_exec(
+        *cmd,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=120)
     pdf_path = os.path.splitext(file_path)[0] + ".pdf"
-    if result.returncode == 0 and os.path.exists(pdf_path):
+    if proc.returncode == 0 and os.path.exists(pdf_path):
         logger.info(f"[DOCX] Сконвертировано в PDF через LibreOffice: {os.path.basename(pdf_path)}")
         try:
             os.remove(file_path)
@@ -291,54 +334,58 @@ def _convert_via_libreoffice(file_path):
             pass
         return pdf_path
     raise RuntimeError(
-        f"LibreOffice конвертация не удалась (code={result.returncode}): "
-        f"{(result.stderr or b'').decode('utf-8', errors='replace')[:200]}"
+        f"LibreOffice конвертация не удалась (code={proc.returncode}): "
+        f"{(stderr or b'').decode('utf-8', errors='replace')[:200]}"
     )
 
 
-def _convert_via_com(file_path, app_name, format_code):
-    import pythoncom
-    import win32com.client
+async def _convert_via_com(file_path, app_name, format_code):
 
-    pdf_path = os.path.splitext(file_path)[0] + ".pdf"
-    app = None
-    doc = None
-    try:
-        pythoncom.CoInitialize()
-        app = win32com.client.Dispatch(app_name)
-        if app_name == "Powerpoint.Application":
-            doc = app.Presentations.Open(os.path.abspath(file_path), WithWindow=False)
-        else:
-            doc = app.Documents.Open(os.path.abspath(file_path))
-        doc.SaveAs(os.path.abspath(pdf_path), format_code)
-        if not os.path.exists(pdf_path):
-            raise RuntimeError(f"COM {app_name} не создал PDF: {pdf_path}")
-        if os.path.exists(file_path):
-            os.remove(file_path)
-        return pdf_path
-    except IngestionCancelled:
-        raise
-    except Exception as e:
-        logger.warning(f"COM-конвертация через {app_name} не удалась: {e}")
-        raise
-    finally:
-        if doc is not None:
-            try:
-                doc.Close()
-            except Exception:
-                pass
-        if app is not None:
-            try:
-                app.Quit()
-            except Exception:
-                pass
+    def _sync_com():
+        import pythoncom
+        import win32com.client
+
+        pdf_path = os.path.splitext(file_path)[0] + ".pdf"
+        app = None
+        doc = None
         try:
-            pythoncom.CoUninitialize()
-        except Exception:
-            pass
+            pythoncom.CoInitialize()
+            app = win32com.client.Dispatch(app_name)
+            if app_name == "Powerpoint.Application":
+                doc = app.Presentations.Open(os.path.abspath(file_path), WithWindow=False)
+            else:
+                doc = app.Documents.Open(os.path.abspath(file_path))
+            doc.SaveAs(os.path.abspath(pdf_path), format_code)
+            if not os.path.exists(pdf_path):
+                raise RuntimeError(f"COM {app_name} не создал PDF: {pdf_path}")
+            if os.path.exists(file_path):
+                os.remove(file_path)
+            return pdf_path
+        except IngestionCancelled:
+            raise
+        except Exception as e:
+            logger.warning(f"COM-конвертация через {app_name} не удалась: {e}")
+            raise
+        finally:
+            if doc is not None:
+                try:
+                    doc.Close()
+                except Exception:
+                    pass
+            if app is not None:
+                try:
+                    app.Quit()
+                except Exception:
+                    pass
+            try:
+                pythoncom.CoUninitialize()
+            except Exception:
+                pass
+
+    return await asyncio.to_thread(_sync_com)
 
 
-def process_pptx(
+async def process_pptx(
     file_path,
     images_dir,
     llm_settings=None,
@@ -350,30 +397,30 @@ def process_pptx(
     file_name = os.path.basename(file_path)
 
     try:
-        pdf_path = _convert_via_libreoffice(file_path)
+        pdf_path = await _convert_via_libreoffice(file_path)
     except FileNotFoundError:
         logger.info("[PPTX] LibreOffice не найден, пробую COM-конвертацию...")
         try:
-            pdf_path = _convert_via_com(file_path, "Powerpoint.Application", 32)
+            pdf_path = await _convert_via_com(file_path, "Powerpoint.Application", 32)
         except IngestionCancelled:
             raise
         except Exception as e:
             logger.warning(f"[PPTX] COM-конвертация тоже не удалась: {e}")
-            return _process_pptx_textonly(file_path, file_name)
+            return await _process_pptx_textonly(file_path, file_name)
     except IngestionCancelled:
         raise
     except Exception as e:
         logger.warning(f"[PPTX] LibreOffice конвертация не удалась: {e}")
         try:
-            pdf_path = _convert_via_com(file_path, "Powerpoint.Application", 32)
+            pdf_path = await _convert_via_com(file_path, "Powerpoint.Application", 32)
         except IngestionCancelled:
             raise
         except Exception:
-            return _process_pptx_textonly(file_path, file_name)
+            return await _process_pptx_textonly(file_path, file_name)
 
     file_name = os.path.basename(pdf_path)
 
-    return process_pdf(
+    return await process_pdf(
         pdf_path,
         images_dir,
         llm_settings,
@@ -385,25 +432,29 @@ def process_pptx(
     )
 
 
-def _process_pptx_textonly(file_path, file_name):
-    try:
-        from pptx import Presentation
+async def _process_pptx_textonly(file_path, file_name):
 
-        prs = Presentation(file_path)
-        nodes = []
-        for i, slide in enumerate(prs.slides):
-            text = "\n".join([sh.text for sh in slide.shapes if hasattr(sh, "text")])
-            if text.strip():
-                nodes.append(TextNode(text=text, metadata={"file_name": file_name, "page": i + 1}))
-        if nodes:
-            logger.info(f"[PPTX] Fallback: {len(nodes)} слайдов через python-pptx (без Vision)")
-            return nodes
-    except Exception as e:
-        logger.warning(f"[PPTX] python-pptx fallback тоже не удался: {e}")
-    return []
+    def _sync_pptx():
+        try:
+            from pptx import Presentation
+
+            prs = Presentation(file_path)
+            nodes = []
+            for i, slide in enumerate(prs.slides):
+                text = "\n".join([sh.text for sh in slide.shapes if hasattr(sh, "text")])
+                if text.strip():
+                    nodes.append(TextNode(text=text, metadata={"file_name": file_name, "page": i + 1}))
+            if nodes:
+                logger.info(f"[PPTX] Fallback: {len(nodes)} слайдов через python-pptx (без Vision)")
+                return nodes
+        except Exception as e:
+            logger.warning(f"[PPTX] python-pptx fallback тоже не удался: {e}")
+        return []
+
+    return await asyncio.to_thread(_sync_pptx)
 
 
-def process_docx(
+async def process_docx(
     file_path,
     images_dir,
     llm_settings=None,
@@ -415,30 +466,30 @@ def process_docx(
     file_name = os.path.basename(file_path)
 
     try:
-        pdf_path = _convert_via_libreoffice(file_path)
+        pdf_path = await _convert_via_libreoffice(file_path)
     except FileNotFoundError:
         logger.info("[DOCX] LibreOffice не найден, пробую COM-конвертацию...")
         try:
-            pdf_path = _convert_via_com(file_path, "Word.Application", 17)
+            pdf_path = await _convert_via_com(file_path, "Word.Application", 17)
         except IngestionCancelled:
             raise
         except Exception as e:
             logger.warning(f"[DOCX] COM-конвертация тоже не удалась: {e}")
-            return _process_docx_textonly(file_path, file_name)
+            return await _process_docx_textonly(file_path, file_name)
     except IngestionCancelled:
         raise
     except Exception as e:
         logger.warning(f"[DOCX] LibreOffice конвертация не удалась: {e}")
         try:
-            pdf_path = _convert_via_com(file_path, "Word.Application", 17)
+            pdf_path = await _convert_via_com(file_path, "Word.Application", 17)
         except IngestionCancelled:
             raise
         except Exception:
-            return _process_docx_textonly(file_path, file_name)
+            return await _process_docx_textonly(file_path, file_name)
 
     file_name = os.path.basename(pdf_path)
 
-    return process_pdf(
+    return await process_pdf(
         pdf_path,
         images_dir,
         llm_settings,
@@ -450,14 +501,18 @@ def process_docx(
     )
 
 
-def _process_docx_textonly(file_path, file_name):
-    try:
-        import docx as _docx
+async def _process_docx_textonly(file_path, file_name):
 
-        text = "\n".join([p.text for p in _docx.Document(file_path).paragraphs])
-        if text.strip():
-            logger.info("[DOCX] Fallback: текст извлечён через python-docx (без Vision)")
-            return [TextNode(text=text, metadata={"file_name": file_name})]
-    except Exception as e:
-        logger.warning(f"[DOCX] python-docx fallback тоже не удался: {e}")
-    return []
+    def _sync_docx():
+        try:
+            import docx as _docx
+
+            text = "\n".join([p.text for p in _docx.Document(file_path).paragraphs])
+            if text.strip():
+                logger.info("[DOCX] Fallback: текст извлечён через python-docx (без Vision)")
+                return [TextNode(text=text, metadata={"file_name": file_name})]
+        except Exception as e:
+            logger.warning(f"[DOCX] python-docx fallback тоже не удался: {e}")
+        return []
+
+    return await asyncio.to_thread(_sync_docx)

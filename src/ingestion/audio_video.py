@@ -1,5 +1,6 @@
 """Обработка аудио/видео: транскрибация WhisperX, анализ кадров, Vision."""
 
+import asyncio
 import logging
 import os
 import subprocess
@@ -73,14 +74,16 @@ def _patch_whisperx_ffmpeg():
 _patch_whisperx_ffmpeg()
 
 
-def get_or_load_whisper(
+async def get_or_load_whisper(
     model_name: str = "medium", device: str = "cuda", compute_type: str = "int8"
 ):
+    """Load or return cached WhisperX model. Heavy I/O runs in a thread."""
 
-    key = (model_name, device, compute_type)
-    with _whisper_lock:
-        if key in _whisper_model_cache:
-            return _whisper_model_cache[key]
+    def _load():
+        key = (model_name, device, compute_type)
+        with _whisper_lock:
+            if key in _whisper_model_cache:
+                return _whisper_model_cache[key]
         import whisperx
 
         logger.info(f"[WhisperX] Загрузка модели {model_name} ({device}, {compute_type})...")
@@ -95,48 +98,59 @@ def get_or_load_whisper(
             )
         finally:
             logging.disable(logging.NOTSET)
-        _whisper_model_cache[key] = model
+        with _whisper_lock:
+            _whisper_model_cache[key] = model
         return model
 
-
-def unload_whisper_model():
-
-    with _whisper_lock:
-        if not _whisper_model_cache:
-            return
-        logger.info(f"[WhisperX] Выгрузка {len(_whisper_model_cache)} кешированных моделей...")
-        _whisper_model_cache.clear()
-        cleanup_gpu()
+    return await asyncio.to_thread(_load)
 
 
-def save_high_res_frame(video_path, time_sec, output_path):
+async def unload_whisper_model():
+    """Unload all cached WhisperX models and free GPU memory."""
 
-    try:
-        from imageio_ffmpeg import get_ffmpeg_exe
+    def _unload():
+        with _whisper_lock:
+            if not _whisper_model_cache:
+                return
+            logger.info(f"[WhisperX] Выгрузка {len(_whisper_model_cache)} кешированных моделей...")
+            _whisper_model_cache.clear()
+            cleanup_gpu()
 
-        cmd = [
-            get_ffmpeg_exe(),
-            "-y",
-            "-hwaccel",
-            "cuda",
-            "-ss",
-            str(time_sec),
-            "-i",
-            video_path,
-            "-vframes",
-            "1",
-            "-vf",
-            "scale=-2:720",
-            "-q:v",
-            "4",
-            output_path,
-        ]
-        subprocess.run(cmd, capture_output=True, timeout=30)
-    except Exception as e:
-        logger.warning(f"Ошибка FFmpeg при сохранении кадра: {e}")
+    await asyncio.to_thread(_unload)
 
 
-def process_audio_video(
+async def save_high_res_frame(video_path, time_sec, output_path):
+    """Extract a single high-res frame via ffmpeg (runs in a thread)."""
+
+    def _save():
+        try:
+            from imageio_ffmpeg import get_ffmpeg_exe
+
+            cmd = [
+                get_ffmpeg_exe(),
+                "-y",
+                "-hwaccel",
+                "cuda",
+                "-ss",
+                str(time_sec),
+                "-i",
+                video_path,
+                "-vframes",
+                "1",
+                "-vf",
+                "scale=-2:720",
+                "-q:v",
+                "4",
+                output_path,
+            ]
+            subprocess.run(cmd, capture_output=True, timeout=30)
+        except Exception as e:
+            logger.warning(f"Ошибка FFmpeg при сохранении кадра: {e}")
+
+    await asyncio.to_thread(_save)
+
+
+async def process_audio_video(
     file_path,
     images_dir,
     is_video=False,
@@ -147,6 +161,7 @@ def process_audio_video(
     keep_vision_alive=False,
     keep_whisper_alive=False,
 ):
+    """Main audio/video processing pipeline. GPU-bound transcription runs in a thread."""
 
     def _is_cancelled():
         return bool(cancel_check and cancel_check())
@@ -170,27 +185,35 @@ def process_audio_video(
     try:
         import whisperx
 
-        model = get_or_load_whisper("medium", device, "int8")
+        model = await get_or_load_whisper("medium", device, "int8")
         prog(18, "Загрузка аудио...")
-        audio = whisperx.load_audio(file_path)
-        duration_sec = len(audio) / 16000
-        prog(20, f"VAD + транскрибация ({format_seconds(duration_sec)})...")
 
-        def _whisper_progress(pct):
-            pct_int = int(pct)
-            if pct_int <= 100:
-                prog(20 + int(pct_int * 0.38), f"Транскрибация: {pct_int}%")
+        # GPU-bound: audio loading + transcription runs entirely in a thread
+        def _transcribe():
+            audio = whisperx.load_audio(file_path)
+            dur = len(audio) / 16000
 
-        result = model.transcribe(audio, batch_size=16, progress_callback=_whisper_progress)
-        for seg in result.get("segments", []):
-            transcript_data.append(
-                {"start": seg["start"], "end": seg["end"], "text": seg["text"].strip()}
-            )
+            def _whisper_progress(pct):
+                pct_int = int(pct)
+                if pct_int <= 100:
+                    prog(20 + int(pct_int * 0.38), f"Транскрибация: {pct_int}%")
+
+            result = model.transcribe(audio, batch_size=16, progress_callback=_whisper_progress)
+            segs = []
+            for seg in result.get("segments", []):
+                segs.append(
+                    {"start": seg["start"], "end": seg["end"], "text": seg["text"].strip()}
+                )
+            return segs, dur
+
+        duration_sec = 0
+        prog(20, "VAD + транскрибация ...")
+        transcript_data, duration_sec = await asyncio.to_thread(_transcribe)
     except Exception as e:
         logger.error(f"WhisperX error: {e}")
     finally:
         if not keep_whisper_alive:
-            unload_whisper_model()
+            await unload_whisper_model()
 
     if transcript_data:
         chunk_text = ""
@@ -284,7 +307,7 @@ def process_audio_video(
                     last_seen_thumb = thumb
                     stable_since_sec = current_sec
                     img_path = os.path.join(images_dir, f"v_{uuid.uuid4().hex[:6]}.jpg")
-                    save_high_res_frame(file_path, current_sec, img_path)
+                    await save_high_res_frame(file_path, current_sec, img_path)
                     frame_list.append((img_path, current_sec))
                     prev_saved_thumb = thumb
                 else:
@@ -301,7 +324,7 @@ def process_audio_video(
                                     img_path = os.path.join(
                                         images_dir, f"v_{uuid.uuid4().hex[:6]}.jpg"
                                     )
-                                    save_high_res_frame(file_path, current_sec, img_path)
+                                    await save_high_res_frame(file_path, current_sec, img_path)
                                     if saved_pct >= NEW_SLIDE_PCT:
                                         frame_list.append((img_path, current_sec))
                                     else:

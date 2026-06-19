@@ -27,7 +27,7 @@ router = APIRouter(tags=["gguf"])
 @router.get("/api/gguf-models")
 async def api_scan_gguf_models():
     try:
-        models = await asyncio.to_thread(scan_gguf_dirs)
+        models = await scan_gguf_dirs()
         return {"models": models}
     except Exception:
         raise HTTPException(status_code=500, detail="Ошибка сканирования GGUF-моделей")
@@ -67,14 +67,14 @@ def _get_gguf_servers_info() -> list:
 
 @router.post("/api/gguf-unload")
 async def api_gguf_unload_all():
-    await asyncio.to_thread(unload_all_models)
+    await unload_all_models()
     return {"status": "ok", "msg": "Все модели выгружены"}
 
 
 @router.post("/api/gguf-kill-all")
 async def api_gguf_kill_all():
-    await asyncio.to_thread(kill_stray_servers)
-    await asyncio.to_thread(unload_all_models)
+    await kill_stray_servers()
+    await unload_all_models()
     return {"status": "ok", "msg": "Все процессы llama-server завершены"}
 
 
@@ -188,8 +188,7 @@ async def api_preload_llm(request: PreloadLlmRequest):
     if not config.validate_gguf_path(request.gguf_model_path):
         raise HTTPException(status_code=400, detail="Некорректный путь GGUF-модели")
     try:
-        result = await asyncio.to_thread(
-            preload_gguf_llm,
+        result = await preload_gguf_llm(
             gguf_path=request.gguf_model_path,
             mmproj_path=request.gguf_mmproj_path or None,
             ctx_size=request.gguf_ctx_size,

@@ -1,5 +1,6 @@
 """Медиа-конвертация: 720p ресайз видео, конвертация аудио в mp3."""
 
+import asyncio
 import concurrent.futures
 import logging
 import os
@@ -15,7 +16,7 @@ from src.ingestion.utils import (
 logger = logging.getLogger(__name__)
 
 
-def ensure_720p_video(file_path, prog_cb=None, cancel_check=None, notebook_id=None):
+async def ensure_720p_video(file_path, prog_cb=None, cancel_check=None, notebook_id=None):
 
     ext = os.path.splitext(file_path)[1].lower()
     if ext not in [".mp4", ".avi", ".mkv", ".mov"]:
@@ -27,17 +28,20 @@ def ensure_720p_video(file_path, prog_cb=None, cancel_check=None, notebook_id=No
     def _is_cancelled():
         return bool(cancel_check and cancel_check())
 
-    def get_duration(path):
+    async def get_duration(path):
         try:
             cmd = [ffmpeg, "-hide_banner", "-i", path]
-            res = subprocess.run(cmd, capture_output=True, timeout=30)
-            stderr = (res.stderr or b"").decode("utf-8", errors="ignore")
+            proc = await asyncio.create_subprocess_exec(
+                *cmd, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE
+            )
+            stdout, stderr_bytes = await asyncio.wait_for(proc.communicate(), timeout=30)
+            stderr = (stderr_bytes or b"").decode("utf-8", errors="ignore")
             for line in stderr.split("\n"):
                 if "Duration" in line:
                     time_str = line.split("Duration: ")[1].split(",")[0]
                     h, m, s = time_str.split(":")
                     return float(h) * 3600 + float(m) * 60 + float(s)
-        except subprocess.TimeoutExpired:
+        except asyncio.TimeoutError:
             logger.warning(
                 f"[ensure_720p_video] WARNING get_duration timeout для {os.path.basename(path)} (30с)"
             )
@@ -46,7 +50,7 @@ def ensure_720p_video(file_path, prog_cb=None, cancel_check=None, notebook_id=No
         return 0
 
     logger.info(f"[ensure_720p_video] Начало: {os.path.basename(file_path)}")
-    duration = get_duration(file_path)
+    duration = await get_duration(file_path)
     temp_final = file_path + ".720p.mp4"
     use_turbo = True if duration == 0 else duration >= 120
 
@@ -87,11 +91,13 @@ def ensure_720p_video(file_path, prog_cb=None, cancel_check=None, notebook_id=No
             "+faststart",
             temp_final,
         ]
-        proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        proc = await asyncio.create_subprocess_exec(
+            *cmd, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL
+        )
         if notebook_id is not None:
             register_subprocess(notebook_id, proc)
         try:
-            proc.wait(timeout=3600)
+            await asyncio.wait_for(proc.wait(), timeout=3600)
         finally:
             if notebook_id is not None:
                 unregister_subprocess(notebook_id, proc)
@@ -111,7 +117,7 @@ def ensure_720p_video(file_path, prog_cb=None, cancel_check=None, notebook_id=No
         temp_dir = file_path + "_parts"
         os.makedirs(temp_dir, exist_ok=True)
 
-        def encode_seg(idx):
+        async def encode_seg(idx):
             if _is_cancelled():
                 return None
             out_part = os.path.join(temp_dir, f"part_{idx}.mp4")
@@ -144,18 +150,21 @@ def ensure_720p_video(file_path, prog_cb=None, cancel_check=None, notebook_id=No
                 "-an",
                 out_part,
             ]
-            proc = subprocess.Popen(
-                cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, bufsize=1
+            proc = await asyncio.create_subprocess_exec(
+                *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL
             )
             if notebook_id is not None:
                 register_subprocess(notebook_id, proc)
             try:
                 last_pct = -1
-                for line in proc.stdout:
+                while True:
+                    line_bytes = await proc.stdout.readline()
+                    if not line_bytes:
+                        break
+                    line = line_bytes.decode("utf-8", errors="ignore").strip()
                     if _is_cancelled():
                         proc.kill()
                         return None
-                    line = line.strip()
                     if line.startswith("out_time_ms="):
                         try:
                             time_ms = int(line.split("=", 1)[1])
@@ -167,20 +176,14 @@ def ensure_720p_video(file_path, prog_cb=None, cancel_check=None, notebook_id=No
                                     prog_cb(overall, f"Сегмент {idx + 1}/{num_workers}: {pct}%")
                         except (ValueError, ZeroDivisionError):
                             pass
-                proc.wait(timeout=3600)
+                await asyncio.wait_for(proc.wait(), timeout=3600)
             finally:
                 if notebook_id is not None:
                     unregister_subprocess(notebook_id, proc)
             return out_part
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=num_workers) as ex:
-            parts = []
-            for p in ex.map(encode_seg, range(num_workers)):
-                if _is_cancelled():
-                    logger.info("[Ingestion] Отмена во время турбо-кодирования")
-                    ex.shutdown(wait=False, cancel_futures=True)
-                    raise IngestionCancelled("Cancelled during turbo encode")
-                parts.append(p)
+        tasks = [encode_seg(idx) for idx in range(num_workers)]
+        parts = await asyncio.gather(*tasks)
 
         if _is_cancelled():
             raise IngestionCancelled("Cancelled after turbo encode")
@@ -212,13 +215,13 @@ def ensure_720p_video(file_path, prog_cb=None, cancel_check=None, notebook_id=No
             "+faststart",
             temp_final,
         ]
-        merge_proc = subprocess.Popen(
-            merge_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+        merge_proc = await asyncio.create_subprocess_exec(
+            *merge_cmd, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL
         )
         if notebook_id is not None:
             register_subprocess(notebook_id, merge_proc)
         try:
-            merge_proc.wait(timeout=3600)
+            await asyncio.wait_for(merge_proc.wait(), timeout=3600)
         finally:
             if notebook_id is not None:
                 unregister_subprocess(notebook_id, merge_proc)
@@ -246,7 +249,7 @@ def ensure_720p_video(file_path, prog_cb=None, cancel_check=None, notebook_id=No
     return file_path
 
 
-def ensure_mp3_audio(file_path, prog_cb=None):
+async def ensure_mp3_audio(file_path, prog_cb=None):
 
     temp_path = file_path.rsplit(".", 1)[0] + ".mp3"
     from imageio_ffmpeg import get_ffmpeg_exe
@@ -262,8 +265,11 @@ def ensure_mp3_audio(file_path, prog_cb=None):
         "128k",
         temp_path,
     ]
-    result = subprocess.run(cmd, capture_output=True, timeout=300)
-    if result.returncode == 0 and os.path.exists(temp_path) and os.path.getsize(temp_path) > 1000:
+    proc = await asyncio.create_subprocess_exec(
+        *cmd, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE
+    )
+    await asyncio.wait_for(proc.communicate(), timeout=300)
+    if proc.returncode == 0 and os.path.exists(temp_path) and os.path.getsize(temp_path) > 1000:
         os.remove(file_path)
         logger.info(f"[media_convert] {os.path.basename(file_path)} → mp3")
         return temp_path

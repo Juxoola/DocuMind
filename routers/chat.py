@@ -82,7 +82,7 @@ async def chat(request: ChatRequest):
     if query_for_rag.strip() and not skip_initial_rag:
         logger.debug(f"DEBUG: Запуск RAG поиска для: {query_for_rag[:50]}...")
         nodes = await retrieve_nodes(query_for_rag, request.notebook_id, request.allowed_files)
-        sources, context = await asyncio.to_thread(build_file_context, nodes, request.notebook_id)
+        sources, context = await build_file_context(nodes, request.notebook_id)
         logger.debug(f"DEBUG: RAG нашёл {len(nodes)} фрагментов.")
 
     active_llm = None
@@ -92,8 +92,7 @@ async def chat(request: ChatRequest):
         from src.gguf.server import get_gguf_llm
 
         try:
-            active_llm = await asyncio.to_thread(
-                get_gguf_llm,
+            active_llm = await get_gguf_llm(
                 gguf_path=request.gguf_model_path,
                 mmproj_path=request.gguf_mmproj_path or None,
                 temperature=request.gguf_temperature,
@@ -194,9 +193,7 @@ async def chat(request: ChatRequest):
                         request.notebook_id,
                         request.allowed_files,
                     )
-                    sources, context = await asyncio.to_thread(
-                        build_file_context, nodes, request.notebook_id
-                    )
+                    sources, context = await build_file_context(nodes, request.notebook_id)
                 except Exception as ve:
                     logger.error(f"DEBUG: Ошибка OCR: {ve}")
 

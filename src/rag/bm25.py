@@ -1,9 +1,8 @@
 """BM25 lifecycle: сборка, debounce, отмена, проверка готовности."""
 
+import asyncio
 import logging
 import os
-import threading
-
 from llama_index.core.schema import TextNode
 
 import config
@@ -22,7 +21,7 @@ from src.rag.state import (
 logger = logging.getLogger(__name__)
 
 
-def _rebuild_bm25_bg(notebook_id: str, db_path: str, new_nodes: list = None):
+async def _rebuild_bm25_bg(notebook_id: str, db_path: str, new_nodes: list = None):
     _PAGE_SIZE = 2000
     try:
         paths = config.get_notebook_paths(notebook_id)
@@ -40,52 +39,63 @@ def _rebuild_bm25_bg(notebook_id: str, db_path: str, new_nodes: list = None):
                 f"{len(old_nodes)} кеш + {len(new_nodes)} новых = {len(full_corpus)} узлов"
             )
         else:
-            import chromadb as _chromadb
+            # ChromaDB operations are sync — run in thread
+            def _fetch_chroma_nodes():
+                import chromadb as _chromadb
 
-            tmp_client = _chromadb.PersistentClient(path=db_path)
-            collection = tmp_client.get_or_create_collection("multimodal_rag")
-            bm25_nodes = []
-            offset = 0
-            while True:
-                result = collection.get(limit=_PAGE_SIZE, offset=offset)
-                ids = result.get("ids", [])
-                if not ids:
-                    break
-                documents = result.get("documents", []) or []
-                metadatas = result.get("metadatas", []) or []
-                for i, doc_id in enumerate(ids):
-                    text = documents[i] if i < len(documents) else ""
-                    meta = metadatas[i] if i < len(metadatas) else {}
-                    if meta is None:
-                        meta = {}
-                    fname = meta.get("file_name", "")
-                    page = meta.get("page", "")
-                    t = meta.get("start", meta.get("time", ""))
-                    coord_parts = []
-                    if fname:
-                        coord_parts.append(str(fname))
-                    if page not in ("", None):
-                        coord_parts.append(f"стр.{page}")
-                    elif t not in ("", None):
-                        coord_parts.append(f"@{t}")
-                    if coord_parts:
-                        text = f"[{' '.join(coord_parts)}]: {text}"
-                    bm25_nodes.append(TextNode(text=text, id_=doc_id, metadata=meta))
-                if len(ids) < _PAGE_SIZE:
-                    break
-                offset += _PAGE_SIZE
-            full_corpus = bm25_nodes
+                tmp_client = _chromadb.PersistentClient(path=db_path)
+                collection = tmp_client.get_or_create_collection("multimodal_rag")
+                bm25_nodes = []
+                offset = 0
+                while True:
+                    result = collection.get(limit=_PAGE_SIZE, offset=offset)
+                    ids = result.get("ids", [])
+                    if not ids:
+                        break
+                    documents = result.get("documents", []) or []
+                    metadatas = result.get("metadatas", []) or []
+                    for i, doc_id in enumerate(ids):
+                        text = documents[i] if i < len(documents) else ""
+                        meta = metadatas[i] if i < len(metadatas) else {}
+                        if meta is None:
+                            meta = {}
+                        fname = meta.get("file_name", "")
+                        page = meta.get("page", "")
+                        t = meta.get("start", meta.get("time", ""))
+                        coord_parts = []
+                        if fname:
+                            coord_parts.append(str(fname))
+                        if page not in ("", None):
+                            coord_parts.append(f"стр.{page}")
+                        elif t not in ("", None):
+                            coord_parts.append(f"@{t}")
+                        if coord_parts:
+                            text = f"[{' '.join(coord_parts)}]: {text}"
+                        bm25_nodes.append(TextNode(text=text, id_=doc_id, metadata=meta))
+                    if len(ids) < _PAGE_SIZE:
+                        break
+                    offset += _PAGE_SIZE
+                return bm25_nodes
+
+            full_corpus = await asyncio.to_thread(_fetch_chroma_nodes)
             logger.info(f"[RAG] BM25 холодная сборка из ChromaDB: {len(full_corpus)} узлов")
 
         if full_corpus:
-            from llama_index.retrievers.bm25 import BM25Retriever
+            # BM25Retriever.from_defaults is sync CPU — run in thread
+            def _build_retriever():
+                from llama_index.retrievers.bm25 import BM25Retriever
 
-            retriever = BM25Retriever.from_defaults(
-                nodes=full_corpus,
-                similarity_top_k=config.RAG_TOP_K_PER_FILE,
-                language="russian",
-            )
-            retriever.persist(bm25_dir)
+                return BM25Retriever.from_defaults(
+                    nodes=full_corpus,
+                    similarity_top_k=config.RAG_TOP_K_PER_FILE,
+                    language="russian",
+                )
+
+            retriever = await asyncio.to_thread(_build_retriever)
+
+            # retriever.persist is sync file I/O — run in thread
+            await asyncio.to_thread(retriever.persist, bm25_dir)
+
             with _bm25_node_cache_lock:
                 _bm25_node_cache[notebook_id] = full_corpus
             logger.info(f"[RAG] ✅ BM25 обновлён: {len(full_corpus)} узлов.")
@@ -93,7 +103,7 @@ def _rebuild_bm25_bg(notebook_id: str, db_path: str, new_nodes: list = None):
         logger.warning(f"[RAG] Ошибка фоновой сборки BM25: {e}")
 
 
-def _schedule_bm25_rebuild(notebook_id: str, db_path: str, new_nodes: list = None):
+async def _schedule_bm25_rebuild(notebook_id: str, db_path: str, new_nodes: list = None):
     with _bm25_pending_lock:
         old = _bm25_pending_timers.get(notebook_id)
         if old is not None:
@@ -108,54 +118,56 @@ def _schedule_bm25_rebuild(notebook_id: str, db_path: str, new_nodes: list = Non
             existing.extend(new_nodes)
             logger.debug(f"[RAG] +{len(new_nodes)} узлов в BM25 pending (всего: {len(existing)})")
 
-        def _fire():
-            with _bm25_pending_lock:
-                _bm25_pending_timers.pop(notebook_id, None)
-                path = _bm25_pending_dbpath.pop(notebook_id, None)
-                pending = _bm25_pending_nodes.pop(notebook_id, [])
-            if path is None:
-                return
+    async def _fire():
+        await asyncio.sleep(_BM25_DEBOUNCE_SEC)
+        with _bm25_pending_lock:
+            _bm25_pending_timers.pop(notebook_id, None)
+            path = _bm25_pending_dbpath.pop(notebook_id, None)
+            pending = _bm25_pending_nodes.pop(notebook_id, [])
+        if path is None:
+            return
+        with _bm25_rebuilding_lock:
+            _bm25_rebuilding.add(notebook_id)
+        try:
+            await _rebuild_bm25_bg(notebook_id, path, new_nodes=pending)
+        finally:
             with _bm25_rebuilding_lock:
-                _bm25_rebuilding.add(notebook_id)
-            try:
-                _rebuild_bm25_bg(notebook_id, path, new_nodes=pending)
-            finally:
-                with _bm25_rebuilding_lock:
-                    _bm25_rebuilding.discard(notebook_id)
+                _bm25_rebuilding.discard(notebook_id)
 
-        t = threading.Timer(_BM25_DEBOUNCE_SEC, _fire)
-        t.daemon = True
-        _bm25_pending_timers[notebook_id] = t
-        t.start()
-        logger.info(
-            f"[RAG] ⏱ BM25 rebuild запланирован через {_BM25_DEBOUNCE_SEC:.0f}с "
-            "(можно сбросить через flush_bm25_rebuild)"
-        )
+    # Cancel any existing task before creating a new one
+    # Note: lock is released by now, but we already handled old.cancel() above
+
+    task = asyncio.create_task(_fire())
+    _bm25_pending_timers[notebook_id] = task
+    logger.info(
+        f"[RAG] ⏱ BM25 rebuild запланирован через {_BM25_DEBOUNCE_SEC:.0f}с "
+        "(можно сбросить через flush_bm25_rebuild)"
+    )
 
 
-def cancel_bm25_rebuild(notebook_id: str):
+async def cancel_bm25_rebuild(notebook_id: str):
     with _bm25_pending_lock:
-        timer = _bm25_pending_timers.pop(notebook_id, None)
+        task = _bm25_pending_timers.pop(notebook_id, None)
         _bm25_pending_dbpath.pop(notebook_id, None)
         _bm25_pending_nodes.pop(notebook_id, None)
-        if timer is not None:
+        if task is not None:
             try:
-                timer.cancel()
+                task.cancel()
             except Exception as e:
-                logger.debug(f"[cancel_bm25_rebuild] timer.cancel: {e}")
+                logger.debug(f"[cancel_bm25_rebuild] task.cancel: {e}")
 
 
-def flush_bm25_rebuild(
+async def flush_bm25_rebuild(
     notebook_id: str,
     db_path: str = None,
     wait: bool = False,
     timeout: float = 120.0,
 ):
     with _bm25_pending_lock:
-        timer = _bm25_pending_timers.pop(notebook_id, None)
-        if timer is not None:
+        task = _bm25_pending_timers.pop(notebook_id, None)
+        if task is not None:
             try:
-                timer.cancel()
+                task.cancel()
             except Exception:
                 pass
         path = _bm25_pending_dbpath.pop(notebook_id, None)
@@ -168,28 +180,27 @@ def flush_bm25_rebuild(
     if path is None:
         return
     if not wait:
-        with _bm25_rebuilding_lock:
-            _bm25_rebuilding.add(notebook_id)
-
-        def _bg():
+        async def _bg():
             try:
-                _rebuild_bm25_bg(notebook_id, path, new_nodes=pending)
+                await _rebuild_bm25_bg(notebook_id, path, new_nodes=pending)
             finally:
                 with _bm25_rebuilding_lock:
                     _bm25_rebuilding.discard(notebook_id)
 
-        threading.Thread(target=_bg, daemon=True, name=f"bm25-flush-{notebook_id}").start()
+        with _bm25_rebuilding_lock:
+            _bm25_rebuilding.add(notebook_id)
+        asyncio.create_task(_bg())
         return
     with _bm25_rebuilding_lock:
         _bm25_rebuilding.add(notebook_id)
     try:
-        _rebuild_bm25_bg(notebook_id, path, new_nodes=pending)
+        await _rebuild_bm25_bg(notebook_id, path, new_nodes=pending)
     finally:
         with _bm25_rebuilding_lock:
             _bm25_rebuilding.discard(notebook_id)
 
 
-def is_bm25_ready(notebook_id: str) -> bool:
+async def is_bm25_ready(notebook_id: str) -> bool:
     paths = config.get_notebook_paths(notebook_id)
     bm25_dir = os.path.join(paths["base"], "bm25")
     exists = os.path.exists(os.path.join(bm25_dir, "retriever.json"))

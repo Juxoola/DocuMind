@@ -202,12 +202,12 @@ async def _load_bm25_retriever(notebook_id: str):
         except Exception as e:
             logger.warning(f"Не удалось загрузить BM25: {e}")
     else:
-        if not is_bm25_ready(notebook_id):
+        if not await is_bm25_ready(notebook_id):
             logger.info(
                 "  [RAG] BM25 отсутствует — форсирую синхронную пересборку для первого запроса"
             )
-            await asyncio.to_thread(
-                flush_bm25_rebuild, notebook_id, db_path=paths["chroma_db"], wait=True, timeout=180
+            await flush_bm25_rebuild(
+                notebook_id, db_path=paths["chroma_db"], wait=True, timeout=180
             )
             if os.path.exists(os.path.join(bm25_dir, "retriever.json")):
                 try:
@@ -449,9 +449,7 @@ async def _rerank_nodes(all_nodes, query: str):
                 from src.gguf.server import get_gguf_embedding_url
 
                 model_path = config.resolve_model_path(reranker_name)
-                url = await asyncio.to_thread(
-                    get_gguf_embedding_url, model_path, is_reranker=True, n_parallel=1
-                )
+                url = await get_gguf_embedding_url(model_path, is_reranker=True, n_parallel=1)
                 _model_cache["reranker"] = url
 
             url = _model_cache["reranker"]
@@ -570,7 +568,7 @@ def _filter_chunks(all_nodes):
 # Гибридный поиск: векторный (ChromaDB) + BM25 с Reciprocal Rank Fusion, опциональный реранкинг через GGUF
 async def retrieve_nodes(query: str, notebook_id: str, allowed_files=None, max_tokens=1024):
     init_settings(max_tokens=max_tokens)
-    vector_store = get_vector_store(notebook_id)
+    vector_store = await get_vector_store(notebook_id)
 
     # Fast path: check cache without lock
     with _index_cache_lock:

@@ -1,11 +1,11 @@
 """Жизненный цикл GGUF-серверов (запуск, остановка, получение URL)."""
 
+import asyncio
 import logging
 import os
 import socket
 import subprocess
 import sys
-import threading
 import time
 
 import httpx
@@ -27,10 +27,17 @@ from src.gguf.state import (
 logger = logging.getLogger(__name__)
 
 
-def is_server_ready(port: int) -> bool:
+def _proc_alive(proc) -> bool:
+    """Check if process is still running. Works for both sync Popen and async Process."""
+    if hasattr(proc, "poll"):
+        return proc.poll() is None
+    return proc.returncode is None
+
+
+async def is_server_ready(port: int) -> bool:
     try:
-        with httpx.Client(timeout=1) as client:
-            r = client.get(f"http://127.0.0.1:{port}/health")
+        async with httpx.AsyncClient(timeout=1) as client:
+            r = await client.get(f"http://127.0.0.1:{port}/health")
             return r.status_code == 200
     except Exception:
         return False
@@ -39,7 +46,7 @@ def is_server_ready(port: int) -> bool:
 # Выбор свободного порта через bind, сборка CLI, запуск subprocess с ожиданием ready через health-check
 
 
-def _start_llm_server_sync(gguf_path: str, mmproj_path: str, current_config: dict) -> str:
+async def _start_llm_server_sync(gguf_path: str, mmproj_path: str, current_config: dict) -> str:
 
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -112,15 +119,15 @@ def _start_llm_server_sync(gguf_path: str, mmproj_path: str, current_config: dic
     logger.info(f"[GGUF Server]   cmd: {' '.join(cmd)}")
 
     creationflags = 0x08000000
-    process = subprocess.Popen(
-        cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=creationflags
+    process = await asyncio.create_subprocess_exec(
+        *cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=creationflags
     )
     _assign_to_job(process)
 
     start_wait = time.time()
     backoff = 0.05
     while time.time() - start_wait < 60:
-        if is_server_ready(port):
+        if await is_server_ready(port):
             logger.info("[GGUF Server] Готов!")
             with _lock:
                 _server_processes[gguf_path] = process
@@ -129,9 +136,9 @@ def _start_llm_server_sync(gguf_path: str, mmproj_path: str, current_config: dic
                 _server_roles[gguf_path] = "llm"
             return f"http://127.0.0.1:{port}"
 
-        if process.poll() is not None:
+        if process.returncode is not None:
             try:
-                _, stderr = process.communicate(timeout=1)
+                _, stderr = await asyncio.wait_for(process.communicate(), timeout=1)
             except Exception:
                 stderr = b""
                 logger.debug("llama-server communicate failed")
@@ -141,23 +148,25 @@ def _start_llm_server_sync(gguf_path: str, mmproj_path: str, current_config: dic
                 f"Сервер llama-server упал при запуске (pid={process.pid}, retcode={retcode}). "
                 f"stderr: {stderr_text}"
             )
-        time.sleep(backoff)
+        await asyncio.sleep(backoff)
         backoff = min(backoff * 2, 1.0)
 
     try:
         if sys.platform == "win32":
-            subprocess.run(
-                ["taskkill", "/F", "/T", "/PID", str(process.pid)], capture_output=True, timeout=5
+            proc = await asyncio.create_subprocess_exec(
+                "taskkill", "/F", "/T", "/PID", str(process.pid),
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
             )
+            await asyncio.wait_for(proc.communicate(), timeout=5)
         else:
             process.kill()
-    except Exception as e:
+    except Exception:
         try:
             process.kill()
         except Exception:
             pass
     try:
-        process.wait(timeout=5)
+        await asyncio.wait_for(process.wait(), timeout=5)
     except Exception:
         pass
     raise TimeoutError("Сервер не ответил за 60 секунд")
@@ -214,7 +223,7 @@ def _build_llm_config(
 # Основной entry-point для загрузки LLM: проверяет кеш, выгружает старое, запускает новое
 
 
-def get_gguf_llm(
+async def get_gguf_llm(
     gguf_path: str,
     mmproj_path: str = None,
     temperature: float = 0.1,
@@ -261,7 +270,7 @@ def get_gguf_llm(
     with _lock:
         if gguf_path in _server_processes:
             if (
-                _server_processes[gguf_path].poll() is None
+                _proc_alive(_server_processes[gguf_path])
                 and _server_configs.get(gguf_path) == current_config
             ):
                 _llm_load_state.update(
@@ -278,6 +287,7 @@ def get_gguf_llm(
                     f"[GGUF Server] Настройки изменились или сервер упал. Перезапуск {os.path.basename(gguf_path)}..."
                 )
 
+    with _lock:
         _llm_load_state.update(
             {
                 "state": "loading",
@@ -292,14 +302,16 @@ def get_gguf_llm(
         )
         _server_configs[gguf_path] = current_config
         unload_rag_models_safe()
-        unload_all_models(role="llm")
 
-        if not os.path.exists(gguf_path):
+    await unload_all_models(role="llm")
+
+    if not os.path.exists(gguf_path):
+        with _lock:
             _llm_load_state.update({"state": "error", "error": f"Model not found: {gguf_path}"})
-            raise FileNotFoundError(f"GGUF модель не найдена: {gguf_path}")
+        raise FileNotFoundError(f"GGUF модель не найдена: {gguf_path}")
 
     try:
-        url = _start_llm_server_sync(gguf_path, mmproj_path, current_config)
+        url = await _start_llm_server_sync(gguf_path, mmproj_path, current_config)
         elapsed = time.time() - (_llm_load_state.get("started_at") or time.time())
         with _lock:
             _llm_load_state.update(
@@ -320,7 +332,7 @@ def get_gguf_llm(
         raise
 
 
-def preload_gguf_llm(
+async def preload_gguf_llm(
     gguf_path: str,
     mmproj_path: str = None,
     ctx_size: int = None,
@@ -369,7 +381,7 @@ def preload_gguf_llm(
     with _lock:
         if gguf_path in _server_processes:
             if (
-                _server_processes[gguf_path].poll() is None
+                _proc_alive(_server_processes[gguf_path])
                 and _server_configs.get(gguf_path) == current_config
             ):
                 _llm_load_state.update(
@@ -401,17 +413,17 @@ def preload_gguf_llm(
         )
         _server_configs[gguf_path] = current_config
 
-    def _worker():
+    async def _worker():
         try:
             with _lock:
                 _llm_load_state["phase"] = "starting"
             unload_rag_models_safe()
-            unload_all_models(role="llm")
+            await unload_all_models(role="llm")
             if not os.path.exists(gguf_path):
                 raise FileNotFoundError(f"GGUF модель не найдена: {gguf_path}")
             with _lock:
                 _llm_load_state["phase"] = "loading_model"
-            url = _start_llm_server_sync(gguf_path, mmproj_path, current_config)
+            url = await _start_llm_server_sync(gguf_path, mmproj_path, current_config)
             elapsed = time.time() - _llm_load_state["started_at"]
             with _lock:
                 _llm_load_state.update(
@@ -431,8 +443,7 @@ def preload_gguf_llm(
                 _llm_load_state.update({"state": "error", "error": str(e)[:300], "phase": None})
             logger.info(f"[preload] ERROR: {e}")
 
-    thread = threading.Thread(target=_worker, daemon=True, name=f"preload-llm-{task_id}")
-    thread.start()
+    asyncio.create_task(_worker(), name=f"preload-llm-{task_id}")
     return {"status": "loading", "task_id": task_id, "model": os.path.basename(gguf_path)}
 
 
@@ -462,10 +473,9 @@ def get_llm_status() -> dict:
     return state
 
 
-def get_gguf_embedding_url(
+async def get_gguf_embedding_url(
     gguf_path: str, n_threads: int = None, is_reranker: bool = False, n_parallel: int = 1
 ) -> str:
-
     role = "reranker" if is_reranker else "embedding"
     n_parallel = max(1, int(n_parallel or 1))
 
@@ -478,7 +488,7 @@ def get_gguf_embedding_url(
     with _lock:
         if gguf_path in _server_processes:
             if (
-                _server_processes[gguf_path].poll() is None
+                _proc_alive(_server_processes[gguf_path])
                 and _server_configs.get(gguf_path) == current_config
             ):
                 return f"http://127.0.0.1:{_server_ports[gguf_path]}"
@@ -486,10 +496,11 @@ def get_gguf_embedding_url(
                 logger.info(f"[GGUF Server] Перезапуск {role} {os.path.basename(gguf_path)}...")
 
         unload_rag_models_safe()
-        unload_all_models(role=role)
 
-        if not os.path.exists(gguf_path):
-            raise FileNotFoundError(f"GGUF модель не найдена: {gguf_path}")
+    await unload_all_models(role=role)
+
+    if not os.path.exists(gguf_path):
+        raise FileNotFoundError(f"GGUF модель не найдена: {gguf_path}")
 
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -529,15 +540,15 @@ def get_gguf_embedding_url(
     logger.info(f"[GGUF Server]   cmd: {' '.join(cmd)}")
 
     creationflags = 0x08000000
-    process = subprocess.Popen(
-        cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=creationflags
+    process = await asyncio.create_subprocess_exec(
+        *cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=creationflags
     )
     _assign_to_job(process)
 
     start_wait = time.time()
     backoff = 0.05
     while time.time() - start_wait < 60:
-        if is_server_ready(port):
+        if await is_server_ready(port):
             logger.info(f"[GGUF Server] {role.capitalize()} готов!")
             with _lock:
                 _server_processes[gguf_path] = process
@@ -546,12 +557,16 @@ def get_gguf_embedding_url(
                 _server_roles[gguf_path] = role
             return f"http://127.0.0.1:{port}"
 
-        if process.poll() is not None:
+        if process.returncode is not None:
             raise RuntimeError(f"{role.capitalize()} сервер упал при запуске")
-        time.sleep(backoff)
+        await asyncio.sleep(backoff)
         backoff = min(backoff * 2, 1.0)
 
     process.terminate()
+    try:
+        await asyncio.wait_for(process.wait(), timeout=5)
+    except Exception:
+        pass
     raise TimeoutError(f"{role.capitalize()} сервер не ответил за 60 секунд")
 
 
@@ -570,7 +585,7 @@ def get_active_embedding_parallel(gguf_path: str = None) -> int:
         return 1
 
 
-def kill_stray_servers():
+async def kill_stray_servers():
 
     with _lock:
         if not _server_processes:
@@ -585,16 +600,16 @@ def kill_stray_servers():
     logger.info("[GGUF Server] Завершение отслеживаемых процессов llama-server...")
     for path, process in processes_copy.items():
         try:
-            if process.poll() is None:
+            if _proc_alive(process):
                 if os.name == "nt":
-                    subprocess.run(
-                        ["taskkill", "/F", "/T", "/PID", str(process.pid)],
-                        capture_output=True,
-                        timeout=5,
+                    proc = await asyncio.create_subprocess_exec(
+                        "taskkill", "/F", "/T", "/PID", str(process.pid),
+                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                     )
+                    await asyncio.wait_for(proc.communicate(), timeout=5)
                 else:
                     process.kill()
-                process.wait(timeout=5)
+                await asyncio.wait_for(process.wait(), timeout=5)
             logger.debug(f"[GGUF Server] Остановлен: {os.path.basename(path)} (PID {process.pid})")
         except Exception as e:
             logger.debug(f"[GGUF Server] Не удалось остановить {os.path.basename(path)}: {e}")
@@ -605,7 +620,7 @@ def count_running_servers() -> int:
     with _lock:
         alive = 0
         for path, proc in _server_processes.items():
-            if proc.poll() is None:
+            if _proc_alive(proc):
                 alive += 1
         return alive
 
@@ -613,13 +628,14 @@ def count_running_servers() -> int:
 # Выгрузка процессов через taskkill/pkill + cleanup GPU через torch.cuda.empty_cache
 
 
-def unload_all_models(role: str = None):
+async def unload_all_models(role: str = None):
 
     with _lock:
         if not _server_processes:
             return
 
         to_remove = []
+        to_kill = []
         for path, process in _server_processes.items():
             if role is not None and _server_roles.get(path) != role:
                 continue
@@ -629,35 +645,35 @@ def unload_all_models(role: str = None):
             )
             to_remove.append(path)
 
-            if process.poll() is None:
+            if _proc_alive(process):
+                to_kill.append((path, process, _server_ports.get(path)))
+
+    async with httpx.AsyncClient(timeout=0.5) as client:
+        for path, process, port in to_kill:
+            if port:
                 try:
-                    port = _server_ports.get(path)
-                    if port:
-                        try:
-                            with httpx.Client(timeout=0.5) as client:
-                                client.post(f"http://127.0.0.1:{port}/slots/0/clear")
-                        except Exception:
-                            pass
+                    await client.post(f"http://127.0.0.1:{port}/slots/0/clear")
                 except Exception:
                     pass
-                try:
-                    if sys.platform == "win32":
-                        subprocess.run(
-                            ["taskkill", "/F", "/T", "/PID", str(process.pid)],
-                            capture_output=True,
-                            timeout=5,
-                        )
-                    else:
-                        process.kill()
-                    try:
-                        process.wait(timeout=5)
-                    except Exception:
-                        pass
-                except Exception as e:
-                    logger.error(
-                        f"[GGUF Server] Ошибка при остановке {os.path.basename(path)}: {e}"
+            try:
+                if sys.platform == "win32":
+                    proc = await asyncio.create_subprocess_exec(
+                        "taskkill", "/F", "/T", "/PID", str(process.pid),
+                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                     )
+                    await asyncio.wait_for(proc.communicate(), timeout=5)
+                else:
+                    process.kill()
+                try:
+                    await asyncio.wait_for(process.wait(), timeout=5)
+                except Exception:
+                    pass
+            except Exception as e:
+                logger.error(
+                    f"[GGUF Server] Ошибка при остановке {os.path.basename(path)}: {e}"
+                )
 
+    with _lock:
         for path in to_remove:
             _server_processes.pop(path, None)
             _server_ports.pop(path, None)
@@ -666,13 +682,13 @@ def unload_all_models(role: str = None):
 
     from src.ingestion.utils import cleanup_gpu
 
-    cleanup_gpu()
+    await asyncio.to_thread(cleanup_gpu)
     if torch.cuda.is_available():
         try:
             torch.cuda.ipc_collect()
         except Exception:
             pass
-    time.sleep(0.1)
+    await asyncio.sleep(0.1)
 
 
 def get_loaded_models():
@@ -683,10 +699,9 @@ def get_loaded_models():
 
 
 def get_active_llm_url() -> str | None:
-
     with _lock:
         for path, process in _server_processes.items():
-            if _server_roles.get(path) == "llm" and process.poll() is None:
+            if _server_roles.get(path) == "llm" and _proc_alive(process):
                 port = _server_ports.get(path)
                 if port:
                     return f"http://127.0.0.1:{port}"

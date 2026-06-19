@@ -115,7 +115,7 @@ async def delete_notebook(nb_id: str):
     try:
         from src.rag.bm25 import cancel_bm25_rebuild
 
-        cancel_bm25_rebuild(nb_id)
+        await cancel_bm25_rebuild(nb_id)
     except Exception as e:
         logger.debug(f"[delete_notebook] cancel_bm25_rebuild: {e}")
 

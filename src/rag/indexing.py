@@ -2,6 +2,7 @@
 
 import logging
 import os
+import asyncio
 
 import chromadb
 from llama_index.core import VectorStoreIndex
@@ -18,42 +19,66 @@ logger = logging.getLogger(__name__)
 
 # Построение векторного индекса из nodes и запуск фоновой
 # пересборки BM25. Вызывается после обработки загруженного файла.
-def build_index(nodes, notebook_id: str):
+async def build_index(nodes, notebook_id: str):
     init_settings()
-    vector_store = get_vector_store(notebook_id)
+    vector_store = await get_vector_store(notebook_id)
     storage_context = StorageContext.from_defaults(vector_store=vector_store)
-    index = VectorStoreIndex(nodes, storage_context=storage_context)
+
+    def _build():
+        return VectorStoreIndex(nodes, storage_context=storage_context)
+
+    index = await asyncio.to_thread(_build)
 
     paths = config.get_notebook_paths(notebook_id)
     db_path = paths["chroma_db"]
-    _schedule_bm25_rebuild(notebook_id, db_path, new_nodes=nodes)
+    await _schedule_bm25_rebuild(notebook_id, db_path, new_nodes=nodes)
     return index
 
 
-def get_vector_store(notebook_id: str):
+async def get_vector_store(notebook_id: str):
     global _client_cache
     paths = config.get_notebook_paths(notebook_id)
     db_path = paths["chroma_db"]
-    os.makedirs(db_path, exist_ok=True)
 
+    # Fast path: check cache under lock
     with _client_cache_lock:
         if db_path in _client_cache:
             _client_cache.move_to_end(db_path)
             _, vector_store = _client_cache[db_path]
             return vector_store
+        # Evict oldest if at capacity
+        if len(_client_cache) >= _CLIENT_CACHE_MAXSIZE:
+            _oldest_path, (_oldest_client, _) = _client_cache.popitem(last=False)
+            try:
+                _oldest_client.close()
+            except Exception:
+                pass
+            logger.debug(f"LRU eviction: закрыт ChromaDB клиент {_oldest_path}")
+
+    # Heavy ChromaDB work offloaded to thread (no lock held)
+    def _create_chroma_client():
+        os.makedirs(db_path, exist_ok=True)
+        db = chromadb.PersistentClient(path=db_path)
+        collection = db.get_or_create_collection("multimodal_rag")
+        return db, collection
+
+    db, chroma_collection = await asyncio.to_thread(_create_chroma_client)
+    vector_store = ChromaVectorStore(chroma_collection=chroma_collection)
+
+    # Store in cache under lock (re-check for concurrent callers)
+    with _client_cache_lock:
+        if db_path in _client_cache:
+            # Another coroutine beat us — close duplicate, use cached
+            try:
+                db.close()
+            except Exception:
+                pass
+            _, vector_store = _client_cache[db_path]
+            _client_cache.move_to_end(db_path)
         else:
-            if len(_client_cache) >= _CLIENT_CACHE_MAXSIZE:
-                _oldest_path, (_oldest_client, _) = _client_cache.popitem(last=False)
-                try:
-                    _oldest_client.close()
-                except Exception:
-                    pass
-                logger.debug(f"LRU eviction: закрыт ChromaDB клиент {_oldest_path}")
-            db = chromadb.PersistentClient(path=db_path)
-            chroma_collection = db.get_or_create_collection("multimodal_rag")
-            vector_store = ChromaVectorStore(chroma_collection=chroma_collection)
             _client_cache[db_path] = (db, vector_store)
-            return vector_store
+
+    return vector_store
 
 
 def close_all_clients():

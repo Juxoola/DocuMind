@@ -184,9 +184,9 @@ def resolve_model_path(path_or_filename: str) -> str:
         return os.path.normpath(path_or_filename).lower()
 
     try:
-        from src.gguf.scanner import find_gguf_by_name
+        from src.gguf.scanner import find_gguf_by_name_sync
 
-        hit = find_gguf_by_name(path_or_filename)
+        hit = find_gguf_by_name_sync(path_or_filename)
         if hit:
             logger.info(f"[CONFIG] Модель найдена: {hit}")
             return os.path.normpath(hit).lower()

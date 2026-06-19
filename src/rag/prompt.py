@@ -10,7 +10,7 @@ from src.rag.state import _model_cache
 logger = logging.getLogger(__name__)
 
 
-def build_file_context(nodes, notebook_id: str):
+async def build_file_context(nodes, notebook_id: str):
     paths = config.get_notebook_paths(notebook_id)
 
     sources = []

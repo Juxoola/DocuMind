@@ -185,7 +185,7 @@ async def upload_file(
             from src.ingestion import ingest_file
             from src.rag.indexing import build_index
 
-            nodes = ingest_file(
+            nodes = asyncio.run(ingest_file(
                 file_path,
                 notebook_id,
                 progress_cb=prog,
@@ -193,9 +193,9 @@ async def upload_file(
                 cancel_check=cancel_event.is_set,
                 keep_vision_alive=not is_last_in_batch,
                 keep_whisper_alive=not is_last_in_batch,
-            )
+            ))
             prog(90, "Построение индекса (ChromaDB)...")
-            build_index(nodes, notebook_id)
+            asyncio.run(build_index(nodes, notebook_id))
             from src.rag.retrieval import invalidate_index_cache
 
             invalidate_index_cache(notebook_id)
@@ -222,7 +222,7 @@ async def upload_file(
                 try:
                     from src.rag.bm25 import flush_bm25_rebuild
 
-                    flush_bm25_rebuild(notebook_id)
+                    asyncio.run(flush_bm25_rebuild(notebook_id))
                 except Exception as bm25_err:
                     logger.info(f"[INGESTION] Не удалось форсировать BM25 rebuild: {bm25_err}")
                 with _ingestion_lock:
@@ -282,7 +282,7 @@ async def upload_file(
             try:
                 from src.rag.indexing import get_vector_store
 
-                vector_store = get_vector_store(notebook_id)
+                vector_store = asyncio.run(get_vector_store(notebook_id))
                 collection = vector_store._collection
                 collection.delete(where={"file_name": file.filename})
             except Exception:
@@ -391,7 +391,7 @@ async def delete_file(filename: str, notebook_id: str):
     from src.rag.indexing import get_vector_store
 
     def _delete_chromadb_entries():
-        vs = get_vector_store(notebook_id)
+        vs = asyncio.run(get_vector_store(notebook_id))
         vs._collection.delete(where={"file_name": filename})
 
     await asyncio.to_thread(_delete_chromadb_entries)
@@ -417,7 +417,7 @@ async def get_source_content(filename: str, notebook_id: str):
     try:
         from src.rag.indexing import get_vector_store
 
-        vector_store = await asyncio.to_thread(get_vector_store, notebook_id)
+        vector_store = await get_vector_store(notebook_id)
         collection = vector_store._collection
         result = await asyncio.to_thread(collection.get, where={"file_name": filename})
         if result and result.get("documents"):

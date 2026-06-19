@@ -9,6 +9,7 @@
 Тяжёлые зависимости (subprocess, requests) замоканы.
 """
 
+import asyncio
 import os
 import sys
 from unittest.mock import MagicMock, patch
@@ -174,44 +175,56 @@ class TestLlmLoadState:
 
 
 class TestServerReady:
-    """Проверка is_server_ready (с моком requests)."""
+    """Проверка is_server_ready (с моком async httpx)."""
 
     def test_ready_when_200(self):
-        mock_client = MagicMock()
-        mock_client.get.return_value.status_code = 200
-        mock_client.__enter__ = MagicMock(return_value=mock_client)
-        mock_client.__exit__ = MagicMock(return_value=False)
-        with patch("httpx.Client", return_value=mock_client):
+        with patch("src.gguf.server.httpx.AsyncClient") as MockAC:
+            from unittest.mock import AsyncMock
+
+            mock_ctx = AsyncMock()
+            mock_ctx.__aenter__.return_value.get = AsyncMock(
+                return_value=MagicMock(status_code=200)
+            )
+            MockAC.return_value = mock_ctx
             from src.gguf.server import is_server_ready
 
-            assert is_server_ready(8081) is True
+            assert asyncio.run(is_server_ready(8081)) is True
 
     def test_not_ready_when_not_200(self):
-        mock_client = MagicMock()
-        mock_client.get.return_value.status_code = 503
-        mock_client.__enter__ = MagicMock(return_value=mock_client)
-        mock_client.__exit__ = MagicMock(return_value=False)
-        with patch("httpx.Client", return_value=mock_client):
+        with patch("src.gguf.server.httpx.AsyncClient") as MockAC:
+            from unittest.mock import AsyncMock
+
+            mock_ctx = AsyncMock()
+            mock_ctx.__aenter__.return_value.get = AsyncMock(
+                return_value=MagicMock(status_code=503)
+            )
+            MockAC.return_value = mock_ctx
             from src.gguf.server import is_server_ready
 
-            assert is_server_ready(8081) is False
+            assert asyncio.run(is_server_ready(8081)) is False
 
     def test_not_ready_when_exception(self):
-        mock_client = MagicMock()
-        mock_client.get.side_effect = Exception("Connection refused")
-        mock_client.__enter__ = MagicMock(return_value=mock_client)
-        mock_client.__exit__ = MagicMock(return_value=False)
-        with patch("httpx.Client", return_value=mock_client):
+        with patch("src.gguf.server.httpx.AsyncClient") as MockAC:
+            from unittest.mock import AsyncMock
+
+            mock_ctx = AsyncMock()
+            mock_ctx.__aenter__.return_value.get = AsyncMock(
+                side_effect=Exception("Connection refused")
+            )
+            MockAC.return_value = mock_ctx
             from src.gguf.server import is_server_ready
 
-            assert is_server_ready(8081) is False
+            assert asyncio.run(is_server_ready(8081)) is False
 
     def test_not_ready_when_timeout(self):
-        mock_client = MagicMock()
-        mock_client.get.side_effect = TimeoutError("timeout")
-        mock_client.__enter__ = MagicMock(return_value=mock_client)
-        mock_client.__exit__ = MagicMock(return_value=False)
-        with patch("httpx.Client", return_value=mock_client):
+        with patch("src.gguf.server.httpx.AsyncClient") as MockAC:
+            from unittest.mock import AsyncMock
+
+            mock_ctx = AsyncMock()
+            mock_ctx.__aenter__.return_value.get = AsyncMock(
+                side_effect=TimeoutError("timeout")
+            )
+            MockAC.return_value = mock_ctx
             from src.gguf.server import is_server_ready
 
-            assert is_server_ready(8081) is False
+            assert asyncio.run(is_server_ready(8081)) is False

@@ -1,14 +1,14 @@
 """Vision: описание изображений через llama-server или LM Studio."""
 
+import asyncio
 import base64
 import logging
 import re
-import time
 
 import config
-from routers.shared import safe_extract_llm_response
+from routers.shared import get_async_http, safe_extract_llm_response
 from src.gguf.server import get_gguf_llm
-from src.ingestion.utils import _http_session, cleanup_gpu
+from src.ingestion.utils import cleanup_gpu
 
 logger = logging.getLogger(__name__)
 
@@ -103,7 +103,7 @@ def _clean_think_tags(text):
     return text.strip()
 
 
-def describe_image_with_lmstudio(
+async def describe_image_with_lmstudio(
     image_path, llm_settings=None, existing_llm_url=None, cancel_check=None
 ):
 
@@ -156,8 +156,11 @@ def describe_image_with_lmstudio(
                     "presence_penalty": v_pres,
                     "frequency_penalty": v_freq,
                 }
-                r = _http_session.post(
-                    f"{existing_llm_url}/v1/chat/completions", json=payload, timeout=30
+                client = get_async_http()
+                r = await client.post(
+                    f"{existing_llm_url}/v1/chat/completions",
+                    json=payload,
+                    timeout=30,
                 )
                 if cancel_check and cancel_check():
                     logger.info("[Ingestion] Отмена: vision запрос прерван")
@@ -174,13 +177,13 @@ def describe_image_with_lmstudio(
                         return ans
                 elif r.status_code == 500:
                     logger.info(f"[Ingestion] GGUF 500 (попытка {attempt + 1}). Повтор...")
-                    time.sleep(2)
+                    await asyncio.sleep(2)
                     continue
                 else:
                     logger.error(f"[Ingestion] Ошибка GGUF {r.status_code}: {r.text}")
             except Exception as e:
                 logger.error(f"[Ingestion] Ошибка запроса (попытка {attempt + 1}): {e}")
-                time.sleep(1)
+                await asyncio.sleep(1)
         return "Ошибка анализа после всех попыток"
 
     api_url = (llm_settings.get("llm_url") if llm_settings else None) or config.LM_STUDIO_URL
@@ -212,7 +215,8 @@ def describe_image_with_lmstudio(
             ],
             "temperature": v_temp,
         }
-        r = _http_session.post(
+        client = get_async_http()
+        r = await client.post(
             f"{api_url.rstrip('/')}/chat/completions",
             headers={"Authorization": f"Bearer {api_key}"},
             json=payload,

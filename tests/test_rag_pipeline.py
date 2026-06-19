@@ -12,6 +12,7 @@ import sys
 from unittest.mock import MagicMock, patch
 
 import pytest
+import asyncio
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
@@ -170,21 +171,21 @@ class TestBm25RebuildApi:
     def test_schedule_cancel(self, mock_llama_index):
         from src.rag.bm25 import _schedule_bm25_rebuild, cancel_bm25_rebuild
 
-        _schedule_bm25_rebuild("test_nb", "/tmp/fake_db")
-        cancel_bm25_rebuild("test_nb")
+        asyncio.run(_schedule_bm25_rebuild("test_nb", "/tmp/fake_db"))
+        asyncio.run(cancel_bm25_rebuild("test_nb"))
 
     def test_cancel_nonexistent(self, mock_llama_index):
         from src.rag.bm25 import cancel_bm25_rebuild
 
-        cancel_bm25_rebuild("never_scheduled")
+        asyncio.run(cancel_bm25_rebuild("never_scheduled"))
 
     def test_flush_without_wait(self, mock_llama_index):
         from src.rag.bm25 import flush_bm25_rebuild
 
         with patch("src.rag.bm25._rebuild_bm25_bg"):
-            flush_bm25_rebuild("test_nb", db_path="/tmp/fake", wait=False)
+            asyncio.run(flush_bm25_rebuild("test_nb", db_path="/tmp/fake", wait=False))
 
     def test_is_bm25_ready_no_index(self, mock_llama_index):
         from src.rag.bm25 import is_bm25_ready
 
-        assert is_bm25_ready("nonexistent") is False
+        assert asyncio.run(is_bm25_ready("nonexistent")) is False

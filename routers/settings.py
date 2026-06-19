@@ -53,7 +53,7 @@ async def update_model_dirs(req: UpdateModelDirsRequest):
     try:
         from src.gguf.scanner import invalidate_scan_cache
 
-        invalidate_scan_cache()
+        await invalidate_scan_cache()
     except Exception:
         logger.debug("settings: не удалось инвалидировать кэш сканирования")
     return {"status": "ok", "new_dirs": config.GGUF_SEARCH_DIRS}
@@ -105,6 +105,6 @@ async def update_rag_config(req: UpdateRagConfigRequest):
         config.USE_RERANKER = req.use_reranker
         data = config._collect_rag_config()
     await save_rag_config(config.RAG_CONFIG_FILE, data)
-    await asyncio.to_thread(unload_rag_models)
+    await unload_rag_models()
     config.resolve_model_path.cache_clear()
     return {"status": "ok"}
