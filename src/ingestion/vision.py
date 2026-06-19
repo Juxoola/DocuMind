@@ -43,19 +43,17 @@ def make_vision_message(base64_data: str, text: str = "") -> list:
     return msg
 
 
-def get_vision_url(llm_settings, progress_cb=None):
-
+async def get_vision_url(llm_settings, progress_cb=None):
     if not llm_settings or not llm_settings.get("use_gguf_direct"):
         return None
 
     v_model = llm_settings.get("vision_model_path") or llm_settings.get("gguf_model_path")
     if not v_model:
         return None
-
     try:
         if progress_cb:
             progress_cb(60, "Запуск Vision-сервера (ленивая загрузка)...")
-        cleanup_gpu()
+        await asyncio.to_thread(cleanup_gpu)
 
         v_mmproj = llm_settings.get("vision_mmproj_path") or llm_settings.get("gguf_mmproj_path")
         g_path = config.resolve_model_path(v_model)
@@ -69,7 +67,7 @@ def get_vision_url(llm_settings, progress_cb=None):
         v_conc = int(llm_settings.get("vision_concurrency") or config.VISION_CONCURRENCY)
         v_mtp = bool(llm_settings.get("vision_mtp_enabled", False))
 
-        return get_gguf_llm(
+        return await get_gguf_llm(
             gguf_path=g_path,
             mmproj_path=m_path,
             ctx_size=v_ctx,

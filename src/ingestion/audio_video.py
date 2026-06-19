@@ -272,7 +272,9 @@ async def process_audio_video(
             "pipe:1",
         ]
 
-        process = subprocess.Popen(cmd, stdout=subprocess.PIPE, bufsize=10**7)
+        process = await asyncio.to_thread(
+            lambda: subprocess.Popen(cmd, stdout=subprocess.PIPE, bufsize=10**7)
+        )
         if notebook_id is not None:
             register_subprocess(notebook_id, process)
         frame_list = []
@@ -297,7 +299,7 @@ async def process_audio_video(
                         f"Cancelled during frame extraction at {format_seconds(current_sec)}"
                     )
                 frame_counter += 1
-                raw_frame = process.stdout.read(chunk_size)
+                raw_frame = await asyncio.to_thread(process.stdout.read, chunk_size)
                 if not raw_frame or len(raw_frame) != chunk_size:
                     break
                 thumb = np.frombuffer(raw_frame, dtype="uint8").reshape(
@@ -354,60 +356,60 @@ async def process_audio_video(
         shared_llm_url = None
         if n > 0:
             prog(65, f"Запуск Vision-сервера для описания {n} кадров...")
-            shared_llm_url = get_vision_url(llm_settings, progress_cb=prog)
+            shared_llm_url = await get_vision_url(llm_settings, progress_cb=prog)
 
         v_conc = int(llm_settings.get("vision_concurrency") or config.VISION_CONCURRENCY)
-        from concurrent.futures import ThreadPoolExecutor
 
-        with ThreadPoolExecutor(max_workers=v_conc) as executor:
-            futures = [
-                executor.submit(
-                    describe_image_with_lmstudio,
-                    path,
-                    llm_settings,
-                    shared_llm_url,
-                    cancel_check=cancel_check,
+        sem = asyncio.Semaphore(v_conc)
+        splitter = _get_splitter()
+        results = []
+
+        async def _describe(idx, path, t):
+            nonlocal results
+            if _is_cancelled():
+                raise IngestionCancelled(f"Cancelled at frame {idx}/{n}")
+            async with sem:
+                desc = await describe_image_with_lmstudio(
+                    path, llm_settings, shared_llm_url, cancel_check=cancel_check
                 )
-                for path, t in frame_list
-            ]
-            splitter = _get_splitter()
-            try:
-                for idx, future in enumerate(futures):
-                    if _is_cancelled():
-                        logger.info(f"[Ingestion] Отмена во время OCR кадров ({idx}/{n})")
-                        executor.shutdown(wait=False, cancel_futures=True)
-                        raise IngestionCancelled(f"Cancelled at frame {idx}/{n}")
-                    desc = future.result()
-                    path, t = frame_list[idx]
-                    full_text = f"Кадр {file_name} [{format_seconds(t)}]: {desc}"
-                    if len(full_text) <= config.GGUF_CTX_EMBED_CHARS:
-                        nodes.append(
-                            TextNode(
-                                text=full_text,
-                                metadata={"file_name": file_name, "image_path": path, "time": t},
-                            )
+                results.append((idx, path, t, desc))
+
+        try:
+            await asyncio.gather(
+                *[_describe(idx, path, t) for idx, (path, t) in enumerate(frame_list)]
+            )
+        except IngestionCancelled:
+            raise
+
+        results.sort(key=lambda x: x[0])
+        for idx, path, t, desc in results:
+            full_text = f"Кадр {file_name} [{format_seconds(t)}]: {desc}"
+            if len(full_text) <= config.GGUF_CTX_EMBED_CHARS:
+                nodes.append(
+                    TextNode(
+                        text=full_text,
+                        metadata={"file_name": file_name, "image_path": path, "time": t},
+                    )
+                )
+            else:
+                desc_nodes = splitter.get_nodes_from_documents(
+                    [
+                        TextNode(
+                            text=full_text,
+                            metadata={
+                                "file_name": file_name,
+                                "image_path": path,
+                                "time": t,
+                            },
                         )
-                    else:
-                        desc_nodes = splitter.get_nodes_from_documents(
-                            [
-                                TextNode(
-                                    text=full_text,
-                                    metadata={
-                                        "file_name": file_name,
-                                        "image_path": path,
-                                        "time": t,
-                                    },
-                                )
-                            ]
-                        )
-                        nodes.extend(desc_nodes)
-                    frame_data.append({"time": t, "image_path": path, "description": desc})
-                    prog(65 + int((idx + 1) / n * 22) if n else 87, f"Описание: {idx + 1}/{n}")
-            except IngestionCancelled:
-                raise
+                    ]
+                )
+                nodes.extend(desc_nodes)
+            frame_data.append({"time": t, "image_path": path, "description": desc})
+            prog(65 + int((idx + 1) / n * 22) if n else 87, f"Описание: {idx + 1}/{n}")
 
         if shared_llm_url and not keep_vision_alive:
-            unload_all_models(role="llm")
+            await unload_all_models(role="llm")
 
     metadata_json = {
         "file_name": file_name,
@@ -415,8 +417,10 @@ async def process_audio_video(
         "transcript": transcript_data,
         "frames": frame_data,
     }
-    with open(
-        os.path.join(os.path.dirname(file_path), f"{file_name}.json"), "w", encoding="utf-8"
-    ) as f:
-        f.write(orjson.dumps(metadata_json, option=orjson.OPT_INDENT_2).decode())
+    def _write_metadata():
+        with open(
+            os.path.join(os.path.dirname(file_path), f"{file_name}.json"), "w", encoding="utf-8"
+        ) as f:
+            f.write(orjson.dumps(metadata_json, option=orjson.OPT_INDENT_2).decode())
+    await asyncio.to_thread(_write_metadata)
     return nodes

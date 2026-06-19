@@ -1,5 +1,6 @@
 """Оркестрация ингеста: маршрутизация файла по типу к нужному обработчику."""
 
+import asyncio
 import logging
 import os
 import shutil
@@ -104,12 +105,15 @@ async def ingest_file(
             keep_vision_alive=keep_vision_alive,
         )
     else:
-        try:
-            with open(file_path, encoding="utf-8") as f:
-                text = f.read()
-        except UnicodeDecodeError:
-            with open(file_path, encoding="cp1251") as f:
-                text = f.read()
+        def _read_file():
+            try:
+                with open(file_path, encoding="utf-8") as f:
+                    return f.read()
+            except UnicodeDecodeError:
+                with open(file_path, encoding="cp1251") as f:
+                    return f.read()
+
+        text = await asyncio.to_thread(_read_file)
         doc = TextNode(text=text, metadata={"file_name": os.path.basename(file_path)})
         nodes = _get_splitter().get_nodes_from_documents([doc])
     return nodes
@@ -128,7 +132,7 @@ async def process_image(
 
     dest_name = f"img_{uuid.uuid4().hex[:6]}{os.path.splitext(file_path)[1].lower()}"
     dest_path = os.path.join(images_dir, dest_name)
-    shutil.copy2(file_path, dest_path)
+    await asyncio.to_thread(shutil.copy2, file_path, dest_path)
 
     def _is_cancelled():
         return bool(cancel_check and cancel_check())
@@ -141,7 +145,7 @@ async def process_image(
 
         raise IngestionCancelled("Cancelled before image analysis")
 
-    shared_llm_url = get_vision_url(llm_settings)
+    shared_llm_url = await get_vision_url(llm_settings)
     if shared_llm_url:
         if progress_cb:
             progress_cb(30, f"Анализ изображения: {file_name}...")
@@ -182,7 +186,7 @@ async def process_image(
         if shared_llm_url and not keep_vision_alive:
             from src.gguf.server import unload_all_models
 
-            unload_all_models(role="llm")
+            await unload_all_models(role="llm")
     else:
         logger.info("[IMAGE] Vision не настроен — пропуск анализа изображения")
 
@@ -193,14 +197,18 @@ async def process_image(
             "transcript": [],
             "frames": frame_data,
         }
-        with open(
-            os.path.join(os.path.dirname(file_path), f"{file_name}.json"),
-            "w",
-            encoding="utf-8",
-        ) as f:
+
+        def _write_json_metadata():
             import orjson
 
-            f.write(orjson.dumps(metadata_json, option=orjson.OPT_INDENT_2).decode())
+            with open(
+                os.path.join(os.path.dirname(file_path), f"{file_name}.json"),
+                "w",
+                encoding="utf-8",
+            ) as f:
+                f.write(orjson.dumps(metadata_json, option=orjson.OPT_INDENT_2).decode())
+
+        await asyncio.to_thread(_write_json_metadata)
 
     if progress_cb:
         progress_cb(60, f"Изображение: {file_name} готово")

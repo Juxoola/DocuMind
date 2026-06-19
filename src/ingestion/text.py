@@ -141,7 +141,7 @@ async def process_pdf(
 
     nodes = []
     file_name = original_filename or os.path.basename(file_path)
-    doc = fitz.open(file_path)
+    doc = await asyncio.to_thread(fitz.open, file_path)
     frame_data = []
     frame_list = []
     splitter = _get_splitter()
@@ -184,7 +184,7 @@ async def process_pdf(
 
         if frame_list:
             if shared_llm_url is None:
-                shared_llm_url = get_vision_url(llm_settings)
+                shared_llm_url = await get_vision_url(llm_settings)
             if shared_llm_url:
                 v_conc = int(llm_settings.get("vision_concurrency") or config.VISION_CONCURRENCY)
                 n = len(frame_list)
@@ -203,8 +203,7 @@ async def process_pdf(
                     if _is_cancelled():
                         raise IngestionCancelled(f"Cancelled during OCR ({done_count}/{n})")
                     async with sem:
-                        desc = await asyncio.to_thread(
-                            describe_image_with_lmstudio,
+                        desc = await describe_image_with_lmstudio(
                             frame_info["path"],
                             llm_settings,
                             shared_llm_url,
@@ -265,7 +264,7 @@ async def process_pdf(
                             pass
 
             if shared_llm_url and not keep_vision_alive:
-                unload_all_models(role="llm")
+                await unload_all_models(role="llm")
 
         if frame_data:
             frame_data.sort(key=lambda x: x["page"])
