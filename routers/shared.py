@@ -121,17 +121,20 @@ async def robust_rmtree(path: str, max_retries: int = 3, delay: float = 0.5) -> 
     if not os.path.exists(path):
         return True, None
 
-    for root, dirs, files in os.walk(path):
-        for f in files:
-            try:
-                os.chmod(os.path.join(root, f), stat.S_IWRITE)
-            except Exception:
-                logger.debug("robust_rmtree: не удалось снять readonly c %s", f)
-        for d in dirs:
-            try:
-                os.chmod(os.path.join(root, d), stat.S_IWRITE)
-            except Exception:
-                logger.debug("robust_rmtree: не удалось снять readonly c %s", d)
+    def _remove_readonly_sync():
+        for root, dirs, files in os.walk(path):
+            for f in files:
+                try:
+                    os.chmod(os.path.join(root, f), stat.S_IWRITE)
+                except Exception:
+                    pass
+            for d in dirs:
+                try:
+                    os.chmod(os.path.join(root, d), stat.S_IWRITE)
+                except Exception:
+                    pass
+
+    await asyncio.to_thread(_remove_readonly_sync)
 
     last_err = None
     for i in range(max_retries):

@@ -210,13 +210,13 @@ async def upload_file(
                 try:
                     from src.gguf.server import unload_all_models
 
-                    unload_all_models(role="llm")
+                    asyncio.run(unload_all_models(role="llm"))
                 except Exception as llm_err:
                     logger.error(f"[INGESTION] Ошибка выгрузки vision-сервера: {llm_err}")
                 try:
                     from src.ingestion import unload_whisper_model
 
-                    unload_whisper_model()
+                    asyncio.run(unload_whisper_model())
                 except Exception as whisper_err:
                     logger.error(f"[INGESTION] Ошибка выгрузки WhisperX: {whisper_err}")
                 try:
@@ -253,7 +253,7 @@ async def upload_file(
             try:
                 from src.gguf.server import kill_stray_servers
 
-                kill_stray_servers()
+                asyncio.run(kill_stray_servers())
             except Exception:
                 logger.debug("cancel: не удалось убить llama-server")
             try:
@@ -360,12 +360,15 @@ async def delete_file(filename: str, notebook_id: str):
     file_path = os.path.join(paths["data"], filename)
     if os.path.exists(file_path):
         if filename.lower().endswith((".mp4", ".avi", ".mov")):
-            cap = cv2.VideoCapture(file_path)
-            try:
-                cap.get(cv2.CAP_PROP_FPS)
-            finally:
-                cap.release()
-        gc.collect()
+            def _release_video_sync(fp):
+                cap = cv2.VideoCapture(fp)
+                try:
+                    cap.get(cv2.CAP_PROP_FPS)
+                finally:
+                    cap.release()
+
+            await asyncio.to_thread(_release_video_sync, file_path)
+        await asyncio.to_thread(gc.collect)
 
         async def _sync_remove_with_retry(fp: str):
             for i in range(10):
@@ -458,7 +461,7 @@ async def clear_notebook(notebook_id: str):
             p = paths[d]
             if os.path.exists(p):
                 await robust_rmtree(p)
-            os.makedirs(p, exist_ok=True)
+            await asyncio.to_thread(os.makedirs, p, exist_ok=True)
 
     await _clear_data()
     return {"status": "ok"}
