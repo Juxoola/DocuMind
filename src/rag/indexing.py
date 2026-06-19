@@ -40,13 +40,11 @@ async def get_vector_store(notebook_id: str):
     paths = config.get_notebook_paths(notebook_id)
     db_path = paths["chroma_db"]
 
-    # Fast path: check cache under lock
     with _client_cache_lock:
         if db_path in _client_cache:
             _client_cache.move_to_end(db_path)
             _, vector_store = _client_cache[db_path]
             return vector_store
-        # Evict oldest if at capacity
         if len(_client_cache) >= _CLIENT_CACHE_MAXSIZE:
             _oldest_path, (_oldest_client, _) = _client_cache.popitem(last=False)
             try:
@@ -55,7 +53,6 @@ async def get_vector_store(notebook_id: str):
                 pass
             logger.debug(f"LRU eviction: закрыт ChromaDB клиент {_oldest_path}")
 
-    # Heavy ChromaDB work offloaded to thread (no lock held)
     def _create_chroma_client():
         os.makedirs(db_path, exist_ok=True)
         db = chromadb.PersistentClient(path=db_path)
@@ -65,10 +62,8 @@ async def get_vector_store(notebook_id: str):
     db, chroma_collection = await asyncio.to_thread(_create_chroma_client)
     vector_store = ChromaVectorStore(chroma_collection=chroma_collection)
 
-    # Store in cache under lock (re-check for concurrent callers)
     with _client_cache_lock:
         if db_path in _client_cache:
-            # Another coroutine beat us — close duplicate, use cached
             try:
                 db.close()
             except Exception:

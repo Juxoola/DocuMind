@@ -35,18 +35,18 @@ from src.rag.state import (
 
 logger = logging.getLogger(__name__)
 
-# Reusable httpx client for reranking (avoids new TCP connection per call)
+# Переиспользуемые HTTP-клиенты для реранкинга (избегают нового TCP-подключения на каждый вызов)
 _rerank_http = httpx.Client(timeout=60)
 _async_rerank_http = httpx.AsyncClient(timeout=60)
 
-# Health-check cache: url -> (is_healthy, timestamp)
+# Кэш проверки работоспособности LLM: url -> (is_healthy, timestamp)
 _qe_health_cache: dict[str, tuple[bool, float]] = {}
 _qe_health_cache_lock = threading.Lock()
 _QE_HEALTH_TTL = 30.0
 
 
 def _is_llm_healthy(url: str) -> bool:
-    """Check LLM health with 30-second TTL cache to avoid per-request overhead."""
+    """Проверка работоспособности LLM с кэшем TTL 30 сек для избежания overhead на каждый запрос."""
     now = _time.time()
     with _qe_health_cache_lock:
         cached = _qe_health_cache.get(url)
@@ -108,7 +108,7 @@ def _file_filter(file_names: str | list[str]):
     )
 
 
-# Query Expansion: LLM генерирует 3-5 альтернативных запросов для лучшего покрытия
+# Расширение запроса (Query Expansion): LLM генерирует 3-5 альтернативных запросов для лучшего покрытия
 _QUERY_GEN_PROMPT = (
     "Ты — эксперт по поиску информации. Сформулируй ровно {num_queries} разных коротких поисковых запроса "
     "на том же языке для поиска справочной теории, правил и формул в учебных материалах на основе следующего задания/вопроса.\n"
@@ -151,7 +151,7 @@ def _get_qe_llm():
     )
 
 
-# Reciprocal Rank Fusion: score = sum(1/(k + rank_i)) из каждого источника. k=60 — стандартный параметр
+# Слияние по взаимному рангу (RRF): score = sum(1/(k + rank_i)) из каждого источника. k=60 — стандартный параметр
 def _rrf_fuse(vector_results, bm25_results, k: int = None):
     scores: dict = {}
     nodes_by_id: dict = {}
@@ -292,7 +292,6 @@ async def _hybrid_search(index, query: str, allowed_files, bm25_retriever, qe_ll
 
                         if queries:
                             embed = Settings.embed_model
-                            # Батч-эмбеддинг: один запрос вместо N
                             all_texts = [original_query, *queries]
                             try:
                                 all_embs = embed.get_text_embedding_batch(all_texts)
@@ -326,8 +325,6 @@ async def _hybrid_search(index, query: str, allowed_files, bm25_retriever, qe_ll
                         logger.warning(f"Ошибка генерации запросов в custom_get_queries: {qe_err}")
                         return []
 
-                # Intentional monkey-patch: override _get_queries for QE customization
-                # (adds cosine-similarity filtering of generated queries)
                 fusion_retriever._get_queries = custom_get_queries
 
             if num_q > 1 and qe_llm:
@@ -565,22 +562,19 @@ def _filter_chunks(all_nodes):
 # ---------------------------------------------------------------------------
 
 
-# Гибридный поиск: векторный (ChromaDB) + BM25 с Reciprocal Rank Fusion, опциональный реранкинг через GGUF
+# Гибридный поиск: векторный (ChromaDB) + BM25 со слиянием по взаимному рангу (RRF), опциональный реранкинг через GGUF
 async def retrieve_nodes(query: str, notebook_id: str, allowed_files=None, max_tokens=1024):
     init_settings(max_tokens=max_tokens)
     vector_store = await get_vector_store(notebook_id)
 
-    # Fast path: check cache without lock
     with _index_cache_lock:
         index = _index_cache.get(notebook_id)
         if index is not None:
             _index_cache.move_to_end(notebook_id)
 
-    # Slow path: create index if not cached
     if index is None:
         new_index = await asyncio.to_thread(VectorStoreIndex.from_vector_store, vector_store)
         with _index_cache_lock:
-            # Re-check: another thread may have created it while we were building
             index = _index_cache.get(notebook_id)
             if index is None:
                 if len(_index_cache) >= _INDEX_CACHE_MAXSIZE:

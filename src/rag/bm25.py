@@ -39,7 +39,6 @@ async def _rebuild_bm25_bg(notebook_id: str, db_path: str, new_nodes: list = Non
                 f"{len(old_nodes)} кеш + {len(new_nodes)} новых = {len(full_corpus)} узлов"
             )
         else:
-            # ChromaDB operations are sync — run in thread
             def _fetch_chroma_nodes():
                 import chromadb as _chromadb
 
@@ -81,7 +80,6 @@ async def _rebuild_bm25_bg(notebook_id: str, db_path: str, new_nodes: list = Non
             logger.info(f"[RAG] BM25 холодная сборка из ChromaDB: {len(full_corpus)} узлов")
 
         if full_corpus:
-            # BM25Retriever.from_defaults is sync CPU — run in thread
             def _build_retriever():
                 from llama_index.retrievers.bm25 import BM25Retriever
 
@@ -93,7 +91,6 @@ async def _rebuild_bm25_bg(notebook_id: str, db_path: str, new_nodes: list = Non
 
             retriever = await asyncio.to_thread(_build_retriever)
 
-            # retriever.persist is sync file I/O — run in thread
             await asyncio.to_thread(retriever.persist, bm25_dir)
 
             with _bm25_node_cache_lock:
@@ -133,9 +130,6 @@ async def _schedule_bm25_rebuild(notebook_id: str, db_path: str, new_nodes: list
         finally:
             with _bm25_rebuilding_lock:
                 _bm25_rebuilding.discard(notebook_id)
-
-    # Cancel any existing task before creating a new one
-    # Note: lock is released by now, but we already handled old.cancel() above
 
     task = asyncio.create_task(_fire())
     _bm25_pending_timers[notebook_id] = task
