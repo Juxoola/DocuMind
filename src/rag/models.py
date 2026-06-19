@@ -12,14 +12,14 @@ from src.rag.state import _init_lock, _model_cache, _model_cache_lock
 logger = logging.getLogger(__name__)
 
 
-def init_settings(max_tokens=1024):
+async def init_settings(max_tokens=1024):
     global _model_cache
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
     with _init_lock:
         with _model_cache_lock:
             if "embed_model" not in _model_cache:
-                _init_embed_model()
+                await _init_embed_model()
             Settings.embed_model = _model_cache["embed_model"]
 
     Settings.llm = OpenAI(
@@ -31,7 +31,7 @@ def init_settings(max_tokens=1024):
     )
 
 
-def _init_embed_model():
+async def _init_embed_model():
     model_name = config.EMBEDDING_MODEL_NAME
 
     if not config.validate_gguf_path(model_name):
@@ -46,7 +46,7 @@ def _init_embed_model():
     from src.gguf.server import get_gguf_embedding_url
 
     model_path = config.resolve_model_path(model_name)
-    url = get_gguf_embedding_url(model_path, n_parallel=config.EMBEDDING_N_PARALLEL)
+    url = await get_gguf_embedding_url(model_path, n_parallel=config.EMBEDDING_N_PARALLEL)
     try:
         from src.gguf.server import get_active_embedding_parallel
 
@@ -70,10 +70,10 @@ def _init_embed_model():
     )
 
 
-def preload_all_models():
+async def preload_all_models():
     logger.info("[RAG] Предзагрузка моделей...")
     try:
-        init_settings()
+        await init_settings()
     except Exception as e:
         logger.warning(f"  [RAG] ⚠ Эмбеддинги не загружены (будут загружены lazily): {e}")
     if config.RERANKER_MODEL_NAME:
@@ -87,7 +87,7 @@ def preload_all_models():
                 from src.gguf.server import get_gguf_embedding_url
 
                 model_path = config.resolve_model_path(config.RERANKER_MODEL_NAME)
-                get_gguf_embedding_url(model_path, is_reranker=True)
+                await get_gguf_embedding_url(model_path, is_reranker=True)
         except Exception as e:
             logger.warning(f"  [RAG] ⚠ Реранкер не загружен (будет загружен lazily): {e}")
 

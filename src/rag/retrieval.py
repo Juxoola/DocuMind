@@ -8,6 +8,10 @@ import statistics as _stats
 import threading
 import time as _time
 
+
+async def _empty_list():
+    return []
+
 import httpx
 import numpy as np
 from llama_index.core import QueryBundle, Settings, VectorStoreIndex
@@ -36,7 +40,6 @@ from src.rag.state import (
 logger = logging.getLogger(__name__)
 
 # Переиспользуемые HTTP-клиенты для реранкинга (избегают нового TCP-подключения на каждый вызов)
-_rerank_http = httpx.Client(timeout=60)
 _async_rerank_http = httpx.AsyncClient(timeout=60)
 
 # Кэш проверки работоспособности LLM: url -> (is_healthy, timestamp)
@@ -45,7 +48,7 @@ _qe_health_cache_lock = threading.Lock()
 _QE_HEALTH_TTL = 30.0
 
 
-def _is_llm_healthy(url: str) -> bool:
+async def _is_llm_healthy(url: str) -> bool:
     """Проверка работоспособности LLM с кэшем TTL 30 сек для избежания overhead на каждый запрос."""
     now = _time.time()
     with _qe_health_cache_lock:
@@ -53,9 +56,9 @@ def _is_llm_healthy(url: str) -> bool:
     if cached and (now - cached[1]) < _QE_HEALTH_TTL:
         return cached[0]
     try:
-        import requests as _req
-
-        _req.get(url.replace("/v1", "").rstrip("/") + "/health", timeout=1)
+        health_url = url.replace("/v1", "").rstrip("/") + "/health"
+        async with httpx.AsyncClient(timeout=1) as client:
+            await client.get(health_url)
         result = True
     except Exception:
         result = False
@@ -120,7 +123,7 @@ _QUERY_GEN_PROMPT = (
 )
 
 
-def _get_qe_llm():
+async def _get_qe_llm():
     from src.gguf.server import get_active_llm_url
 
     url = get_active_llm_url()
@@ -129,7 +132,7 @@ def _get_qe_llm():
     else:
         url = config.LM_STUDIO_URL
         logger.debug(f"[QE] GGUF LLM не найден, пробуем LM Studio: {url}")
-    if not _is_llm_healthy(url):
+    if not await _is_llm_healthy(url):
         logger.debug("[QE] LLM-сервер недоступен, Query Expansion пропускается")
         return None
 
@@ -354,7 +357,7 @@ async def _hybrid_search(index, query: str, allowed_files, bm25_retriever, qe_ll
                     asyncio.to_thread(vector_retriever.retrieve, query),
                     asyncio.to_thread(bm25_retriever.retrieve, query)
                     if bm25_retriever
-                    else asyncio.coroutine(lambda: [])(),
+                    else _empty_list(),
                 )
                 bm25_results = bm25_results_raw
                 bm25_results = [
@@ -374,7 +377,7 @@ async def _hybrid_search(index, query: str, allowed_files, bm25_retriever, qe_ll
                     asyncio.to_thread(vector_retriever.retrieve, query),
                     asyncio.to_thread(bm25_retriever.retrieve, query)
                     if bm25_retriever
-                    else asyncio.coroutine(lambda: [])(),
+                    else _empty_list(),
                 )
                 vec_results_all = vec_results_all_raw[:fetch_k]
                 bm25_all = bm25_all_raw
@@ -441,15 +444,19 @@ async def _rerank_nodes(all_nodes, query: str):
 
     if reranker_available:
         with _model_cache_lock:
-            if "reranker" not in _model_cache:
-                logger.info(f"  [RAG] Загрузка GGUF реранкера: {reranker_name}")
-                from src.gguf.server import get_gguf_embedding_url
+            need_load = "reranker" not in _model_cache
 
-                model_path = config.resolve_model_path(reranker_name)
-                url = await get_gguf_embedding_url(model_path, is_reranker=True, n_parallel=1)
+        if need_load:
+            logger.info(f"  [RAG] Загрузка GGUF реранкера: {reranker_name}")
+            from src.gguf.server import get_gguf_embedding_url
+
+            model_path = config.resolve_model_path(reranker_name)
+            url = await get_gguf_embedding_url(model_path, is_reranker=True, n_parallel=1)
+            with _model_cache_lock:
                 _model_cache["reranker"] = url
 
-            url = _model_cache["reranker"]
+        with _model_cache_lock:
+            url = _model_cache.get("reranker")
 
         def _rerank_doc(nws):
             meta = nws.node.metadata or {}
@@ -564,7 +571,7 @@ def _filter_chunks(all_nodes):
 
 # Гибридный поиск: векторный (ChromaDB) + BM25 со слиянием по взаимному рангу (RRF), опциональный реранкинг через GGUF
 async def retrieve_nodes(query: str, notebook_id: str, allowed_files=None, max_tokens=1024):
-    init_settings(max_tokens=max_tokens)
+    await init_settings(max_tokens=max_tokens)
     vector_store = await get_vector_store(notebook_id)
 
     with _index_cache_lock:
@@ -590,7 +597,7 @@ async def retrieve_nodes(query: str, notebook_id: str, allowed_files=None, max_t
 
     bm25_retriever = await _load_bm25_retriever(notebook_id)
 
-    qe_llm = _get_qe_llm() if config.RAG_QUERY_EXPANSION else None
+    qe_llm = await _get_qe_llm() if config.RAG_QUERY_EXPANSION else None
 
     all_nodes = await _hybrid_search(index, query, allowed_files, bm25_retriever, qe_llm)
 

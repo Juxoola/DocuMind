@@ -60,7 +60,7 @@ async def lifespan(app: FastAPI):
             logger.info(f"Удаляю отложенную папку: {pending}")
             from routers.shared import robust_rmtree
 
-            success, err = robust_rmtree(pending)
+            success, err = await robust_rmtree(pending)
             if not success:
                 logger.warning(f"Не удалось удалить {pending}: {err}")
     except Exception as e:
@@ -79,25 +79,29 @@ async def lifespan(app: FastAPI):
         logger.info("Остановка системы...")
         from src.gguf.server import kill_stray_servers, unload_all_models
 
-        unload_all_models()
-        kill_stray_servers()
-
+        await unload_all_models()
+        await kill_stray_servers()
 
 def preload_all_models():
     try:
+        import asyncio
         from src.rag.models import preload_all_models as _preload
 
-        _preload()
+        asyncio.run(_preload())
     except Exception as e:
         logger.warning(f"Предзагрузка моделей не удалась: {e}")
 
 
 def _shutdown_models():
     try:
+        import asyncio
         from src.gguf.server import kill_stray_servers, unload_all_models
 
-        unload_all_models()
-        kill_stray_servers()
+        async def _do_shutdown():
+            await unload_all_models()
+            await kill_stray_servers()
+
+        asyncio.run(_do_shutdown())
         logger.info("Модели выгружены.")
     except Exception as e:
         logger.error(f"Ошибка при выгрузке моделей: {e}")

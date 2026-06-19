@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 # Построение векторного индекса из nodes и запуск фоновой
 # пересборки BM25. Вызывается после обработки загруженного файла.
 async def build_index(nodes, notebook_id: str):
-    init_settings()
+    await init_settings()
     vector_store = await get_vector_store(notebook_id)
     storage_context = StorageContext.from_defaults(vector_store=vector_store)
 
