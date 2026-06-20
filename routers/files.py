@@ -582,9 +582,11 @@ def _build_pdf(title: str, text: str) -> bytes:
 def _content_disposition(name: str, ext: str) -> str:
     """RFC 5987 Content-Disposition: supports non-ASCII filenames."""
     from urllib.parse import quote
-    ascii_name = quote(name, safe="")
-    utf8_name = quote(name)
-    return f'attachment; filename="{ascii_name}.{ext}"; filename*=UTF-8\'\'%{utf8_name}.%{ext}'
+    full = f"{name}.{ext}"
+    encoded = quote(full)
+    # ASCII fallback: non-ASCII chars replaced with _
+    ascii_safe = full.encode("ascii", "replace").decode().replace("?", "_")
+    return f'attachment; filename="{ascii_safe}"; filename*=UTF-8\'\'{encoded}'
 
 
 @router.get("/api/export_text")
