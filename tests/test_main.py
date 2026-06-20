@@ -170,8 +170,11 @@ class TestConfigEndpoints:
         assert resp.status_code == 200
         data = resp.json()
         assert "embedding_model" in data
+        assert "embedding_n_parallel" in data
         assert "top_k_per_file" in data
         assert "use_reranker" in data
+        assert "query_expansion" in data
+        assert "rerank_score_threshold" in data
 
     def test_update_rag_config(self, client):
         resp = client.post(
@@ -179,10 +182,13 @@ class TestConfigEndpoints:
             json={
                 "embedding_model": "test.gguf",
                 "reranker_model": "test-reranker.gguf",
+                "embedding_n_parallel": 2,
                 "top_k_per_file": 10,
                 "rerank_pool": 30,
                 "final_top_n": 15,
                 "use_reranker": True,
+                "query_expansion": True,
+                "rerank_score_threshold": 0.1,
             },
         )
         assert resp.status_code == 200

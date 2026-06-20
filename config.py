@@ -125,6 +125,7 @@ def _apply_rag_config(data: dict) -> None:
         global \
             EMBEDDING_MODEL_NAME, \
             RERANKER_MODEL_NAME, \
+            EMBEDDING_N_PARALLEL, \
             RAG_TOP_K_PER_FILE, \
             RAG_RERANK_POOL, \
             RAG_FINAL_TOP_N, \
@@ -134,6 +135,7 @@ def _apply_rag_config(data: dict) -> None:
             RERANK_SCORE_THRESHOLD
         EMBEDDING_MODEL_NAME = data.get("embedding_model", EMBEDDING_MODEL_NAME)
         RERANKER_MODEL_NAME = data.get("reranker_model", RERANKER_MODEL_NAME)
+        EMBEDDING_N_PARALLEL = int(data.get("embedding_n_parallel", EMBEDDING_N_PARALLEL))
         RAG_TOP_K_PER_FILE = data.get("top_k_per_file", RAG_TOP_K_PER_FILE)
         RAG_RERANK_POOL = data.get("rerank_pool", RAG_RERANK_POOL)
         RAG_FINAL_TOP_N = data.get("final_top_n", RAG_FINAL_TOP_N)
@@ -148,6 +150,7 @@ def _collect_rag_config() -> dict:
         return {
             "embedding_model": EMBEDDING_MODEL_NAME,
             "reranker_model": RERANKER_MODEL_NAME,
+            "embedding_n_parallel": EMBEDDING_N_PARALLEL,
             "top_k_per_file": RAG_TOP_K_PER_FILE,
             "rerank_pool": RAG_RERANK_POOL,
             "final_top_n": RAG_FINAL_TOP_N,

@@ -64,10 +64,13 @@ async def get_rag_config():
     return {
         "embedding_model": config.EMBEDDING_MODEL_NAME,
         "reranker_model": config.RERANKER_MODEL_NAME,
+        "embedding_n_parallel": config.EMBEDDING_N_PARALLEL,
         "top_k_per_file": config.RAG_TOP_K_PER_FILE,
         "rerank_pool": config.RAG_RERANK_POOL,
         "final_top_n": config.RAG_FINAL_TOP_N,
         "use_reranker": config.USE_RERANKER,
+        "query_expansion": config.RAG_QUERY_EXPANSION,
+        "rerank_score_threshold": config.RERANK_SCORE_THRESHOLD,
     }
 
 
@@ -75,10 +78,13 @@ async def get_rag_config():
 class UpdateRagConfigRequest(BaseModel):
     embedding_model: str = Field(..., min_length=1, max_length=256)
     reranker_model: str = Field(..., min_length=1, max_length=256)
+    embedding_n_parallel: int = Field(..., ge=1, le=8)
     top_k_per_file: int = Field(..., ge=1, le=100)
     rerank_pool: int = Field(..., ge=1, le=200)
     final_top_n: int = Field(..., ge=1, le=50)
     use_reranker: bool
+    query_expansion: bool = True
+    rerank_score_threshold: float = Field(..., ge=0.0, le=1.0)
 
     @field_validator("embedding_model", "reranker_model")
     @classmethod
@@ -99,10 +105,13 @@ async def update_rag_config(req: UpdateRagConfigRequest):
     with config._config_lock:
         config.EMBEDDING_MODEL_NAME = req.embedding_model
         config.RERANKER_MODEL_NAME = req.reranker_model
+        config.EMBEDDING_N_PARALLEL = req.embedding_n_parallel
         config.RAG_TOP_K_PER_FILE = req.top_k_per_file
         config.RAG_RERANK_POOL = req.rerank_pool
         config.RAG_FINAL_TOP_N = req.final_top_n
         config.USE_RERANKER = req.use_reranker
+        config.RAG_QUERY_EXPANSION = req.query_expansion
+        config.RERANK_SCORE_THRESHOLD = req.rerank_score_threshold
         data = config._collect_rag_config()
     await save_rag_config(config.RAG_CONFIG_FILE, data)
     await unload_rag_models()

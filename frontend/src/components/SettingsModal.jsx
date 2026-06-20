@@ -28,10 +28,13 @@ export default function SettingsModal({ isOpen, onClose, settings, onSave }) {
     const [ragConfig, setRagConfig] = useState({
         embedding_model: '',
         reranker_model: '',
+        embedding_n_parallel: 2,
         top_k_per_file: 5,
         rerank_pool: 30,
         final_top_n: 10,
-        use_reranker: true
+        use_reranker: true,
+        query_expansion: true,
+        rerank_score_threshold: 0.1
     });
 
     useEffect(() => {
@@ -882,6 +885,65 @@ export default function SettingsModal({ isOpen, onClose, settings, onSave }) {
                                             onChange={(e) => setRagConfig({...ragConfig, final_top_n: parseInt(e.target.value)})}
                                             className="w-full bg-muted/30 border border-border/50 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all"
                                         />
+                                    </div>
+                                </div>
+
+                                <div className="p-4 rounded-2xl bg-muted/30 border border-border/50 space-y-4">
+                                    <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest flex items-center gap-1.5">
+                                        <Database size={10} /> Серверы Embedding и Reranker
+                                    </p>
+                                    <div className="grid grid-cols-2 gap-4">
+                                        <div className="space-y-2">
+                                            <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest flex items-center gap-2">
+                                                <Cpu size={12} /> Embedding Parallel
+                                            </label>
+                                            <input 
+                                                type="number"
+                                                min="1"
+                                                max="8"
+                                                value={ragConfig.embedding_n_parallel}
+                                                onChange={(e) => setRagConfig({...ragConfig, embedding_n_parallel: parseInt(e.target.value) || 1})}
+                                                className="w-full bg-muted/30 border border-border/50 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all"
+                                            />
+                                            <p className="text-[9px] text-muted-foreground/60 italic">Параллельные запросы эмбеддингов (1-8). Больше → быстрее, но больше VRAM.</p>
+                                        </div>
+
+                                        <div className="space-y-2">
+                                            <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest flex items-center gap-2">
+                                                <Filter size={12} /> Порог реранкера
+                                            </label>
+                                            <input 
+                                                type="number"
+                                                step="0.05"
+                                                min="0"
+                                                max="1"
+                                                value={ragConfig.rerank_score_threshold}
+                                                onChange={(e) => setRagConfig({...ragConfig, rerank_score_threshold: parseFloat(e.target.value) || 0})}
+                                                className="w-full bg-muted/30 border border-border/50 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all"
+                                            />
+                                            <p className="text-[9px] text-muted-foreground/60 italic">Минимальный score реранкера. Ниже этого → фрагмент отбрасывается.</p>
+                                        </div>
+                                    </div>
+
+                                    <div className="flex items-center justify-between">
+                                        <div className="space-y-1">
+                                            <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest flex items-center gap-2">
+                                                <Search size={12} /> Расширение запроса
+                                            </label>
+                                            <p className="text-[9px] text-muted-foreground/60 italic">LLM переформулирует запрос для лучшего поиска</p>
+                                        </div>
+                                        <button 
+                                            onClick={() => setRagConfig({...ragConfig, query_expansion: !ragConfig.query_expansion})}
+                                            className={cn(
+                                                "w-10 h-6 rounded-full transition-all relative",
+                                                ragConfig.query_expansion ? "bg-primary" : "bg-muted-foreground/30"
+                                            )}
+                                        >
+                                            <div className={cn(
+                                                "absolute top-1 w-4 h-4 rounded-full bg-white transition-all",
+                                                ragConfig.query_expansion ? "left-5" : "left-1"
+                                            )} />
+                                        </button>
                                     </div>
                                 </div>
 
