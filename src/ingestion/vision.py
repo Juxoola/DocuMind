@@ -67,6 +67,7 @@ async def get_vision_url(llm_settings, progress_cb=None):
         v_conc = int(llm_settings.get("vision_concurrency") or config.VISION_CONCURRENCY)
         v_mtp = bool(llm_settings.get("vision_mtp_enabled", False))
         v_max_tokens = int(llm_settings.get("vision_max_tokens") or 4096)
+        v_threads = int(llm_settings.get("vision_threads") or 0)
 
         return await get_gguf_llm(
             gguf_path=g_path,
@@ -82,6 +83,7 @@ async def get_vision_url(llm_settings, progress_cb=None):
             mtp_enabled=v_mtp,
             max_tokens=v_max_tokens,
             enable_thinking=False,
+            n_threads=v_threads or None,
             custom_args=[
                 "--no-context-shift",
             ],
