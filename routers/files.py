@@ -14,7 +14,7 @@ import aiofiles.os
 import cv2
 import orjson
 from fastapi import APIRouter, File, HTTPException, Query, UploadFile
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import JSONResponse, Response, StreamingResponse
 
 import config
 
@@ -429,18 +429,227 @@ async def delete_file(filename: str, notebook_id: str):
 @router.get("/api/source_content")
 async def get_source_content(filename: str, notebook_id: str):
     filename = safe_filename(filename)
+    ext = os.path.splitext(filename)[1].lower()
+    paths = config.get_notebook_paths(notebook_id)
+    file_path = os.path.join(paths["data"], filename)
+
+    # Для PDF — чередование текста страниц и описаний изображений
+    if ext == ".pdf":
+        text = await asyncio.to_thread(
+            _build_interleaved_text, file_path, paths["data"], filename
+        )
+        if text:
+            return {"text": text}
+    # Для остальных — ChromaDB
     try:
         from src.rag.indexing import get_vector_store
-
         vector_store = await get_vector_store(notebook_id)
         collection = vector_store._collection
         result = await asyncio.to_thread(collection.get, where={"file_name": filename})
         if result and result.get("documents"):
             full_text = "\n\n---\n\n".join(result["documents"])
             return {"text": full_text}
-        return {"text": "Содержимое документа не найдено в базе данных."}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail="Внутренняя ошибка сервера")
+    except Exception:
+        pass
+    return {"text": "Содержимое документа не найдено."}
+
+
+def _extract_pdf_text(file_path: str) -> list[str]:
+    """Extract text from PDF page by page."""
+    import fitz
+
+    doc = fitz.open(file_path)
+    pages = [page.get_text() for page in doc]
+    doc.close()
+    return pages
+
+
+def _build_interleaved_text(file_path: str, data_dir: str, filename: str) -> str:
+    """Interleave PDF page text with image descriptions from sidecar JSON."""
+    pages = _extract_pdf_text(file_path)
+    # Загружаем описания из sidecar JSON
+    descriptions: dict[int, str] = {}
+    json_path = os.path.join(data_dir, f"{filename}.json")
+    if os.path.exists(json_path):
+        with open(json_path, "rb") as f:
+            data = orjson.loads(f.read())
+        for frame in data.get("frames", []):
+            desc = frame.get("description", "").strip()
+            page = frame.get("page")
+            if desc and page is not None:
+                descriptions[int(page)] = desc
+    # Чередуем: текст страницы → описание (если есть)
+    parts = []
+    for i, page_text in enumerate(pages):
+        if page_text.strip():
+            parts.append(page_text)
+        if i in descriptions:
+            parts.append(f"\n\n---\n\n{descriptions[i]}\n\n---\n")
+    return "\n".join(parts)
+
+
+def _extract_text_from_file(file_path: str, ext: str) -> str:
+    """Extract text directly from file — faster than ChromaDB for large docs."""
+    if not os.path.exists(file_path):
+        return ""
+    try:
+        if ext == ".pdf":
+            import fitz
+
+            doc = fitz.open(file_path)
+            text = "\n".join(page.get_text() for page in doc)
+            doc.close()
+            return text
+        elif ext in (".txt", ".md", ".csv", ".json", ".log"):
+            with open(file_path, encoding="utf-8", errors="replace") as f:
+                return f.read()
+        elif ext in (".docx", ".doc"):
+            from docx import Document
+
+            return "\n".join(p.text for p in Document(file_path).paragraphs)
+        elif ext in (".pptx", ".ppt"):
+            from pptx import Presentation
+
+            texts = []
+            for slide in Presentation(file_path).slides:
+                for shape in slide.shapes:
+                    if shape.has_text_frame:
+                        texts.append(shape.text_frame.text)
+            return "\n".join(texts)
+    except Exception:
+        pass
+    return ""
+
+
+_PDF_CSS = """
+body { font-family: sans-serif; font-size: 10pt; line-height: 1.5; color: #1a1a1a; }
+h1 { font-size: 22pt; margin-bottom: 20px; border-bottom: 2px solid #333; padding-bottom: 8px; }
+h2 { font-size: 16pt; margin-top: 24px; color: #222; }
+h3 { font-size: 13pt; margin-top: 18px; color: #333; }
+p { margin: 6px 0; text-align: justify; }
+pre { background: #f4f4f4; padding: 10px; border-radius: 4px; font-size: 9pt; }
+code { font-family: monospace; background: #f0f0f0; padding: 1px 4px; border-radius: 2px; }
+table { border-collapse: collapse; width: 100%; margin: 12px 0; }
+th, td { border: 1px solid #ccc; padding: 6px 8px; text-align: left; font-size: 9pt; }
+th { background: #f0f0f0; font-weight: bold; }
+blockquote { border-left: 3px solid #999; padding-left: 12px; color: #555; }
+"""
+
+
+def _build_pdf(title: str, text: str) -> bytes:
+    """Markdown → HTML → PDF via PyMuPDF Story API."""
+    import fitz
+    import markdown
+
+    html_body = markdown.markdown(text, extensions=["tables", "fenced_code"])
+    html = f"<h1>{title}</h1>\n{html_body}"
+
+    out_path = f"_export_{os.getpid()}.pdf"
+    try:
+        writer = fitz.DocumentWriter(out_path)
+        story = fitz.Story(html=html, user_css=_PDF_CSS)
+
+        def contentfn(positions):
+            return html
+
+        def rectfn(page_num, filled):
+            return fitz.Rect(0, 0, 595, 842), fitz.Rect(50, 50, 545, 790), fitz.Identity
+
+        story.write_stabilized(writer, contentfn, rectfn, em=10)
+        writer.close()
+
+        # write_stabilized не сжимает контент — пересохраняем со сжатием
+        doc = fitz.open(out_path)
+        compressed_path = f"_export_{os.getpid()}_c.pdf"
+        doc.save(compressed_path, garbage=4, deflate=True)
+        doc.close()
+
+        with open(compressed_path, "rb") as f:
+            pdf_bytes = f.read()
+
+
+    finally:
+        for _f in (out_path, compressed_path):
+            try:
+                os.unlink(_f)
+            except (OSError, UnboundLocalError):
+                pass
+    return pdf_bytes
+
+
+@router.get("/api/export_text")
+async def export_text(filename: str, notebook_id: str, fmt: str = "txt"):
+    """Export extracted text/transcript/description as downloadable file."""
+    filename = safe_filename(filename)
+    ext = os.path.splitext(filename)[1].lower()
+    is_video = ext in (".mp4", ".avi", ".mov", ".mkv")
+    is_audio = ext in (".mp3", ".wav", ".m4a", ".aac", ".flac")
+    is_image = ext in (".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp")
+    is_media = is_video or is_audio
+
+    text = ""
+    stem = os.path.splitext(filename)[0]
+
+    if is_media or is_image:
+        # Читаем транскрипт/описание из sidecar JSON
+        paths = config.get_notebook_paths(notebook_id)
+        json_path = os.path.join(paths["data"], f"{filename}.json")
+        if os.path.exists(json_path):
+            async with aiofiles.open(json_path, "rb") as f:
+                data = orjson.loads(await f.read())
+            if is_media:
+                transcript = data.get("transcript", [])
+                if transcript:
+                    lines = []
+                    for seg in transcript:
+                        start = seg.get("start", 0)
+                        m, s = divmod(int(start), 60)
+                        h, m = divmod(m, 60)
+                        ts = f"{h:02d}:{m:02d}:{s:02d}" if h else f"{m:02d}:{s:02d}"
+                        lines.append(f"[{ts}] {seg.get('text', '')}")
+                    text = "\n".join(lines)
+            elif is_image:
+                frames = data.get("frames", [])
+                if frames and frames[0].get("description"):
+                    text = frames[0]["description"]
+        if not text:
+            text = f"Описание/транскрипт для {filename} не найдены."
+    else:
+        # PDF, DOCX, PPT, TXT — читаем из файла
+        paths = config.get_notebook_paths(notebook_id)
+        file_path = os.path.join(paths["data"], filename)
+        if ext == ".pdf":
+            text = await asyncio.to_thread(
+                _build_interleaved_text, file_path, paths["data"], filename
+            )
+        else:
+            text = await asyncio.to_thread(_extract_text_from_file, file_path, ext)
+        if not text:
+            text = f"Содержимое {filename} не найдено."
+
+    # Формируем ответ
+    base_name = stem
+    if fmt == "pdf":
+        pdf_bytes = await asyncio.to_thread(_build_pdf, stem, text)
+        return Response(
+            content=pdf_bytes,
+            media_type="application/pdf",
+            headers={"Content-Disposition": f'attachment; filename="{base_name}.pdf"'},
+        )
+    elif fmt == "md":
+        content = f"# {stem}\n\n{text}"
+        media_type = "text/markdown"
+        download_name = f"{base_name}.md"
+    else:
+        content = text
+        media_type = "text/plain; charset=utf-8"
+        download_name = f"{base_name}.txt"
+
+    return Response(
+        content=content.encode("utf-8"),
+        media_type=media_type,
+        headers={"Content-Disposition": f'attachment; filename="{download_name}"'},
+    )
 
 
 @router.get("/api/video_metadata")

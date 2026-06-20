@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, FileText, Play, Image as ImageIcon, ExternalLink, Clock, AlertCircle } from 'lucide-react';
+import { X, FileText, Play, Image as ImageIcon, ExternalLink, Clock, AlertCircle, Download, ChevronDown } from 'lucide-react';
 import { cn } from '../lib/utils';
 
 export default function DocumentViewer({ file, notebook, onClose }) {
@@ -11,6 +11,7 @@ export default function DocumentViewer({ file, notebook, onClose }) {
   const [currentTime, setCurrentTime] = useState(0);
   const [showRawText, setShowRawText] = useState(false);
   const [showImagesOnly, setShowImagesOnly] = useState(false);
+  const [showExportMenu, setShowExportMenu] = useState(false);
   const vidRef = useRef(null);
   const feedRef = useRef(null);
   const itemRefs = useRef({});
@@ -103,6 +104,37 @@ export default function DocumentViewer({ file, notebook, onClose }) {
     return `${m}:${sec.toString().padStart(2, '0')}`;
   };
 
+  const downloadText = (fmt = 'txt') => {
+    setShowExportMenu(false);
+    const stem = filename.replace(/\.[^.]+$/, '');
+    const ext = fmt === 'md' ? 'md' : fmt;
+    const url = `/api/export_text?filename=${encodeURIComponent(filename)}&notebook_id=${notebook.id}&fmt=${fmt}`;
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${stem}.${ext}`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  };
+
+  const exportFormats = [
+    { fmt: 'txt', label: 'Текст (.txt)', icon: '📄' },
+    { fmt: 'md', label: 'Markdown (.md)', icon: '📝' },
+    { fmt: 'pdf', label: 'PDF (.pdf)', icon: '📑' },
+  ];
+
+  // Закрытие дропдауна по клику снаружи
+  useEffect(() => {
+    if (!showExportMenu) return;
+    const handler = (e) => {
+      if (!e.target.closest('[data-export-menu]')) {
+        setShowExportMenu(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [showExportMenu]);
+
   // Объединяем транскрипт и кадры в единую хронологическую ленту для навигации
   const feedItems = useMemo(() => {
     if (!videoMeta) return [];
@@ -190,6 +222,31 @@ export default function DocumentViewer({ file, notebook, onClose }) {
           <button onClick={onClose} className="p-2 hover:bg-muted rounded-xl transition-all hover:rotate-90">
             <X size={18} />
           </button>
+          <div className="relative">
+            <button 
+              onClick={() => setShowExportMenu(!showExportMenu)}
+              title="Скачать текст"
+              className="flex items-center gap-1 p-2 hover:bg-muted rounded-xl transition-all text-muted-foreground hover:text-foreground"
+              data-export-menu
+            >
+              <Download size={18} />
+              <ChevronDown size={12} />
+            </button>
+            {showExportMenu && (
+              <div data-export-menu className="absolute right-0 top-full mt-1 bg-card border border-border/60 rounded-xl shadow-xl z-50 py-1 min-w-[160px]">
+                {exportFormats.map(({ fmt, label, icon }) => (
+                  <button
+                    key={fmt}
+                    onClick={() => downloadText(fmt)}
+                    className="w-full px-3 py-2 text-left text-xs font-medium hover:bg-muted/60 flex items-center gap-2 transition-colors"
+                  >
+                    <span>{icon}</span>
+                    <span>{label}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
