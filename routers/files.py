@@ -579,6 +579,14 @@ def _build_pdf(title: str, text: str) -> bytes:
     return pdf_bytes
 
 
+def _content_disposition(name: str, ext: str) -> str:
+    """RFC 5987 Content-Disposition: supports non-ASCII filenames."""
+    from urllib.parse import quote
+    ascii_name = quote(name, safe="")
+    utf8_name = quote(name)
+    return f'attachment; filename="{ascii_name}.{ext}"; filename*=UTF-8\'\'%{utf8_name}.%{ext}'
+
+
 @router.get("/api/export_text")
 async def export_text(filename: str, notebook_id: str, fmt: str = "txt"):
     """Export extracted text/transcript/description as downloadable file."""
@@ -631,26 +639,26 @@ async def export_text(filename: str, notebook_id: str, fmt: str = "txt"):
 
     # Формируем ответ
     base_name = stem
+    ext_map = {"pdf": "pdf", "md": "md"}
+    file_ext = ext_map.get(fmt, "txt")
     if fmt == "pdf":
         pdf_bytes = await asyncio.to_thread(_build_pdf, stem, text)
         return Response(
             content=pdf_bytes,
             media_type="application/pdf",
-            headers={"Content-Disposition": f'attachment; filename="{base_name}.pdf"'},
+            headers={"Content-Disposition": _content_disposition(base_name, "pdf")},
         )
     elif fmt == "md":
         content = f"# {stem}\n\n{text}"
         media_type = "text/markdown"
-        download_name = f"{base_name}.md"
     else:
         content = text
         media_type = "text/plain; charset=utf-8"
-        download_name = f"{base_name}.txt"
 
     return Response(
         content=content.encode("utf-8"),
         media_type=media_type,
-        headers={"Content-Disposition": f'attachment; filename="{download_name}"'},
+        headers={"Content-Disposition": _content_disposition(base_name, file_ext)},
     )
 
 
