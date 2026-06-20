@@ -34,14 +34,27 @@ def make_http_session(pool_size: int = 10) -> requests.Session:
 # HTTP-сессия с пулом соединений — используется всеми роутерами для внешних API-вызовов (LLM, эмбеддинги).
 _http_session = make_http_session(config.HTTP_POOL_SIZE_MAIN)
 
-# Асинхронная HTTP-сессия — для async-эндпоинтов (chat streaming, vision OCR)
+# Асинхронная HTTP-сессия — для async-эндпоинтов (chat streaming, vision OCR).
+# Клиент создаётся лениво и сбрасывается, если текущий event loop отличается
+# от того, на котором клиент был создан (происходит при asyncio.run() из разных потоков).
 _async_http: httpx.AsyncClient | None = None
+_async_http_loop: object | None = None
 _http_lock = threading.Lock()
 
 
 def get_async_http() -> httpx.AsyncClient:
-    global _async_http
+    global _async_http, _async_http_loop
+    try:
+        current_loop = asyncio.get_running_loop()
+    except RuntimeError:
+        current_loop = None
+
     with _http_lock:
+        # Сброс клиента, если loop сменился (threading/multiprocessing).
+        if current_loop is not None and _async_http_loop is not current_loop:
+            _async_http = None
+            _async_http_loop = current_loop
+
         if _async_http is None or _async_http.is_closed:
             _async_http = httpx.AsyncClient(
                 timeout=httpx.Timeout(config.LM_STUDIO_HTTP_TIMEOUT),
@@ -50,6 +63,7 @@ def get_async_http() -> httpx.AsyncClient:
                     max_keepalive_connections=config.HTTP_POOL_SIZE_MAIN,
                 ),
             )
+            _async_http_loop = current_loop
         return _async_http
 
 

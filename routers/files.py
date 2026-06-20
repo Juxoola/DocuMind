@@ -185,17 +185,28 @@ async def upload_file(
             from src.ingestion import ingest_file
             from src.rag.indexing import build_index
 
-            nodes = asyncio.run(ingest_file(
-                file_path,
-                notebook_id,
-                progress_cb=prog,
-                llm_settings=llm_settings,
-                cancel_check=cancel_event.is_set,
-                keep_vision_alive=not is_last_in_batch,
-                keep_whisper_alive=not is_last_in_batch,
-            ))
-            prog(90, "Построение индекса (ChromaDB)...")
-            asyncio.run(build_index(nodes, notebook_id))
+            async def _run_pipeline():
+                """Единый async-пайплайн: ingest + index на одном event loop.
+
+                Ранее asyncio.run() вызывался дважды (ingest, затем index),
+                что ломало httpx.AsyncClient: транспорт привязывался к первому
+                loop, а второй asyncio.run() создавал новый — клиент
+                оказывался на закрытом loop → 'Event loop is closed'.
+                """
+                nodes = await ingest_file(
+                    file_path,
+                    notebook_id,
+                    progress_cb=prog,
+                    llm_settings=llm_settings,
+                    cancel_check=cancel_event.is_set,
+                    keep_vision_alive=not is_last_in_batch,
+                    keep_whisper_alive=not is_last_in_batch,
+                )
+                prog(90, "Построение индекса (ChromaDB)...")
+                await build_index(nodes, notebook_id)
+                return nodes
+
+            nodes = asyncio.run(_run_pipeline())
             from src.rag.retrieval import invalidate_index_cache
 
             invalidate_index_cache(notebook_id)
@@ -360,6 +371,7 @@ async def delete_file(filename: str, notebook_id: str):
     file_path = os.path.join(paths["data"], filename)
     if os.path.exists(file_path):
         if filename.lower().endswith((".mp4", ".avi", ".mov")):
+
             def _release_video_sync(fp):
                 cap = cv2.VideoCapture(fp)
                 try:

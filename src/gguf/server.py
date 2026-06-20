@@ -154,8 +154,13 @@ async def _start_llm_server_sync(gguf_path: str, mmproj_path: str, current_confi
     try:
         if sys.platform == "win32":
             proc = await asyncio.create_subprocess_exec(
-                "taskkill", "/F", "/T", "/PID", str(process.pid),
-                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                "taskkill",
+                "/F",
+                "/T",
+                "/PID",
+                str(process.pid),
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
             )
             await asyncio.wait_for(proc.communicate(), timeout=5)
         else:
@@ -332,6 +337,10 @@ async def get_gguf_llm(
         raise
 
 
+# Хранилище ссылок на фоновые задачи preload, чтобы GC не собрал их.
+_preload_tasks: set = set()
+
+
 async def preload_gguf_llm(
     gguf_path: str,
     mmproj_path: str = None,
@@ -443,7 +452,9 @@ async def preload_gguf_llm(
                 _llm_load_state.update({"state": "error", "error": str(e)[:300], "phase": None})
             logger.info(f"[preload] ERROR: {e}")
 
-    asyncio.create_task(_worker(), name=f"preload-llm-{task_id}")
+    _task = asyncio.create_task(_worker(), name=f"preload-llm-{task_id}")
+    _preload_tasks.add(_task)
+    _task.add_done_callback(_preload_tasks.discard)
     return {"status": "loading", "task_id": task_id, "model": os.path.basename(gguf_path)}
 
 
@@ -517,7 +528,10 @@ async def get_gguf_embedding_url(
     else:
         cmd.extend(["--reranking"])
 
-    min_ctx_per_slot = 2048
+    # SemanticSplitterNodeParser может дать чанки до ~4000 токенов.
+    # Ранее min_ctx_per_slot=2048 давал при parallel=2 лишь 2048 на слот →
+    # BadRequestError: request exceeds available context size.
+    min_ctx_per_slot = 4096
     ctx = str(max(4096, n_parallel * min_ctx_per_slot))
     if is_reranker:
         b_size, ub_size = "2048", "2048"
@@ -603,8 +617,13 @@ async def kill_stray_servers():
             if _proc_alive(process):
                 if os.name == "nt":
                     proc = await asyncio.create_subprocess_exec(
-                        "taskkill", "/F", "/T", "/PID", str(process.pid),
-                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                        "taskkill",
+                        "/F",
+                        "/T",
+                        "/PID",
+                        str(process.pid),
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
                     )
                     await asyncio.wait_for(proc.communicate(), timeout=5)
                 else:
@@ -658,8 +677,13 @@ async def unload_all_models(role: str = None):
             try:
                 if sys.platform == "win32":
                     proc = await asyncio.create_subprocess_exec(
-                        "taskkill", "/F", "/T", "/PID", str(process.pid),
-                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                        "taskkill",
+                        "/F",
+                        "/T",
+                        "/PID",
+                        str(process.pid),
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
                     )
                     await asyncio.wait_for(proc.communicate(), timeout=5)
                 else:
@@ -669,9 +693,7 @@ async def unload_all_models(role: str = None):
                 except Exception:
                     pass
             except Exception as e:
-                logger.error(
-                    f"[GGUF Server] Ошибка при остановке {os.path.basename(path)}: {e}"
-                )
+                logger.error(f"[GGUF Server] Ошибка при остановке {os.path.basename(path)}: {e}")
 
     with _lock:
         for path in to_remove:

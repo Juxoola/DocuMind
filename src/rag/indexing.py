@@ -1,8 +1,8 @@
 """ChromaDB операции: построение индекса, клиенты, close."""
 
+import asyncio
 import logging
 import os
-import asyncio
 
 import chromadb
 from llama_index.core import VectorStoreIndex
@@ -17,10 +17,28 @@ from src.rag.state import _CLIENT_CACHE_MAXSIZE, _client_cache, _client_cache_lo
 logger = logging.getLogger(__name__)
 
 
+# Макс. символов на чанк для embedding — страховка от превышения контекста.
+# При min_ctx_per_slot=4096 и ~4 символах/токен → ~16000 символов,
+# но ставим запас 12000 (≈3000 токенов для смешанного RU/EN текста).
+_MAX_EMBED_CHARS = 12000
+
+
 # Построение векторного индекса из nodes и запуск фоновой
 # пересборки BM25. Вызывается после обработки загруженного файла.
 async def build_index(nodes, notebook_id: str):
     await init_settings()
+
+    # Defensive truncate: обрезаем чанки, превышающие лимит embedding-контекста.
+    # SemanticSplitterNodeParser может дать чанки >4000 токенов, что ломает
+    # GGUF embedding сервер (exceeds context size).
+    for node in nodes:
+        if len(node.text) > _MAX_EMBED_CHARS:
+            logger.warning(
+                f"[Indexing] Чанк обрезан: {len(node.text)} → {_MAX_EMBED_CHARS} симв. "
+                f"(file={node.metadata.get('file_name', '?')})"
+            )
+            node.text = node.text[:_MAX_EMBED_CHARS]
+
     vector_store = await get_vector_store(notebook_id)
     storage_context = StorageContext.from_defaults(vector_store=vector_store)
 
