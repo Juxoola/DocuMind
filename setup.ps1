@@ -239,17 +239,17 @@ if (-not $allPresent) {
 $whisperDir = Join-Path $modelsDir "whisper"
 $whisperMarker = Join-Path $whisperDir ".downloaded"
 if (-not (Test-Path $whisperMarker)) {
-    Write-Color $Colors.Info "[7/7] Скачивание Whisper medium (1.5 ГБ)..."
+    Write-Color $Colors.Info "[7/7] Скачивание Whisper large-v2 (3 ГБ)..."
     try {
         & python -c @"
 import warnings; warnings.filterwarnings('ignore')
 import logging; logging.disable(logging.INFO)
 from faster_whisper import WhisperModel
-WhisperModel('medium', device='cpu', compute_type='int8', download_root=r'$whisperDir')
+WhisperModel('large-v2', device='cpu', compute_type='int8', download_root=r'$whisperDir')
 open(r'$whisperMarker', 'w').close()
 "@ 2>&1 | Out-Null
         if (Test-Path $whisperMarker) {
-            Write-Color $Colors.Ok "  Whisper medium скачан в models/whisper/"
+            Write-Color $Colors.Ok "  Whisper large-v2 скачан в models/whisper/"
         } else {
             Write-Color $Colors.Warn "  Whisper: модель не подтверждена"
         }

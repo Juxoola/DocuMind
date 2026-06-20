@@ -75,7 +75,7 @@ _patch_whisperx_ffmpeg()
 
 
 async def get_or_load_whisper(
-    model_name: str = "medium", device: str = "cuda", compute_type: str = "int8"
+    model_name: str = "large-v2", device: str = "cuda", compute_type: str = "int8"
 ):
     """Load or return cached WhisperX model. Heavy I/O runs in a thread."""
 
@@ -185,7 +185,7 @@ async def process_audio_video(
     try:
         import whisperx
 
-        model = await get_or_load_whisper("medium", device, "int8")
+        model = await get_or_load_whisper("large-v2", device, "int8")
         prog(18, "Загрузка аудио...")
 
         # GPU-bound: audio loading + transcription runs entirely in a thread
@@ -201,9 +201,7 @@ async def process_audio_video(
             result = model.transcribe(audio, batch_size=16, progress_callback=_whisper_progress)
             segs = []
             for seg in result.get("segments", []):
-                segs.append(
-                    {"start": seg["start"], "end": seg["end"], "text": seg["text"].strip()}
-                )
+                segs.append({"start": seg["start"], "end": seg["end"], "text": seg["text"].strip()})
             return segs, dur
 
         duration_sec = 0
@@ -417,10 +415,12 @@ async def process_audio_video(
         "transcript": transcript_data,
         "frames": frame_data,
     }
+
     def _write_metadata():
         with open(
             os.path.join(os.path.dirname(file_path), f"{file_name}.json"), "w", encoding="utf-8"
         ) as f:
             f.write(orjson.dumps(metadata_json, option=orjson.OPT_INDENT_2).decode())
+
     await asyncio.to_thread(_write_metadata)
     return nodes
