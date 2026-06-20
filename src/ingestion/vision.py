@@ -66,6 +66,7 @@ async def get_vision_url(llm_settings, progress_cb=None):
         v_kv = int(llm_settings.get("vision_kv_quant") or 2)
         v_conc = int(llm_settings.get("vision_concurrency") or config.VISION_CONCURRENCY)
         v_mtp = bool(llm_settings.get("vision_mtp_enabled", False))
+        v_max_tokens = int(llm_settings.get("vision_max_tokens") or 4096)
 
         return await get_gguf_llm(
             gguf_path=g_path,
@@ -79,13 +80,9 @@ async def get_vision_url(llm_settings, progress_cb=None):
             type_v=v_kv,
             n_parallel=v_conc,
             mtp_enabled=v_mtp,
+            max_tokens=v_max_tokens,
+            enable_thinking=False,
             custom_args=[
-                "--reasoning",
-                "off",
-                "--reasoning-format",
-                "none",
-                "--reasoning-budget",
-                "0",
                 "--no-context-shift",
             ],
         )
