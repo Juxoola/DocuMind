@@ -479,12 +479,14 @@ def _build_interleaved_text(file_path: str, data_dir: str, filename: str) -> str
             if desc and page is not None:
                 descriptions[int(page)] = desc
     # Чередуем: текст страницы → описание (если есть)
+    # Нумерация страниц в JSON начинается с 1, enumerate — с 0
     parts = []
     for i, page_text in enumerate(pages):
+        page_num = i + 1
         if page_text.strip():
             parts.append(page_text)
-        if i in descriptions:
-            parts.append(f"\n\n---\n\n{descriptions[i]}\n\n---\n")
+        if page_num in descriptions:
+            parts.append(f"\n\n---\n\n{descriptions[page_num]}\n\n---\n")
     return "\n".join(parts)
 
 
