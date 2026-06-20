@@ -483,10 +483,15 @@ def _build_interleaved_text(file_path: str, data_dir: str, filename: str) -> str
     parts = []
     for i, page_text in enumerate(pages):
         page_num = i + 1
-        if page_text.strip():
+        has_text = bool(page_text.strip())
+        has_desc = page_num in descriptions
+        if not has_text and not has_desc:
+            continue
+        parts.append(f"\n\n--- Стр. {page_num} ---\n")
+        if has_text:
             parts.append(page_text)
-        if page_num in descriptions:
-            parts.append(f"\n\n---\n\n{descriptions[page_num]}\n\n---\n")
+        if has_desc:
+            parts.append(f"\n{descriptions[page_num]}\n")
     return "\n".join(parts)
 
 
