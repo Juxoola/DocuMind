@@ -39,6 +39,8 @@ python-pptx==1.0.2
 watchfiles==1.1.1
 aiofiles==25.1.0
 orjson==3.11.8
+markdown==3.10.2
+fpdf2==2.8.3
 
 # ── Dev ──
 pytest==9.0.3
