@@ -363,6 +363,7 @@ async def process_audio_video(
             shared_llm_url = await get_vision_url(llm_settings, progress_cb=prog)
 
         v_conc = int(llm_settings.get("vision_concurrency") or config.VISION_CONCURRENCY)
+        VISION_BATCH_SIZE = 20
 
         sem = asyncio.Semaphore(v_conc)
         splitter = _get_splitter()
@@ -379,9 +380,28 @@ async def process_audio_video(
                 results.append((idx, path, t, desc))
 
         try:
-            await asyncio.gather(
-                *[_describe(idx, path, t) for idx, (path, t) in enumerate(frame_list)]
-            )
+            # Батчи по 20 кадров — между батчами перезапускаем vision-сервер для очистки CUDA
+            for batch_start in range(0, n, VISION_BATCH_SIZE):
+                if _is_cancelled():
+                    raise IngestionCancelled(f"Cancelled at batch {batch_start}")
+                batch_end = min(batch_start + VISION_BATCH_SIZE, n)
+                batch_tasks = [
+                    _describe(idx, path, t)
+                    for idx, (path, t) in enumerate(frame_list[batch_start:batch_end], batch_start)
+                ]
+                await asyncio.gather(*batch_tasks)
+
+                # Перезапуск vision-сервера между батчами для очистки CUDA memory pool
+                if batch_end < n:
+                    logger.info(f"[Vision] Батч {batch_start+1}-{batch_end}/{n} готов, перезапуск vision-сервера...")
+                    await unload_all_models(role="vision")
+                    import gc
+                    gc.collect()
+                    await asyncio.sleep(1)
+                    shared_llm_url = await get_vision_url(llm_settings)
+                    if not shared_llm_url:
+                        logger.warning("[Vision] Не удалось перезапустить vision-сервер")
+                        break
         except IngestionCancelled:
             raise
 

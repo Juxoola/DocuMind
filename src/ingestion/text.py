@@ -198,6 +198,7 @@ async def process_pdf(
                 sem = asyncio.Semaphore(v_conc)
                 done_count = 0
                 results = []
+                VISION_BATCH_SIZE = 20
 
                 async def _describe_frame(frame_info):
                     nonlocal done_count
@@ -217,8 +218,24 @@ async def process_pdf(
                                 65 + int(done_count / n * 25), f"Описание PDF: {done_count}/{n}"
                             )
 
-                tasks = [_describe_frame(f) for f in frame_list]
-                await asyncio.gather(*tasks)
+                # Батчи по 20 — между батчами перезапускаем vision для очистки CUDA
+                for batch_start in range(0, n, VISION_BATCH_SIZE):
+                    if _is_cancelled():
+                        raise IngestionCancelled(f"Cancelled at batch {batch_start}")
+                    batch_end = min(batch_start + VISION_BATCH_SIZE, n)
+                    batch = frame_list[batch_start:batch_end]
+                    await asyncio.gather(*[_describe_frame(f) for f in batch])
+
+                    if batch_end < n:
+                        logger.info(f"[Vision] Батч {batch_start+1}-{batch_end}/{n} готов, перезапуск vision...")
+                        await unload_all_models(role="vision")
+                        import gc
+                        gc.collect()
+                        await asyncio.sleep(1)
+                        shared_llm_url = await get_vision_url(llm_settings)
+                        if not shared_llm_url:
+                            logger.warning("[Vision] Не удалось перезапустить vision-сервер")
+                            break
 
                 results.sort(key=lambda x: x[0]["page"])
                 for frame_info, desc in results:
