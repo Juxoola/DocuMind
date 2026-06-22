@@ -816,9 +816,14 @@ async def unload_all_models(role: str = None):
                 else:
                     process.kill()
                 try:
-                    await asyncio.wait_for(process.wait(), timeout=5)
+                    await asyncio.wait_for(process.wait(), timeout=10)
                 except Exception:
                     pass
+                # Ждём пока ОС реально освободит память
+                for _ in range(10):
+                    if not _proc_alive(process):
+                        break
+                    await asyncio.sleep(0.5)
             except Exception as e:
                 logger.error(f"[GGUF Server] Ошибка при остановке {os.path.basename(path)}: {e}")
 
