@@ -79,9 +79,7 @@ async def get_vision_url(llm_settings, progress_cb=None):
             flash_attn=v_fa,
             n_parallel=1,
             n_threads=v_threads or None,
-            custom_args=[
-                "--no-context-shift",
-            ],
+            custom_args=[],
         )
     except Exception as e:
         logger.error(f"[Vision] Ошибка ленивого запуска: {e}")
