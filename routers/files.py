@@ -199,8 +199,8 @@ async def upload_file(
                     progress_cb=prog,
                     llm_settings=llm_settings,
                     cancel_check=cancel_event.is_set,
-                    keep_vision_alive=not is_last_in_batch,
-                    keep_whisper_alive=not is_last_in_batch,
+                    keep_vision_alive=False,
+                    keep_whisper_alive=False,
                 )
                 prog(90, "Построение индекса (ChromaDB)...")
                 await build_index(nodes, notebook_id)
