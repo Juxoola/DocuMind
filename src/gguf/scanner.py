@@ -40,7 +40,7 @@ async def _scan_gguf_dirs_uncached() -> list[dict]:
                     f
                     for f in filenames
                     if f.lower().endswith(".gguf")
-                    and not any(x in f.lower() for x in [".mmproj", ".proj"])
+                    and not any(x in f.lower() for x in ["mmproj", ".proj"])
                 ]
             )
             mmproj_files = sorted(
@@ -48,7 +48,7 @@ async def _scan_gguf_dirs_uncached() -> list[dict]:
                     f
                     for f in filenames
                     if f.lower().endswith(".gguf")
-                    and any(x in f.lower() for x in [".mmproj", ".proj"])
+                    and any(x in f.lower() for x in ["mmproj", ".proj"])
                 ]
             )
             if gguf_files or mmproj_files:
@@ -80,9 +80,9 @@ async def scan_gguf_dirs() -> list[dict]:
                 age = time.time() - saved_at
                 cached_mtimes = cached.get("dir_mtimes", {}) or {}
                 roots = [d.strip() for d in config.GGUF_SEARCH_DIRS.split(";") if d.strip()]
-                roots_valid = all(cached_mtimes.get(r) == await _dir_mtime(r) for r in roots) and len(
-                    cached_mtimes
-                ) == len(roots)
+                roots_valid = all(
+                    cached_mtimes.get(r) == await _dir_mtime(r) for r in roots
+                ) and len(cached_mtimes) == len(roots)
                 if age < _GGUF_CACHE_TTL_SEC and roots_valid:
                     return cached.get("results", [])
             except Exception:

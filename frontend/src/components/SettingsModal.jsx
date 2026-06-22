@@ -83,11 +83,15 @@ export default function SettingsModal({ isOpen, onClose, settings, onSave }) {
 
     const updateRagConfig = async () => {
         try {
-            await fetch('/api/update-rag-config', {
+            const res = await fetch('/api/update-rag-config', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(ragConfig)
             });
+            if (!res.ok) {
+                const err = await res.json().catch(() => ({}));
+                console.error('Ошибка RAG конфига:', res.status, err);
+            }
         } catch (err) {
             console.error('Ошибка обновления RAG конфига:', err);
         }
@@ -969,10 +973,15 @@ export default function SettingsModal({ isOpen, onClose, settings, onSave }) {
                         >
                             Отмена
                         </button>
-                        <button 
-                            onClick={() => {
+                        <button
+                            onClick={async () => {
                                 onSave(localSettings);
-                                if (activeTab === 'rag') updateRagConfig();
+                                if (activeTab === 'rag') {
+                                    await updateRagConfig();
+                                }
+                                if (ggufConfig.search_dirs !== undefined) {
+                                    await updateSearchDirs(ggufConfig.search_dirs);
+                                }
                                 onClose();
                             }}
                             className="flex-1 px-4 py-3 rounded-xl bg-primary text-white font-bold text-sm shadow-lg shadow-primary/20 hover:scale-[1.02] active:scale-95 transition-all flex items-center justify-center gap-2"

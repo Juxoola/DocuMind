@@ -1,6 +1,5 @@
 """Роутер: настройки RAG и GGUF."""
 
-import asyncio
 import logging
 import os
 
@@ -89,18 +88,24 @@ class UpdateRagConfigRequest(BaseModel):
     @field_validator("embedding_model", "reranker_model")
     @classmethod
     def validate_model_name(cls, v: str) -> str:
-        if "/" in v:
-            raise ValueError("имя модели не должно содержать '/'")
+        # Фронтенд отправляет полные пути из сканера — принимаем их как есть
+        # для совпадения со значениями <select>, но запрещаем traversal
+        v = v.strip()
         if ".." in v:
-            raise ValueError("имя модели не должно содержать '..'")
-        if os.path.isabs(v):
-            raise ValueError("абсолютные пути запрещены")
+            raise ValueError("путь не должен содержать '..'")
+        if not v:
+            raise ValueError("имя модели не может быть пустым")
         return v
 
 
 @router.post("/api/update-rag-config")
 async def update_rag_config(req: UpdateRagConfigRequest):
-    from src.rag.models import unload_rag_models
+    from src.gguf.server import unload_all_models
+    from src.rag.models import preload_all_models, unload_rag_models
+
+    # Запоминаем старые модели для сравнения
+    old_embedding = config.EMBEDDING_MODEL_NAME
+    old_reranker = config.RERANKER_MODEL_NAME
 
     with config._config_lock:
         config.EMBEDDING_MODEL_NAME = req.embedding_model
@@ -114,6 +119,26 @@ async def update_rag_config(req: UpdateRagConfigRequest):
         config.RERANK_SCORE_THRESHOLD = req.rerank_score_threshold
         data = config._collect_rag_config()
     await save_rag_config(config.RAG_CONFIG_FILE, data)
-    await unload_rag_models()
-    config.resolve_model_path.cache_clear()
+
+    embedding_changed = old_embedding != req.embedding_model
+    reranker_changed = old_reranker != req.reranker_model
+
+    if embedding_changed or reranker_changed:
+        logger.info("[Settings] Модели изменились — выгрузка старых и загрузка новых...")
+        # Выгружаем старые llama-server процессы
+        await unload_all_models(role="embedding")
+        await unload_all_models(role="reranker")
+        # Очищаем Python-кэш и GPU
+        unload_rag_models(hard=True)
+        config.resolve_model_path.cache_clear()
+        # Загружаем новые модели
+        try:
+            await preload_all_models()
+            logger.info("[Settings] Новые модели загружены.")
+        except Exception as e:
+            logger.warning(f"[Settings] Ошибка предзагрузки моделей: {e}")
+    else:
+        unload_rag_models(hard=True)
+        config.resolve_model_path.cache_clear()
+
     return {"status": "ok"}

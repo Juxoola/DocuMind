@@ -539,7 +539,7 @@ async def get_gguf_embedding_url(
         b_size, ub_size = "512", "512"
     cmd.extend(["-c", ctx, "-b", b_size, "-ub", ub_size])
 
-    cmd.extend(["--cache-type-k", "q8_0", "--cache-type-v", "q8_0"])
+    cmd.extend(["--cache-type-k", "q4_0", "--cache-type-v", "q4_0"])
 
     if config.GGUF_GPU_LAYERS != 0:
         cmd.extend(["-ngl", str(config.GGUF_GPU_LAYERS)])
