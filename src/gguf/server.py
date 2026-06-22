@@ -643,7 +643,6 @@ async def get_vision_server(
         "-b", str(current_config["n_batch"]),
         "-ub", str(current_config["n_ubatch"]),
         "--parallel", str(current_config["n_parallel"]),
-        "--cont-batching",
         "--jinja",
         "--cache-type-k", "q4_0",
         "--cache-type-v", "q4_0",
