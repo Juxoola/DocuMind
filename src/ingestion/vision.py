@@ -161,14 +161,15 @@ async def describe_image_with_lmstudio(
                 if r.status_code == 200:
                     res = r.json()
                     # Освобождаем слот llama-server сразу после ответа
-                    slot_id = res.get("slot", 0)
+                    slot_id = res.get("slot_id", 0)
                     try:
-                        await client.post(
+                        erase_r = await client.post(
                             f"{existing_llm_url}/slots/{slot_id}?action=erase",
                             timeout=5,
                         )
-                    except Exception:
-                        pass
+                        logger.debug(f"[Vision] slot_id={slot_id}, erase status={erase_r.status_code}")
+                    except Exception as e:
+                        logger.debug(f"[Vision] slot erase failed: {e}")
                     if "choices" in res:
                         ans = safe_extract_llm_response(res) or "Ошибка извлечения ответа"
                         reason = res.get("choices", [{}])[0].get("finish_reason")
