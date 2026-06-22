@@ -7,7 +7,7 @@ import re
 
 import config
 from routers.shared import get_async_http, safe_extract_llm_response
-from src.gguf.server import get_gguf_llm
+from src.gguf.server import get_vision_server
 from src.ingestion.utils import cleanup_gpu
 
 logger = logging.getLogger(__name__)
@@ -69,7 +69,7 @@ async def get_vision_url(llm_settings, progress_cb=None):
         v_max_tokens = int(llm_settings.get("vision_max_tokens") or 4096)
         v_threads = int(llm_settings.get("vision_threads") or 0)
 
-        return await get_gguf_llm(
+        return await get_vision_server(
             gguf_path=g_path,
             mmproj_path=m_path,
             ctx_size=v_ctx,
@@ -77,12 +77,7 @@ async def get_vision_url(llm_settings, progress_cb=None):
             n_batch=v_b,
             n_ubatch=v_ub,
             flash_attn=v_fa,
-            type_k=v_kv,
-            type_v=v_kv,
             n_parallel=v_conc,
-            mtp_enabled=v_mtp,
-            max_tokens=v_max_tokens,
-            enable_thinking=False,
             n_threads=v_threads or None,
             custom_args=[
                 "--no-context-shift",

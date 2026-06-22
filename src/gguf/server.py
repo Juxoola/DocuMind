@@ -584,6 +584,134 @@ async def get_gguf_embedding_url(
     raise TimeoutError(f"{role.capitalize()} сервер не ответил за 60 секунд")
 
 
+async def get_vision_server(
+    gguf_path: str,
+    mmproj_path: str = None,
+    ctx_size: int = 4096,
+    gpu_layers: int = -1,
+    n_threads: int = None,
+    n_batch: int = 512,
+    n_ubatch: int = 256,
+    flash_attn: bool = True,
+    n_parallel: int = 1,
+    custom_args: list[str] | None = None,
+) -> str:
+    """Vision-сервер: отдельный процесс с role='vision', не зависит от основного LLM."""
+    server_key = f"vision:{gguf_path}"
+
+    current_config = {
+        "mmproj": mmproj_path or None,
+        "ctx_size": int(ctx_size or 4096),
+        "gpu_layers": int(gpu_layers if gpu_layers is not None else -1),
+        "n_batch": int(n_batch or 512),
+        "n_ubatch": int(n_ubatch or 256),
+        "flash_attn": bool(flash_attn),
+        "n_parallel": int(n_parallel or 1),
+        "custom_args": custom_args or [],
+        "_n_threads": n_threads,
+    }
+
+    with _lock:
+        if server_key in _server_processes:
+            if (
+                _proc_alive(_server_processes[server_key])
+                and _server_configs.get(server_key) == current_config
+            ):
+                logger.info(f"[GGUF Server] Vision-сервер уже готов: {_server_ports[server_key]}")
+                return f"http://127.0.0.1:{_server_ports[server_key]}"
+            else:
+                logger.info("[GGUF Server] Vision: настройки изменились, перезапуск...")
+
+    await unload_all_models(role="vision")
+
+    if not os.path.exists(gguf_path):
+        raise FileNotFoundError(f"Vision модель не найдена: {gguf_path}")
+
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    s.bind(("", 0))
+    port = s.getsockname()[1]
+    s.close()
+
+    total_ctx = current_config["ctx_size"] * current_config["n_parallel"]
+    cmd = [
+        SERVER_EXE,
+        "-m", gguf_path,
+        "--port", str(port),
+        "-c", str(total_ctx),
+        "-ngl", str(current_config["gpu_layers"]),
+        "-b", str(current_config["n_batch"]),
+        "-ub", str(current_config["n_ubatch"]),
+        "--parallel", str(current_config["n_parallel"]),
+        "--cont-batching",
+        "--jinja",
+        "--cache-type-k", "q4_0",
+        "--cache-type-v", "q4_0",
+        "-n", "2048",
+        "--reasoning", "off",
+        "--reasoning-format", "none",
+        "--reasoning-budget", "0",
+    ]
+
+    if current_config["flash_attn"]:
+        cmd.extend(["--flash-attn", "on"])
+
+    if current_config.get("_n_threads") and current_config["_n_threads"] > 0:
+        cmd.extend(["-t", str(current_config["_n_threads"])])
+
+    if current_config.get("mmproj") and os.path.exists(current_config["mmproj"]):
+        cmd.extend(["--mmproj", os.path.normpath(current_config["mmproj"])])
+        logger.info(f"[GGUF Server] Vision с поддержкой mmproj: {os.path.basename(current_config['mmproj'])}")
+
+    cmd.extend(["--metrics"])
+
+    if current_config.get("custom_args"):
+        cmd.extend(current_config["custom_args"])
+
+    logger.info(f"[GGUF Server] Запуск vision: {os.path.basename(gguf_path)} на порту {port}...")
+    logger.info(f"[GGUF Server]   cmd: {' '.join(cmd)}")
+
+    creationflags = 0x08000000
+    process = await asyncio.create_subprocess_exec(
+        *cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=creationflags
+    )
+    _assign_to_job(process)
+
+    start_wait = time.time()
+    backoff = 0.05
+    while time.time() - start_wait < 60:
+        if await is_server_ready(port):
+            logger.info("[GGUF Server] Vision готов!")
+            with _lock:
+                _server_processes[server_key] = process
+                _server_ports[server_key] = port
+                _server_configs[server_key] = current_config
+                _server_roles[server_key] = "vision"
+            return f"http://127.0.0.1:{port}"
+
+        if process.returncode is not None:
+            try:
+                _, stderr = await asyncio.wait_for(process.communicate(), timeout=1)
+            except Exception:
+                stderr = b""
+            stderr_text = (stderr or b"").decode("utf-8", errors="ignore")[:500]
+            raise RuntimeError(
+                f"Vision-сервер упал (pid={process.pid}, retcode={process.returncode}). stderr: {stderr_text}"
+            )
+        await asyncio.sleep(backoff)
+        backoff = min(backoff * 2, 1.0)
+
+    try:
+        process.kill()
+    except Exception:
+        pass
+    try:
+        await asyncio.wait_for(process.wait(), timeout=5)
+    except Exception:
+        pass
+    raise TimeoutError("Vision-сервер не ответил за 60 секунд")
+
+
 def get_active_embedding_parallel(gguf_path: str = None) -> int:
 
     with _lock:

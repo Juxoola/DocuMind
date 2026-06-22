@@ -407,7 +407,7 @@ async def process_audio_video(
             prog(65 + int((idx + 1) / n * 22) if n else 87, f"Описание: {idx + 1}/{n}")
 
         if shared_llm_url and not keep_vision_alive:
-            await unload_all_models(role="llm")
+            await unload_all_models(role="vision")
 
     metadata_json = {
         "file_name": file_name,
