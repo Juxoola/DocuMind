@@ -662,7 +662,8 @@ async def get_vision_server(
         cmd.extend(["--mmproj", os.path.normpath(current_config["mmproj"])])
         logger.info(f"[GGUF Server] Vision с поддержкой mmproj: {os.path.basename(current_config['mmproj'])}")
 
-    slot_dir = os.path.join(os.path.dirname(gguf_path), ".slots")
+    import tempfile
+    slot_dir = os.path.join(tempfile.gettempdir(), "documind_slots")
     os.makedirs(slot_dir, exist_ok=True)
     cmd.extend(["--metrics", "--slot-save-path", slot_dir])
 
