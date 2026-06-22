@@ -160,7 +160,6 @@ async def describe_image_with_lmstudio(
                     return "Изображение без описания."
                 if r.status_code == 200:
                     res = r.json()
-                    r.close()
                     if "choices" in res:
                         ans = safe_extract_llm_response(res) or "Ошибка извлечения ответа"
                         reason = res.get("choices", [{}])[0].get("finish_reason")
