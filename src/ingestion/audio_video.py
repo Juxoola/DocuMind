@@ -350,6 +350,12 @@ async def process_audio_video(
             if notebook_id is not None:
                 unregister_subprocess(notebook_id, process)
 
+        # Освобождаем numpy-views и raw-буферы ffmpeg
+        last_seen_thumb = None
+        prev_saved_thumb = None
+        import gc
+        gc.collect()
+
         n = len(frame_list)
         shared_llm_url = None
         if n > 0:
@@ -405,6 +411,11 @@ async def process_audio_video(
                 nodes.extend(desc_nodes)
             frame_data.append({"time": t, "image_path": path, "description": desc})
             prog(65 + int((idx + 1) / n * 22) if n else 87, f"Описание: {idx + 1}/{n}")
+
+        # Освобождаем память после обработки всех кадров
+        results.clear()
+        import gc
+        gc.collect()
 
         if shared_llm_url and not keep_vision_alive:
             await unload_all_models(role="vision")

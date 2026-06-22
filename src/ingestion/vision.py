@@ -72,12 +72,12 @@ async def get_vision_url(llm_settings, progress_cb=None):
         return await get_vision_server(
             gguf_path=g_path,
             mmproj_path=m_path,
-            ctx_size=v_ctx,
+            ctx_size=4096,
             gpu_layers=v_gl,
             n_batch=v_b,
             n_ubatch=v_ub,
             flash_attn=v_fa,
-            n_parallel=v_conc,
+            n_parallel=1,
             n_threads=v_threads or None,
             custom_args=[
                 "--no-context-shift",
@@ -154,11 +154,13 @@ async def describe_image_with_lmstudio(
                     json=payload,
                     timeout=30,
                 )
+                del payload
                 if cancel_check and cancel_check():
                     logger.info("[Ingestion] Отмена: vision запрос прерван")
                     return "Изображение без описания."
                 if r.status_code == 200:
                     res = r.json()
+                    r.close()
                     if "choices" in res:
                         ans = safe_extract_llm_response(res) or "Ошибка извлечения ответа"
                         reason = res.get("choices", [{}])[0].get("finish_reason")

@@ -263,8 +263,13 @@ async def process_pdf(
                         except Exception:
                             pass
 
+            # Освобождаем память после обработки всех страниц
+            results.clear()
+            import gc
+            gc.collect()
+
             if shared_llm_url and not keep_vision_alive:
-                await unload_all_models(role="llm")
+                await unload_all_models(role="vision")
 
         if frame_data:
             frame_data.sort(key=lambda x: x["page"])
