@@ -147,6 +147,8 @@ async def describe_image_with_lmstudio(
                     "min_p": v_min_p,
                     "presence_penalty": v_pres,
                     "frequency_penalty": v_freq,
+                    "cache_prompt": False,
+                    "slot_id": -1,
                 }
                 client = get_async_http()
                 r = await client.post(
@@ -160,6 +162,15 @@ async def describe_image_with_lmstudio(
                     return "Изображение без описания."
                 if r.status_code == 200:
                     res = r.json()
+                    # Освобождаем слот llama-server сразу после ответа
+                    slot_id = res.get("slot", 0)
+                    try:
+                        await client.post(
+                            f"{existing_llm_url}/slots/{slot_id}?action=erase",
+                            timeout=5,
+                        )
+                    except Exception:
+                        pass
                     if "choices" in res:
                         ans = safe_extract_llm_response(res) or "Ошибка извлечения ответа"
                         reason = res.get("choices", [{}])[0].get("finish_reason")
