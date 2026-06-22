@@ -167,9 +167,9 @@ async def describe_image_with_lmstudio(
                             f"{existing_llm_url}/slots/{slot_id}?action=erase",
                             timeout=5,
                         )
-                        logger.debug(f"[Vision] slot_id={slot_id}, erase status={erase_r.status_code}")
+                        logger.info(f"[Vision] slot_id={slot_id}, erase status={erase_r.status_code}")
                     except Exception as e:
-                        logger.debug(f"[Vision] slot erase failed: {e}")
+                        logger.info(f"[Vision] slot erase failed: {e}")
                     if "choices" in res:
                         ans = safe_extract_llm_response(res) or "Ошибка извлечения ответа"
                         reason = res.get("choices", [{}])[0].get("finish_reason")
