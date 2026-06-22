@@ -144,6 +144,7 @@ async def process_pdf(
     doc = await asyncio.to_thread(fitz.open, file_path)
     frame_data = []
     frame_list = []
+    results = []
     splitter = _get_splitter()
     total_pages = len(doc)
     n_workers = min(8, (os.cpu_count() or 4), total_pages)
