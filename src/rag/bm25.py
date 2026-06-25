@@ -4,6 +4,7 @@ import asyncio
 import logging
 import os
 
+import aiofiles.os
 from llama_index.core.schema import TextNode
 
 import config
@@ -30,7 +31,7 @@ async def _rebuild_bm25_bg(notebook_id: str, db_path: str, new_nodes: list = Non
     try:
         paths = config.get_notebook_paths(notebook_id)
         bm25_dir = os.path.join(paths["base"], "bm25")
-        os.makedirs(bm25_dir, exist_ok=True)
+        await aiofiles.os.makedirs(bm25_dir, exist_ok=True)
 
         new_nodes = new_nodes or []
         async with _bm25_node_cache_lock:

@@ -270,7 +270,7 @@ async def upload_file(
                 images_dir = paths.get("images")
                 if images_dir and os.path.exists(images_dir):
                     stem = os.path.splitext(file.filename)[0]
-                    for f in os.listdir(images_dir):
+                    for f in await aiofiles.os.listdir(images_dir):
                         if f.startswith("p_") or f.startswith("v_") or stem in f:
                             try:
                                 await aiofiles.os.remove(os.path.join(images_dir, f))

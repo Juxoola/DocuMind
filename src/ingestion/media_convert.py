@@ -115,7 +115,7 @@ async def ensure_720p_video(file_path, prog_cb=None, cancel_check=None, notebook
         num_workers = 4
         seg_len = duration / num_workers
         temp_dir = file_path + "_parts"
-        os.makedirs(temp_dir, exist_ok=True)
+        await aiofiles.os.makedirs(temp_dir, exist_ok=True)
 
         async def encode_seg(idx):
             if _is_cancelled():

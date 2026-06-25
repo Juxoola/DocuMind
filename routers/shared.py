@@ -13,6 +13,7 @@ import threading
 import time
 from ctypes import wintypes
 
+import aiofiles.os
 import httpx
 
 import config
@@ -172,7 +173,7 @@ async def robust_rmtree(path: str, max_retries: int = 3, delay: float = 0.5) -> 
     ts = int(time.time())
     deferred = f"{path}.pending_delete_{ts}"
     try:
-        os.rename(path, deferred)
+        await aiofiles.os.rename(path, deferred)
         return True, None
     except Exception:
         if sys.platform == "win32":
