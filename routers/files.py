@@ -25,6 +25,7 @@ from .shared import (
     ingestion_status,
     robust_rmtree,
     safe_filename,
+    sse_event,
     upload_cancel_flags,
 )
 
@@ -318,7 +319,7 @@ async def upload_file(
         loop = asyncio.get_running_loop()
         while True:
             msg = await loop.run_in_executor(None, q.get)
-            yield f"data: {orjson.dumps(msg).decode()}\n\n"
+            yield sse_event(msg)
             if msg["type"] in ("done", "error", "cancelled"):
                 break
 

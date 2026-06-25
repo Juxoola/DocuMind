@@ -5,6 +5,7 @@ import logging
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
+from routers.notebooks import validate_nb_id
 from src.bookmarks import (
     create_bookmark,
     delete_bookmark,
@@ -19,7 +20,6 @@ router = APIRouter(tags=["bookmarks"])
 
 @router.get("/api/bookmarks")
 async def api_list_bookmarks(notebook_id: str = Query(...)):
-    from routers.notebooks import validate_nb_id
 
     notebook_id = validate_nb_id(notebook_id)
     return {"bookmarks": await list_bookmarks(notebook_id)}
@@ -27,7 +27,6 @@ async def api_list_bookmarks(notebook_id: str = Query(...)):
 
 @router.get("/api/bookmarks/{bookmark_id}")
 async def api_get_bookmark(bookmark_id: str, notebook_id: str = Query(...)):
-    from routers.notebooks import validate_nb_id
 
     notebook_id = validate_nb_id(notebook_id)
     bm = await get_bookmark(notebook_id, bookmark_id)
@@ -50,7 +49,6 @@ class CreateBookmarkRequest(BaseModel):
 
 @router.post("/api/bookmarks")
 async def api_create_bookmark(req: CreateBookmarkRequest):
-    from routers.notebooks import validate_nb_id
 
     req.notebook_id = validate_nb_id(req.notebook_id)
     try:
@@ -67,7 +65,6 @@ class UpdateBookmarkRequest(BaseModel):
 
 @router.patch("/api/bookmarks/{bookmark_id}")
 async def api_update_bookmark(bookmark_id: str, req: UpdateBookmarkRequest):
-    from routers.notebooks import validate_nb_id
 
     req.notebook_id = validate_nb_id(req.notebook_id)
     patch = {k: v for k, v in req.model_dump().items() if k != "notebook_id" and v is not None}
@@ -79,7 +76,6 @@ async def api_update_bookmark(bookmark_id: str, req: UpdateBookmarkRequest):
 
 @router.delete("/api/bookmarks/{bookmark_id}")
 async def api_delete_bookmark(bookmark_id: str, notebook_id: str = Query(...)):
-    from routers.notebooks import validate_nb_id
 
     notebook_id = validate_nb_id(notebook_id)
     ok = await delete_bookmark(notebook_id, bookmark_id)

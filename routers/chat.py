@@ -4,7 +4,6 @@ import asyncio
 import logging
 import time
 
-import orjson
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
@@ -13,7 +12,7 @@ import config
 from src.rag.prompts import get_system_prompt
 from src.rag.state import RAG_POOL
 
-from .shared import get_async_http, safe_extract_llm_response
+from .shared import SSE_DONE, get_async_http, safe_extract_llm_response, sse_event
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["chat"])
@@ -50,6 +49,18 @@ class ChatRequest(BaseModel):
     mtp_enabled: bool | None = False
 
 
+def _build_chat_messages(
+    answer_mode: str, context: str, history: list[dict], user_content
+) -> list[dict]:
+    sys_prompt = get_system_prompt(answer_mode) + f"\n\nДоступные источники:\n{context}"
+    messages = [{"role": "system", "content": sys_prompt}]
+    for h_msg in history:
+        if h_msg.get("role") in ("user", "assistant"):
+            messages.append({"role": h_msg["role"], "content": h_msg["content"]})
+    messages.append({"role": "user", "content": user_content})
+    return messages
+
+
 @router.post("/api/chat")
 async def chat(request: ChatRequest):
 
@@ -62,9 +73,11 @@ async def chat(request: ChatRequest):
     if not request.allowed_files:
 
         async def no_files():
-            yield f"data: {orjson.dumps({'type': 'sources', 'sources': []}).decode()}\n\n"
-            yield f"data: {orjson.dumps({'type': 'chunk', 'text': 'Пожалуйста, выберите хотя бы один источник.'}).decode()}\n\n"
-            yield "data: [DONE]\n\n"
+            yield sse_event({"type": "sources", "sources": []})
+            yield sse_event(
+                {"type": "chunk", "text": "Пожалуйста, выберите хотя бы один источник."}
+            )
+            yield SSE_DONE
 
         return StreamingResponse(no_files(), media_type="text/event-stream")
 
@@ -113,8 +126,8 @@ async def chat(request: ChatRequest):
             error_msg = f"Ошибка загрузки LLM: {type(e).__name__}"
 
             async def error_gen():
-                yield f"data: {orjson.dumps({'type': 'error', 'text': error_msg}).decode()}\n\n"
-                yield "data: [DONE]\n\n"
+                yield sse_event({"type": "error", "text": error_msg})
+                yield SSE_DONE
 
             return StreamingResponse(error_gen(), media_type="text/event-stream")
     elif request.llm_url:
@@ -200,15 +213,12 @@ async def chat(request: ChatRequest):
             if not query_for_rag or not query_for_rag.strip():
                 query_for_rag = request.query or "Опиши содержимое"
 
-            yield f"data: {orjson.dumps({'type': 'sources', 'sources': sources}).decode()}\n\n"
+            yield sse_event({"type": "sources", "sources": sources})
 
             if use_direct_gguf:
                 from src.gguf.models import detect_model_family
                 from src.gguf.streaming import stream_gguf_chat
 
-                sys_prompt = (
-                    get_system_prompt(request.answer_mode) + f"\n\nДоступные источники:\n{context}"
-                )
                 if request.image_base64:
                     user_content = [
                         {
@@ -219,13 +229,9 @@ async def chat(request: ChatRequest):
                     ]
                 else:
                     user_content = query_for_rag
-                messages_for_chat = [{"role": "system", "content": sys_prompt}]
-                for h_msg in request.history:
-                    if h_msg.get("role") in ("user", "assistant"):
-                        messages_for_chat.append(
-                            {"role": h_msg["role"], "content": h_msg["content"]}
-                        )
-                messages_for_chat.append({"role": "user", "content": user_content})
+                messages_for_chat = _build_chat_messages(
+                    request.answer_mode, context, request.history, user_content
+                )
                 model_family = detect_model_family(request.gguf_model_path)
                 OPEN_TAG, CLOSE_TAG = (
                     ("<|channel|>", "<channel|>")
@@ -254,14 +260,14 @@ async def chat(request: ChatRequest):
                         if OPEN_TAG in buf:
                             if request.thinking_mode:
                                 buf = buf[buf.index(OPEN_TAG) + len(OPEN_TAG) :]
-                                yield f"data: {orjson.dumps({'type': 'thinking_start'}).decode()}\n\n"
+                                yield sse_event({"type": "thinking_start"})
                                 phase = "thinking"
                             else:
                                 buf = buf[buf.index(OPEN_TAG) + len(OPEN_TAG) :]
                                 phase = "thinking_ignore"
                         elif len(buf) > 10:
                             phase = "answer"
-                            yield f"data: {orjson.dumps({'type': 'chunk', 'text': buf}).decode()}\n\n"
+                            yield sse_event({"type": "chunk", "text": buf})
                             buf = ""
                     if phase == "thinking_ignore":
                         if CLOSE_TAG in buf:
@@ -276,38 +282,38 @@ async def chat(request: ChatRequest):
                         if CLOSE_TAG in buf:
                             think_part, _, rest = buf.partition(CLOSE_TAG)
                             if think_part:
-                                yield f"data: {orjson.dumps({'type': 'thinking_chunk', 'text': think_part}).decode()}\n\n"
-                            yield f"data: {orjson.dumps({'type': 'thinking_done'}).decode()}\n\n"
+                                yield sse_event({"type": "thinking_chunk", "text": think_part})
+                            yield sse_event({"type": "thinking_done"})
                             phase = "answer"
                             buf = rest.lstrip("\n")
                             if buf:
-                                yield f"data: {orjson.dumps({'type': 'chunk', 'text': buf}).decode()}\n\n"
+                                yield sse_event({"type": "chunk", "text": buf})
                                 buf = ""
                         else:
                             safe = buf[: -len(CLOSE_TAG)] if len(buf) > len(CLOSE_TAG) else ""
                             if safe:
-                                yield f"data: {orjson.dumps({'type': 'thinking_chunk', 'text': safe}).decode()}\n\n"
+                                yield sse_event({"type": "thinking_chunk", "text": safe})
                                 buf = buf[len(safe) :]
                     elif phase == "answer":
-                        yield f"data: {orjson.dumps({'type': 'chunk', 'text': buf}).decode()}\n\n"
+                        yield sse_event({"type": "chunk", "text": buf})
                         buf = ""
                 if buf and phase == "thinking":
-                    yield f"data: {orjson.dumps({'type': 'thinking_chunk', 'text': buf}).decode()}\n\n"
-                    yield f"data: {orjson.dumps({'type': 'thinking_done'}).decode()}\n\n"
+                    yield sse_event({"type": "thinking_chunk", "text": buf})
+                    yield sse_event({"type": "thinking_done"})
                 elif buf and phase == "answer":
-                    yield f"data: {orjson.dumps({'type': 'chunk', 'text': buf}).decode()}\n\n"
+                    yield sse_event({"type": "chunk", "text": buf})
             else:
-                sys_prompt = (
-                    get_system_prompt(request.answer_mode) + f"\n\nДоступные источники:\n{context}"
+                chat_messages = _build_chat_messages(
+                    request.answer_mode, context, request.history, request.query
                 )
-                chat_messages = [{"role": "system", "content": sys_prompt}]
-                for h_msg in request.history:
-                    if h_msg.get("role") in ("user", "assistant"):
-                        chat_messages.append({"role": h_msg["role"], "content": h_msg["content"]})
-                chat_messages.append({"role": "user", "content": request.query})
                 if active_llm is None:
-                    yield f"data: {orjson.dumps({'type': 'error', 'text': 'LLM не инициализирован. Настройте URL API-модели или загрузите GGUF-модель.'}).decode()}\n\n"
-                    yield "data: [DONE]\n\n"
+                    yield sse_event(
+                        {
+                            "type": "error",
+                            "text": "LLM не инициализирован. Настройте URL API-модели или загрузите GGUF-модель.",
+                        }
+                    )
+                    yield SSE_DONE
                     return
 
                 queue = asyncio.Queue()
@@ -327,15 +333,22 @@ async def chat(request: ChatRequest):
                     if delta is None:
                         break
                     token_count += 1
-                    yield f"data: {orjson.dumps({'type': 'chunk', 'text': delta}).decode()}\n\n"
+                    yield sse_event({"type": "chunk", "text": delta})
 
             elapsed = time.time() - global_start_time
-            yield f"data: {orjson.dumps({'type': 'stats', 'elapsed_sec': round(elapsed, 2), 'total_tokens': token_count, 'tokens_per_sec': round(token_count / elapsed, 1) if elapsed > 0 else 0}).decode()}\n\n"
-            yield "data: [DONE]\n\n"
+            yield sse_event(
+                {
+                    "type": "stats",
+                    "elapsed_sec": round(elapsed, 2),
+                    "total_tokens": token_count,
+                    "tokens_per_sec": round(token_count / elapsed, 1) if elapsed > 0 else 0,
+                }
+            )
+            yield SSE_DONE
         except Exception as e:
             logger.error("Ошибка при обработке чата", exc_info=True)
             error_text = "Внутренняя ошибка сервера. Попробуйте позже."
-            yield f"data: {orjson.dumps({'type': 'error', 'text': error_text}).decode()}\n\n"
-            yield "data: [DONE]\n\n"
+            yield sse_event({"type": "error", "text": error_text})
+            yield SSE_DONE
 
     return StreamingResponse(generate(), media_type="text/event-stream")

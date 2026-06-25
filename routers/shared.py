@@ -209,3 +209,12 @@ def safe_extract_llm_response(data: dict) -> str | None:
     except (KeyError, IndexError, TypeError):
         logger.warning("LLM API вернул неожиданный формат: %s", str(data)[:200])
         return None
+
+
+def sse_event(data: dict) -> str:
+    import orjson
+
+    return f"data: {orjson.dumps(data).decode()}\n\n"
+
+
+SSE_DONE = "data: [DONE]\n\n"
