@@ -45,19 +45,24 @@ async def api_gguf_status():
     return {"running_count": count}
 
 
-def _get_gguf_servers_info() -> list:
+async def _get_gguf_servers_info() -> list:
     servers = []
     try:
         from src.gguf.state import _lock, _server_ports, _server_processes, _server_roles
 
-        with _lock:
+        async with _lock:
             for path, proc in _server_processes.items():
+                alive = True
+                if hasattr(proc, "poll"):
+                    alive = proc.poll() is None
+                else:
+                    alive = proc.returncode is None
                 servers.append(
                     {
                         "model": os.path.basename(path),
                         "role": _server_roles.get(path, "?"),
                         "port": _server_ports.get(path),
-                        "alive": proc.poll() is None,
+                        "alive": alive,
                     }
                 )
     except Exception:
@@ -95,7 +100,7 @@ async def api_vram():
                 "utilization_pct": 0,
             },
             "per_process": [],
-            "gguf_servers": _get_gguf_servers_info(),
+            "gguf_servers": await _get_gguf_servers_info(),
         }
     used_mib = 0
     total_mib = 0
@@ -163,7 +168,7 @@ async def api_vram():
             "utilization_pct": round(used_mib / max(total_mib, 1) * 100, 1),
         },
         "per_process": per_process,
-        "gguf_servers": _get_gguf_servers_info(),
+        "gguf_servers": await _get_gguf_servers_info(),
     }
 
 

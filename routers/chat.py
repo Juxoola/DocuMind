@@ -173,7 +173,7 @@ async def chat(request: ChatRequest):
                 ]
                 try:
                     v_payload = {"messages": vision_messages, "stream": False, "max_tokens": 1024}
-                    http = get_async_http()
+                    http = await get_async_http()
                     r_vision = await http.post(
                         f"{active_llm}/v1/chat/completions",
                         json=v_payload,

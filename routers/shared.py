@@ -9,7 +9,6 @@ import shutil
 import stat
 import sys
 import tempfile
-import threading
 import time
 from ctypes import wintypes
 
@@ -25,17 +24,14 @@ logger = logging.getLogger(__name__)
 # от того, на котором клиент был создан (происходит при asyncio.run() из разных потоков).
 _async_http: httpx.AsyncClient | None = None
 _async_http_loop: object | None = None
-_http_lock = threading.Lock()
+_http_lock = asyncio.Lock()
 
 
-def get_async_http() -> httpx.AsyncClient:
+async def get_async_http() -> httpx.AsyncClient:
     global _async_http, _async_http_loop
-    try:
-        current_loop = asyncio.get_running_loop()
-    except RuntimeError:
-        current_loop = None
+    current_loop = asyncio.get_running_loop()
 
-    with _http_lock:
+    async with _http_lock:
         # Сброс клиента, если loop сменился (threading/multiprocessing).
         if current_loop is not None and _async_http_loop is not current_loop:
             _async_http = None
@@ -55,14 +51,14 @@ def get_async_http() -> httpx.AsyncClient:
 
 ingestion_status: dict = {}
 upload_cancel_flags: dict = {}
-_ingestion_lock = threading.Lock()
+_ingestion_lock = asyncio.Lock()
 _background_tasks: "set[asyncio.Task]" = set()
 _INGESTION_STATUS_TTL_SEC = 3600  # 1 час
 
 
-def _cleanup_ingestion_status():
+async def _cleanup_ingestion_status():
     now = time.time()
-    with _ingestion_lock:
+    async with _ingestion_lock:
         expired = [
             k
             for k, v in ingestion_status.items()

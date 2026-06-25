@@ -331,7 +331,9 @@ async def _hybrid_search(index, query: str, allowed_files, bm25_retriever, qe_ll
 
             if num_q > 1 and qe_llm:
                 try:
-                    generated_bundles = await asyncio.to_thread(fusion_retriever._get_queries, query)
+                    generated_bundles = await asyncio.to_thread(
+                        fusion_retriever._get_queries, query
+                    )
                     logger.info("  [RAG] 🧠 Сгенерированные поисковые запросы (Query Expansion):")
                     for i, gq in enumerate(generated_bundles, 1):
                         logger.info(f"    {i}. {gq.query_str}")
@@ -442,7 +444,7 @@ async def _rerank_nodes(all_nodes, query: str):
         )
 
     if reranker_available:
-        with _model_cache_lock:
+        async with _model_cache_lock:
             need_load = "reranker" not in _model_cache
 
         if need_load:
@@ -451,10 +453,10 @@ async def _rerank_nodes(all_nodes, query: str):
 
             model_path = config.resolve_model_path(reranker_name)
             url = await get_gguf_embedding_url(model_path, is_reranker=True, n_parallel=1)
-            with _model_cache_lock:
+            async with _model_cache_lock:
                 _model_cache["reranker"] = url
 
-        with _model_cache_lock:
+        async with _model_cache_lock:
             url = _model_cache.get("reranker")
 
         def _rerank_doc(nws):

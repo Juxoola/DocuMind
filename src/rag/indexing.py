@@ -39,10 +39,7 @@ async def build_index(nodes, notebook_id: str):
     vector_store = await get_vector_store(notebook_id)
     storage_context = StorageContext.from_defaults(vector_store=vector_store)
 
-    def _build():
-        return VectorStoreIndex(nodes, storage_context=storage_context)
-
-    index = await asyncio.to_thread(_build)
+    index = VectorStoreIndex(nodes, storage_context=storage_context)
 
     paths = config.get_notebook_paths(notebook_id)
     db_path = paths["chroma_db"]
@@ -68,13 +65,9 @@ async def get_vector_store(notebook_id: str):
                 pass
             logger.debug(f"LRU eviction: закрыт ChromaDB клиент {_oldest_path}")
 
-    def _create_chroma_client():
-        os.makedirs(db_path, exist_ok=True)
-        db = chromadb.PersistentClient(path=db_path)
-        collection = db.get_or_create_collection("multimodal_rag")
-        return db, collection
-
-    db, chroma_collection = await asyncio.to_thread(_create_chroma_client)
+    os.makedirs(db_path, exist_ok=True)
+    db = chromadb.PersistentClient(path=db_path)
+    chroma_collection = db.get_or_create_collection("multimodal_rag")
     vector_store = ChromaVectorStore(chroma_collection=chroma_collection)
 
     async with _client_cache_lock:

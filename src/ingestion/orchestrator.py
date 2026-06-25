@@ -1,6 +1,5 @@
 """Оркестрация ингеста: маршрутизация файла по типу к нужному обработчику."""
 
-import asyncio
 import logging
 import os
 import shutil
@@ -106,15 +105,8 @@ async def ingest_file(
             keep_vision_alive=keep_vision_alive,
         )
     else:
-        def _read_file():
-            try:
-                with open(file_path, encoding="utf-8") as f:
-                    return f.read()
-            except UnicodeDecodeError:
-                with open(file_path, encoding="cp1251") as f:
-                    return f.read()
-
-        text = await asyncio.to_thread(_read_file)
+        async with aiofiles.open(file_path, encoding="utf-8", errors="replace") as f:
+            text = await f.read()
         doc = TextNode(text=text, metadata={"file_name": os.path.basename(file_path)})
         nodes = _get_splitter().get_nodes_from_documents([doc])
     return nodes
@@ -133,7 +125,7 @@ async def process_image(
 
     dest_name = f"img_{uuid.uuid4().hex[:6]}{os.path.splitext(file_path)[1].lower()}"
     dest_path = os.path.join(images_dir, dest_name)
-    await asyncio.to_thread(shutil.copy2, file_path, dest_path)
+    shutil.copy2(file_path, dest_path)
 
     def _is_cancelled():
         return bool(cancel_check and cancel_check())
@@ -199,17 +191,11 @@ async def process_image(
             "frames": frame_data,
         }
 
-        def _write_json_metadata():
-            import orjson
+        import orjson
 
-            with open(
-                os.path.join(os.path.dirname(file_path), f"{file_name}.json"),
-                "w",
-                encoding="utf-8",
-            ) as f:
-                f.write(orjson.dumps(metadata_json, option=orjson.OPT_INDENT_2).decode())
-
-        await asyncio.to_thread(_write_json_metadata)
+        metadata_path = os.path.join(os.path.dirname(file_path), f"{file_name}.json")
+        async with aiofiles.open(metadata_path, "w", encoding="utf-8") as f:
+            await f.write(orjson.dumps(metadata_json, option=orjson.OPT_INDENT_2).decode())
 
     if progress_cb:
         progress_cb(60, f"Изображение: {file_name} готово")

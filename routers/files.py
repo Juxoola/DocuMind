@@ -156,7 +156,7 @@ async def upload_file(
         start_time = time.time()
         cancel_event = upload_cancel_flags.setdefault(task_id, threading.Event())
         cancel_event.clear()
-        with _ingestion_lock:
+        async with _ingestion_lock:
             ingestion_status[notebook_id] = {
                 "is_uploading": True,
                 "progress": 0,
@@ -175,9 +175,8 @@ async def upload_file(
 
             def prog(pct, msg):
                 q.put({"type": "progress", "pct": pct, "msg": msg})
-                with _ingestion_lock:
-                    if notebook_id in ingestion_status:
-                        ingestion_status[notebook_id].update({"progress": pct, "status": msg})
+                if notebook_id in ingestion_status:
+                    ingestion_status[notebook_id].update({"progress": pct, "status": msg})
 
             prog(5, "Файл сохранён, подготовка...")
             is_last_in_batch = current_idx >= total_count
@@ -224,13 +223,13 @@ async def upload_file(
                     await flush_bm25_rebuild(notebook_id)
                 except Exception as bm25_err:
                     logger.info(f"[INGESTION] Не удалось форсировать BM25 rebuild: {bm25_err}")
-                with _ingestion_lock:
+                async with _ingestion_lock:
                     ingestion_status[notebook_id] = {
                         "is_uploading": False,
                         "updated_at": time.time(),
                     }
             else:
-                with _ingestion_lock:
+                async with _ingestion_lock:
                     ingestion_status[notebook_id].update(
                         {
                             "batch_progress": current_idx / total_count * 100,
@@ -283,10 +282,10 @@ async def upload_file(
 
                 vector_store = await get_vector_store(notebook_id)
                 collection = vector_store._collection
-                await asyncio.to_thread(collection.delete, where={"file_name": file.filename})
+                collection.delete(where={"file_name": file.filename})
             except Exception:
                 logger.debug("cancel: не удалось очистить векторные индексы для %s", file.filename)
-            with _ingestion_lock:
+            async with _ingestion_lock:
                 ingestion_status[notebook_id] = {
                     "is_uploading": False,
                     "cancelled": True,
@@ -295,7 +294,7 @@ async def upload_file(
             q.put({"type": "cancelled", "filename": file.filename})
         except Exception as e:
             logger.error("Ошибка при обработке загрузки", exc_info=True)
-            with _ingestion_lock:
+            async with _ingestion_lock:
                 ingestion_status[notebook_id] = {
                     "is_uploading": False,
                     "error": "Внутренняя ошибка обработки файла",
@@ -307,7 +306,7 @@ async def upload_file(
             try:
                 from src.ingestion import cleanup_gpu
 
-                await asyncio.to_thread(cleanup_gpu)
+                cleanup_gpu()
             except Exception:
                 logger.debug("finally: не удалось вызвать cleanup_gpu")
 
@@ -359,16 +358,12 @@ async def delete_file(filename: str, notebook_id: str):
     file_path = os.path.join(paths["data"], filename)
     if os.path.exists(file_path):
         if filename.lower().endswith((".mp4", ".avi", ".mov")):
-
-            def _release_video_sync(fp):
-                cap = cv2.VideoCapture(fp)
-                try:
-                    cap.get(cv2.CAP_PROP_FPS)
-                finally:
-                    cap.release()
-
-            await asyncio.to_thread(_release_video_sync, file_path)
-        await asyncio.to_thread(gc.collect)
+            cap = cv2.VideoCapture(file_path)
+            try:
+                cap.get(cv2.CAP_PROP_FPS)
+            finally:
+                cap.release()
+        gc.collect()
 
         async def _sync_remove_with_retry(fp: str):
             for i in range(10):
@@ -393,7 +388,7 @@ async def delete_file(filename: str, notebook_id: str):
     from src.rag.indexing import get_vector_store
 
     vector_store = await get_vector_store(notebook_id)
-    await asyncio.to_thread(lambda: vector_store._collection.delete(where={"file_name": filename}))
+    await asyncio.to_thread(vector_store._collection.delete, where={"file_name": filename})
     from src.rag.retrieval import invalidate_index_cache
 
     invalidate_index_cache(notebook_id)
@@ -684,6 +679,6 @@ async def clear_notebook(notebook_id: str):
 
 @router.get("/api/ingestion_status")
 async def get_ingestion_status(notebook_id: str):
-    _cleanup_ingestion_status()
-    with _ingestion_lock:
+    await _cleanup_ingestion_status()
+    async with _ingestion_lock:
         return ingestion_status.get(notebook_id, {"is_uploading": False})

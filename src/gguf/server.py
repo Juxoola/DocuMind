@@ -46,7 +46,7 @@ async def is_server_ready(port: int) -> bool:
 # Выбор свободного порта через bind, сборка CLI, запуск subprocess с ожиданием ready через health-check
 
 
-async def _start_llm_server_sync(gguf_path: str, mmproj_path: str, current_config: dict) -> str:
+async def _start_llm_server(gguf_path: str, mmproj_path: str, current_config: dict) -> str:
 
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -129,7 +129,7 @@ async def _start_llm_server_sync(gguf_path: str, mmproj_path: str, current_confi
     while time.time() - start_wait < 60:
         if await is_server_ready(port):
             logger.info("[GGUF Server] Готов!")
-            with _lock:
+            async with _lock:
                 _server_processes[gguf_path] = process
                 _server_ports[gguf_path] = port
                 _server_configs[gguf_path] = current_config
@@ -181,7 +181,7 @@ async def unload_rag_models_safe():
     try:
         from src.rag.models import unload_rag_models
 
-        await asyncio.to_thread(unload_rag_models, hard=False)
+        unload_rag_models(hard=False)
     except Exception:
         pass
 
@@ -271,7 +271,7 @@ async def get_gguf_llm(
         n_ubatch=n_ubatch,
     )
 
-    with _lock:
+    async with _lock:
         if gguf_path in _server_processes:
             if (
                 _proc_alive(_server_processes[gguf_path])
@@ -308,14 +308,14 @@ async def get_gguf_llm(
     await unload_all_models(role="llm")
 
     if not os.path.exists(gguf_path):
-        with _lock:
+        async with _lock:
             _llm_load_state.update({"state": "error", "error": f"Model not found: {gguf_path}"})
         raise FileNotFoundError(f"GGUF модель не найдена: {gguf_path}")
 
     try:
-        url = await _start_llm_server_sync(gguf_path, mmproj_path, current_config)
+        url = await _start_llm_server(gguf_path, mmproj_path, current_config)
         elapsed = time.time() - (_llm_load_state.get("started_at") or time.time())
-        with _lock:
+        async with _lock:
             _llm_load_state.update(
                 {
                     "state": "ready",
@@ -328,7 +328,7 @@ async def get_gguf_llm(
             )
         return url
     except Exception as e:
-        with _lock:
+        async with _lock:
             _server_configs.pop(gguf_path, None)
             _llm_load_state.update({"state": "error", "error": str(e)[:300], "phase": None})
         raise
@@ -384,7 +384,7 @@ async def preload_gguf_llm(
 
     task_id = str(uuid.uuid4())[:8]
 
-    with _lock:
+    async with _lock:
         if gguf_path in _server_processes:
             if (
                 _proc_alive(_server_processes[gguf_path])
@@ -404,7 +404,7 @@ async def preload_gguf_llm(
                 )
                 return {"status": "ready", "port": _server_ports[gguf_path], "task_id": task_id}
 
-    with _lock:
+    async with _lock:
         _llm_load_state.update(
             {
                 "state": "loading",
@@ -421,17 +421,17 @@ async def preload_gguf_llm(
 
     async def _worker():
         try:
-            with _lock:
+            async with _lock:
                 _llm_load_state["phase"] = "starting"
             await unload_rag_models_safe()
             await unload_all_models(role="llm")
             if not os.path.exists(gguf_path):
                 raise FileNotFoundError(f"GGUF модель не найдена: {gguf_path}")
-            with _lock:
+            async with _lock:
                 _llm_load_state["phase"] = "loading_model"
-            url = await _start_llm_server_sync(gguf_path, mmproj_path, current_config)
+            url = await _start_llm_server(gguf_path, mmproj_path, current_config)
             elapsed = time.time() - _llm_load_state["started_at"]
-            with _lock:
+            async with _lock:
                 _llm_load_state.update(
                     {
                         "state": "ready",
@@ -444,7 +444,7 @@ async def preload_gguf_llm(
                 )
             logger.info(f"[preload] OK: loaded in {elapsed:.1f}s")
         except Exception as e:
-            with _lock:
+            async with _lock:
                 _server_configs.pop(gguf_path, None)
                 _llm_load_state.update({"state": "error", "error": str(e)[:300], "phase": None})
             logger.info(f"[preload] ERROR: {e}")
@@ -456,7 +456,7 @@ async def preload_gguf_llm(
 
 
 async def get_llm_status() -> dict:
-    with _lock:
+    async with _lock:
         state = _llm_load_state.copy()
     if state.get("started_at") and state.get("state") == "loading":
         elapsed = time.time() - state["started_at"]
@@ -492,7 +492,7 @@ async def get_gguf_embedding_url(
         "n_parallel": n_parallel,
     }
 
-    with _lock:
+    async with _lock:
         if gguf_path in _server_processes:
             if (
                 _proc_alive(_server_processes[gguf_path])
@@ -558,7 +558,7 @@ async def get_gguf_embedding_url(
     while time.time() - start_wait < 60:
         if await is_server_ready(port):
             logger.info(f"[GGUF Server] {role.capitalize()} готов!")
-            with _lock:
+            async with _lock:
                 _server_processes[gguf_path] = process
                 _server_ports[gguf_path] = port
                 _server_configs[gguf_path] = current_config
@@ -605,7 +605,7 @@ async def get_vision_server(
         "_n_threads": n_threads,
     }
 
-    with _lock:
+    async with _lock:
         if server_key in _server_processes:
             if (
                 _proc_alive(_server_processes[server_key])
@@ -690,7 +690,7 @@ async def get_vision_server(
     while time.time() - start_wait < 60:
         if await is_server_ready(port):
             logger.info("[GGUF Server] Vision готов!")
-            with _lock:
+            async with _lock:
                 _server_processes[server_key] = process
                 _server_ports[server_key] = port
                 _server_configs[server_key] = current_config
@@ -721,7 +721,7 @@ async def get_vision_server(
 
 
 async def get_active_embedding_parallel(gguf_path: str = None) -> int:
-    with _lock:
+    async with _lock:
         if gguf_path:
             cfg = _server_configs.get(gguf_path)
             if cfg and cfg.get("n_parallel"):
@@ -736,7 +736,7 @@ async def get_active_embedding_parallel(gguf_path: str = None) -> int:
 
 async def kill_stray_servers():
 
-    with _lock:
+    async with _lock:
         if not _server_processes:
             logger.debug("[GGUF Server] Нет отслеживаемых процессов для завершения.")
             return
@@ -770,7 +770,7 @@ async def kill_stray_servers():
 
 
 async def count_running_servers() -> int:
-    with _lock:
+    async with _lock:
         alive = 0
         for path, proc in _server_processes.items():
             if _proc_alive(proc):
@@ -783,7 +783,7 @@ async def count_running_servers() -> int:
 
 async def unload_all_models(role: str = None):
 
-    with _lock:
+    async with _lock:
         if not _server_processes:
             return
 
@@ -833,7 +833,7 @@ async def unload_all_models(role: str = None):
             except Exception as e:
                 logger.error(f"[GGUF Server] Ошибка при остановке {os.path.basename(path)}: {e}")
 
-    with _lock:
+    async with _lock:
         for path in to_remove:
             _server_processes.pop(path, None)
             _server_ports.pop(path, None)
@@ -842,7 +842,7 @@ async def unload_all_models(role: str = None):
 
     from src.ingestion.utils import cleanup_gpu
 
-    await asyncio.to_thread(cleanup_gpu)
+    cleanup_gpu()
     if torch.cuda.is_available():
         try:
             torch.cuda.ipc_collect()
@@ -852,14 +852,14 @@ async def unload_all_models(role: str = None):
 
 
 async def get_loaded_models():
-    with _lock:
+    async with _lock:
         return [
             path for path in _server_processes.keys() if _server_roles.get(path, "llm") == "llm"
         ]
 
 
 async def get_active_llm_url() -> str | None:
-    with _lock:
+    async with _lock:
         for path, process in _server_processes.items():
             if _server_roles.get(path) == "llm" and _proc_alive(process):
                 port = _server_ports.get(path)

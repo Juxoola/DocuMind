@@ -7,12 +7,12 @@
 до загрузки тестируемого модуля.
 """
 
+import asyncio
 import os
 import sys
 from unittest.mock import MagicMock, patch
 
 import pytest
-import asyncio
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 

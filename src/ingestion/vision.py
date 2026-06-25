@@ -53,7 +53,7 @@ async def get_vision_url(llm_settings, progress_cb=None):
     try:
         if progress_cb:
             progress_cb(60, "Запуск Vision-сервера (ленивая загрузка)...")
-        await asyncio.to_thread(cleanup_gpu)
+        cleanup_gpu()
 
         v_mmproj = llm_settings.get("vision_mmproj_path") or llm_settings.get("gguf_mmproj_path")
         g_path = config.resolve_model_path(v_model)
@@ -148,7 +148,7 @@ async def describe_image_with_lmstudio(
                     "cache_prompt": False,
                     "slot_id": -1,
                 }
-                client = get_async_http()
+                client = await get_async_http()
                 r = await client.post(
                     f"{existing_llm_url}/v1/chat/completions",
                     json=payload,
@@ -208,7 +208,7 @@ async def describe_image_with_lmstudio(
             ],
             "temperature": v_temp,
         }
-        client = get_async_http()
+        client = await get_async_http()
         r = await client.post(
             f"{api_url.rstrip('/')}/chat/completions",
             headers={"Authorization": f"Bearer {api_key}"},

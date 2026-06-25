@@ -44,45 +44,40 @@ async def _rebuild_bm25_bg(notebook_id: str, db_path: str, new_nodes: list = Non
                 f"{len(old_nodes)} кеш + {len(new_nodes)} новых = {len(full_corpus)} узлов"
             )
         else:
+            import chromadb as _chromadb
 
-            def _fetch_chroma_nodes():
-                import chromadb as _chromadb
-
-                tmp_client = _chromadb.PersistentClient(path=db_path)
-                collection = tmp_client.get_or_create_collection("multimodal_rag")
-                bm25_nodes = []
-                offset = 0
-                while True:
-                    result = collection.get(limit=_PAGE_SIZE, offset=offset)
-                    ids = result.get("ids", [])
-                    if not ids:
-                        break
-                    documents = result.get("documents", []) or []
-                    metadatas = result.get("metadatas", []) or []
-                    for i, doc_id in enumerate(ids):
-                        text = documents[i] if i < len(documents) else ""
-                        meta = metadatas[i] if i < len(metadatas) else {}
-                        if meta is None:
-                            meta = {}
-                        fname = meta.get("file_name", "")
-                        page = meta.get("page", "")
-                        t = meta.get("start", meta.get("time", ""))
-                        coord_parts = []
-                        if fname:
-                            coord_parts.append(str(fname))
-                        if page not in ("", None):
-                            coord_parts.append(f"стр.{page}")
-                        elif t not in ("", None):
-                            coord_parts.append(f"@{t}")
-                        if coord_parts:
-                            text = f"[{' '.join(coord_parts)}]: {text}"
-                        bm25_nodes.append(TextNode(text=text, id_=doc_id, metadata=meta))
-                    if len(ids) < _PAGE_SIZE:
-                        break
-                    offset += _PAGE_SIZE
-                return bm25_nodes
-
-            full_corpus = await asyncio.to_thread(_fetch_chroma_nodes)
+            tmp_client = _chromadb.PersistentClient(path=db_path)
+            collection = tmp_client.get_or_create_collection("multimodal_rag")
+            full_corpus = []
+            offset = 0
+            while True:
+                result = collection.get(limit=_PAGE_SIZE, offset=offset)
+                ids = result.get("ids", [])
+                if not ids:
+                    break
+                documents = result.get("documents", []) or []
+                metadatas = result.get("metadatas", []) or []
+                for i, doc_id in enumerate(ids):
+                    text = documents[i] if i < len(documents) else ""
+                    meta = metadatas[i] if i < len(metadatas) else {}
+                    if meta is None:
+                        meta = {}
+                    fname = meta.get("file_name", "")
+                    page = meta.get("page", "")
+                    t = meta.get("start", meta.get("time", ""))
+                    coord_parts = []
+                    if fname:
+                        coord_parts.append(str(fname))
+                    if page not in ("", None):
+                        coord_parts.append(f"стр.{page}")
+                    elif t not in ("", None):
+                        coord_parts.append(f"@{t}")
+                    if coord_parts:
+                        text = f"[{'. '.join(coord_parts)}]: {text}"
+                    full_corpus.append(TextNode(text=text, id_=doc_id, metadata=meta))
+                if len(ids) < _PAGE_SIZE:
+                    break
+                offset += _PAGE_SIZE
             logger.info(f"[RAG] BM25 холодная сборка из ChromaDB: {len(full_corpus)} узлов")
 
         if full_corpus:

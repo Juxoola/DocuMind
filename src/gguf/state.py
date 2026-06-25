@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
 import ctypes
 import logging
 import os
 import subprocess
-import threading
 from ctypes import wintypes
 
 import config
@@ -19,7 +19,7 @@ _server_processes: dict[str, subprocess.Popen] = {}
 _server_ports: dict[str, int] = {}
 _server_configs: dict[str, dict] = {}
 _server_roles: dict[str, str] = {}
-_lock = threading.RLock()
+_lock = asyncio.Lock()
 
 _llm_load_state: dict = {
     "state": "idle",
@@ -71,4 +71,4 @@ CACHE_TYPE_MAP = {
 
 _GGUF_CACHE_FILE = os.path.join(config.BASE_DIR, "_gguf_scan_cache.json")
 _GGUF_CACHE_TTL_SEC = 300.0
-_gguf_cache_lock = threading.Lock()
+_gguf_cache_lock = asyncio.Lock()

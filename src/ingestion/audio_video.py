@@ -119,33 +119,32 @@ async def unload_whisper_model():
 
 
 async def save_high_res_frame(video_path, time_sec, output_path):
+    try:
+        from imageio_ffmpeg import get_ffmpeg_exe
 
-    def _save():
-        try:
-            from imageio_ffmpeg import get_ffmpeg_exe
-
-            cmd = [
-                get_ffmpeg_exe(),
-                "-y",
-                "-hwaccel",
-                "cuda",
-                "-ss",
-                str(time_sec),
-                "-i",
-                video_path,
-                "-vframes",
-                "1",
-                "-vf",
-                "scale=-2:720",
-                "-q:v",
-                "4",
-                output_path,
-            ]
-            subprocess.run(cmd, capture_output=True, timeout=30)
-        except Exception as e:
-            logger.warning(f"Ошибка FFmpeg при сохранении кадра: {e}")
-
-    await asyncio.to_thread(_save)
+        cmd = [
+            get_ffmpeg_exe(),
+            "-y",
+            "-hwaccel",
+            "cuda",
+            "-ss",
+            str(time_sec),
+            "-i",
+            video_path,
+            "-vframes",
+            "1",
+            "-vf",
+            "scale=-2:720",
+            "-q:v",
+            "4",
+            output_path,
+        ]
+        proc = await asyncio.create_subprocess_exec(
+            *cmd, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL
+        )
+        await asyncio.wait_for(proc.wait(), timeout=30)
+    except Exception as e:
+        logger.warning(f"Ошибка FFmpeg при сохранении кадра: {e}")
 
 
 async def process_audio_video(

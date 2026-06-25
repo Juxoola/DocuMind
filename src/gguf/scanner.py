@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 async def _dir_mtime(root: str) -> float:
 
     try:
-        st = await asyncio.to_thread(os.stat, root)
+        st = await aiofiles.os.stat(root)
         return st.st_mtime
     except OSError:
         return 0.0
@@ -101,7 +101,7 @@ async def scan_gguf_dirs() -> list[dict]:
             tmp = _GGUF_CACHE_FILE + ".tmp"
             async with aiofiles.open(tmp, "w", encoding="utf-8") as f:
                 await f.write(orjson.dumps(payload).decode())
-            await asyncio.to_thread(os.replace, tmp, _GGUF_CACHE_FILE)
+            await aiofiles.os.replace(tmp, _GGUF_CACHE_FILE)
         except Exception as e:
             logger.warning(f"не удалось сохранить scan cache: {e}")
         return results

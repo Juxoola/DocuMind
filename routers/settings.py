@@ -1,6 +1,5 @@
 """Роутер: настройки RAG и GGUF."""
 
-import asyncio
 import logging
 import os
 
@@ -131,7 +130,7 @@ async def update_rag_config(req: UpdateRagConfigRequest):
         except Exception as e:
             logger.warning(f"[Settings] Ошибка предзагрузки моделей: {e}")
     else:
-        await asyncio.to_thread(unload_rag_models, hard=True)
+        unload_rag_models(hard=True)
         config.resolve_model_path.cache_clear()
 
     return {"status": "ok"}

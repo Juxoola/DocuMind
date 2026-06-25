@@ -190,11 +190,9 @@ async def ensure_720p_video(file_path, prog_cb=None, cancel_check=None, notebook
         if prog_cb:
             prog_cb(8, "Сборка сегментов...")
         list_path = os.path.join(temp_dir, "list.txt")
-        def _write_concat_list():
-            with open(list_path, "w") as f:
-                for p in parts:
-                    f.write(f"file '{os.path.abspath(p)}'\n")
-        await asyncio.to_thread(_write_concat_list)
+        async with aiofiles.open(list_path, "w") as f:
+            for p in parts:
+                await f.write(f"file '{os.path.abspath(p)}'\n")
         merge_cmd = [
             ffmpeg,
             "-y",
