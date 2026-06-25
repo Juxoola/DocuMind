@@ -1,3 +1,4 @@
+// Тултип-цитата: кнопка [N] и всплывающее окно с текстом источника.
 import React, { useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';

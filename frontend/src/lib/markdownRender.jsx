@@ -1,3 +1,4 @@
+// Рендер markdown-сообщений LLM: цитаты [N], LaTeX, блоки кода.
 import React, { useState, useRef, useEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';

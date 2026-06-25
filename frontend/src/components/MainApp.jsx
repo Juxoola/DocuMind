@@ -1,3 +1,4 @@
+// Основной layout: боковая панель + чат + просмотрщик документов.
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import Sidebar from './Sidebar';

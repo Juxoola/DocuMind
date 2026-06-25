@@ -1,3 +1,4 @@
+// Основная область чата: ввод, стриминг, рендер сообщений, закладки.
 import React, { useState, useRef, useEffect, lazy, Suspense } from 'react';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';

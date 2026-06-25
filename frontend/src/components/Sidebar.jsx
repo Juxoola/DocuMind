@@ -1,3 +1,4 @@
+// Боковая панель: список файлов, загрузка, состояние ingestion.
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {

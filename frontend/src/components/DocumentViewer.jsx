@@ -1,3 +1,4 @@
+// Просмотрщик документов: PDF, изображения, видео, аудио, текст.
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { X, FileText, Play, Image as ImageIcon, Clock, AlertCircle, Download, ChevronDown } from 'lucide-react';

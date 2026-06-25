@@ -1,3 +1,4 @@
+// Корневой компонент: переключение между выбором блокнота и основным приложением.
 import React, { useState } from 'react';
 import NotebookSelector from './components/NotebookSelector';
 import MainApp from './components/MainApp';

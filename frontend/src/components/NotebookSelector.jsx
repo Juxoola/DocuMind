@@ -1,3 +1,4 @@
+// Выбор блокнота: список, поиск, сортировка, создание/удаление.
 import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { Plus, Trash2, Book, Clock } from 'lucide-react';

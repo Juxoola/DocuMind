@@ -1,3 +1,4 @@
+// Граница ошибок: перехват uncaught exceptions, UI с кнопкой сброса.
 import React from 'react';
 
 class ErrorBoundary extends React.Component {

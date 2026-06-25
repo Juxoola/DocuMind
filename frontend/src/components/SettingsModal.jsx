@@ -1,3 +1,4 @@
+// Модалка настроек: LLM, RAG, GGUF-модели, конфигурация.
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, Save, Globe, Key, Cpu, HardDrive, Server, RefreshCw, FolderOpen, ChevronDown, ChevronRight, Zap, Filter, MessageSquare, Database, Search } from 'lucide-react';
