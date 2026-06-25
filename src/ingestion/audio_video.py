@@ -87,7 +87,6 @@ async def get_or_load_whisper(
         import whisperx
 
         logger.info(f"[WhisperX] Загрузка модели {model_name} ({device}, {compute_type})...")
-        # Подавляем DEBUG от speechbrain/lightning при первом импорте
         logging.disable(logging.INFO)
         try:
             model = whisperx.load_model(
@@ -106,7 +105,6 @@ async def get_or_load_whisper(
 
 
 async def unload_whisper_model():
-    """Unload all cached WhisperX models and free GPU memory."""
 
     def _unload():
         with _whisper_lock:
@@ -120,7 +118,6 @@ async def unload_whisper_model():
 
 
 async def save_high_res_frame(video_path, time_sec, output_path):
-    """Extract a single high-res frame via ffmpeg (runs in a thread)."""
 
     def _save():
         try:
@@ -350,10 +347,10 @@ async def process_audio_video(
             if notebook_id is not None:
                 unregister_subprocess(notebook_id, process)
 
-        # Освобождаем numpy-views и raw-буферы ffmpeg
         last_seen_thumb = None
         prev_saved_thumb = None
         import gc
+
         gc.collect()
 
         n = len(frame_list)
@@ -380,7 +377,7 @@ async def process_audio_video(
                 results.append((idx, path, t, desc))
 
         try:
-            # Батчи по 20 кадров — между батчами перезапускаем vision-сервер для очистки CUDA
+            # Батчи по 20 кадров: между батчами перезапускаем vision для очистки CUDA memory pool
             for batch_start in range(0, n, VISION_BATCH_SIZE):
                 if _is_cancelled():
                     raise IngestionCancelled(f"Cancelled at batch {batch_start}")
@@ -391,11 +388,13 @@ async def process_audio_video(
                 ]
                 await asyncio.gather(*batch_tasks)
 
-                # Перезапуск vision-сервера между батчами для очистки CUDA memory pool
                 if batch_end < n:
-                    logger.info(f"[Vision] Батч {batch_start+1}-{batch_end}/{n} готов, перезапуск vision-сервера...")
+                    logger.info(
+                        f"[Vision] Батч {batch_start + 1}-{batch_end}/{n} готов, перезапуск vision-сервера..."
+                    )
                     await unload_all_models(role="vision")
                     import gc
+
                     gc.collect()
                     await asyncio.sleep(1)
                     shared_llm_url = await get_vision_url(llm_settings)
@@ -435,6 +434,7 @@ async def process_audio_video(
         # Освобождаем память после обработки всех кадров
         results.clear()
         import gc
+
         gc.collect()
 
         if shared_llm_url and not keep_vision_alive:

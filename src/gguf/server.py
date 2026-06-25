@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 
 
 def _proc_alive(proc) -> bool:
-    """Check if process is still running. Works for both sync Popen and async Process."""
+
     if hasattr(proc, "poll"):
         return proc.poll() is None
     return proc.returncode is None
@@ -528,9 +528,7 @@ async def get_gguf_embedding_url(
     else:
         cmd.extend(["--reranking"])
 
-    # SemanticSplitterNodeParser может дать чанки до ~4000 токенов.
-    # Ранее min_ctx_per_slot=2048 давал при parallel=2 лишь 2048 на слот →
-    # BadRequestError: request exceeds available context size.
+    # SemanticSplitterNodeParser даёт чанки до ~4000 токенов → min_ctx_per_slot=4096
     min_ctx_per_slot = 4096
     ctx = str(max(4096, n_parallel * min_ctx_per_slot))
     if is_reranker:
@@ -636,20 +634,33 @@ async def get_vision_server(
     total_ctx = current_config["ctx_size"] * current_config["n_parallel"]
     cmd = [
         SERVER_EXE,
-        "-m", gguf_path,
-        "--port", str(port),
-        "-c", str(total_ctx),
-        "-ngl", str(current_config["gpu_layers"]),
-        "-b", str(current_config["n_batch"]),
-        "-ub", str(current_config["n_ubatch"]),
-        "--parallel", str(current_config["n_parallel"]),
+        "-m",
+        gguf_path,
+        "--port",
+        str(port),
+        "-c",
+        str(total_ctx),
+        "-ngl",
+        str(current_config["gpu_layers"]),
+        "-b",
+        str(current_config["n_batch"]),
+        "-ub",
+        str(current_config["n_ubatch"]),
+        "--parallel",
+        str(current_config["n_parallel"]),
         "--jinja",
-        "--cache-type-k", "q4_0",
-        "--cache-type-v", "q4_0",
-        "-n", "2048",
-        "--reasoning", "off",
-        "--reasoning-format", "none",
-        "--reasoning-budget", "0",
+        "--cache-type-k",
+        "q4_0",
+        "--cache-type-v",
+        "q4_0",
+        "-n",
+        "2048",
+        "--reasoning",
+        "off",
+        "--reasoning-format",
+        "none",
+        "--reasoning-budget",
+        "0",
     ]
 
     if current_config["flash_attn"]:
@@ -660,7 +671,9 @@ async def get_vision_server(
 
     if current_config.get("mmproj") and os.path.exists(current_config["mmproj"]):
         cmd.extend(["--mmproj", os.path.normpath(current_config["mmproj"])])
-        logger.info(f"[GGUF Server] Vision с поддержкой mmproj: {os.path.basename(current_config['mmproj'])}")
+        logger.info(
+            f"[GGUF Server] Vision с поддержкой mmproj: {os.path.basename(current_config['mmproj'])}"
+        )
 
     cmd.extend(["--metrics"])
 
@@ -819,7 +832,6 @@ async def unload_all_models(role: str = None):
                     await asyncio.wait_for(process.wait(), timeout=10)
                 except Exception:
                     pass
-                # Ждём пока ОС реально освободит память
                 for _ in range(10):
                     if not _proc_alive(process):
                         break

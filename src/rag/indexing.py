@@ -17,20 +17,15 @@ from src.rag.state import _CLIENT_CACHE_MAXSIZE, _client_cache, _client_cache_lo
 logger = logging.getLogger(__name__)
 
 
-# Макс. символов на чанк для embedding — страховка от превышения контекста.
-# При min_ctx_per_slot=4096 и ~4 символах/токен → ~16000 символов,
-# но ставим запас 12000 (≈3000 токенов для смешанного RU/EN текста).
+# Макс. символов на чанк для embedding — запас 12000 (≈3000 токенов) от лимита контекста
 _MAX_EMBED_CHARS = 12000
 
 
-# Построение векторного индекса из nodes и запуск фоновой
-# пересборки BM25. Вызывается после обработки загруженного файла.
+# Построение векторного индекса из nodes и запуск фоновой пересборки BM25
 async def build_index(nodes, notebook_id: str):
     await init_settings()
 
-    # Defensive truncate: обрезаем чанки, превышающие лимит embedding-контекста.
-    # SemanticSplitterNodeParser может дать чанки >4000 токенов, что ломает
-    # GGUF embedding сервер (exceeds context size).
+    # Defensive truncate: обрезаем чанки > лимита embedding-контекста (SemanticSplitter даёт >4000 токенов)
     for node in nodes:
         if len(node.text) > _MAX_EMBED_CHARS:
             logger.warning(

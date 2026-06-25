@@ -186,13 +186,6 @@ async def upload_file(
             from src.rag.indexing import build_index
 
             async def _run_pipeline():
-                """Единый async-пайплайн: ingest + index на одном event loop.
-
-                Ранее asyncio.run() вызывался дважды (ingest, затем index),
-                что ломало httpx.AsyncClient: транспорт привязывался к первому
-                loop, а второй asyncio.run() создавал новый — клиент
-                оказывался на закрытом loop → 'Event loop is closed'.
-                """
                 nodes = await ingest_file(
                     file_path,
                     notebook_id,
@@ -391,7 +384,6 @@ async def delete_file(filename: str, notebook_id: str):
                     if i < 4:
                         await asyncio.sleep(1)
                         continue
-                    # Fallback: переименовываем и удаляем (обходит лок Windows)
                     try:
                         tmp = fp + f".del{i}"
                         await aiofiles.os.rename(fp, tmp)
@@ -435,14 +427,12 @@ async def get_source_content(filename: str, notebook_id: str):
 
     # Для PDF — чередование текста страниц и описаний изображений
     if ext == ".pdf":
-        text = await asyncio.to_thread(
-            _build_interleaved_text, file_path, paths["data"], filename
-        )
+        text = await asyncio.to_thread(_build_interleaved_text, file_path, paths["data"], filename)
         if text:
             return {"text": text}
-    # Для остальных — ChromaDB
     try:
         from src.rag.indexing import get_vector_store
+
         vector_store = await get_vector_store(notebook_id)
         collection = vector_store._collection
         result = await asyncio.to_thread(collection.get, where={"file_name": filename})
@@ -455,7 +445,7 @@ async def get_source_content(filename: str, notebook_id: str):
 
 
 def _extract_pdf_text(file_path: str) -> list[str]:
-    """Extract text from PDF page by page."""
+
     import fitz
 
     doc = fitz.open(file_path)
@@ -465,9 +455,8 @@ def _extract_pdf_text(file_path: str) -> list[str]:
 
 
 def _build_interleaved_text(file_path: str, data_dir: str, filename: str) -> str:
-    """Interleave PDF page text with image descriptions from sidecar JSON."""
+
     pages = _extract_pdf_text(file_path)
-    # Загружаем описания из sidecar JSON
     descriptions: dict[int, str] = {}
     json_path = os.path.join(data_dir, f"{filename}.json")
     if os.path.exists(json_path):
@@ -478,8 +467,6 @@ def _build_interleaved_text(file_path: str, data_dir: str, filename: str) -> str
             page = frame.get("page")
             if desc and page is not None:
                 descriptions[int(page)] = desc
-    # Чередуем: текст страницы → описание (если есть)
-    # Нумерация страниц в JSON начинается с 1, enumerate — с 0
     parts = []
     for i, page_text in enumerate(pages):
         page_num = i + 1
@@ -496,7 +483,7 @@ def _build_interleaved_text(file_path: str, data_dir: str, filename: str) -> str
 
 
 def _extract_text_from_file(file_path: str, ext: str) -> str:
-    """Extract text directly from file — faster than ChromaDB for large docs."""
+
     if not os.path.exists(file_path):
         return ""
     try:
@@ -544,7 +531,7 @@ blockquote { border-left: 3px solid #999; padding-left: 12px; color: #555; }
 
 
 def _build_pdf(title: str, text: str) -> bytes:
-    """Markdown → HTML → PDF via PyMuPDF Story API."""
+
     import fitz
     import markdown
 
@@ -574,7 +561,6 @@ def _build_pdf(title: str, text: str) -> bytes:
         with open(compressed_path, "rb") as f:
             pdf_bytes = f.read()
 
-
     finally:
         for _f in (out_path, compressed_path):
             try:
@@ -585,18 +571,19 @@ def _build_pdf(title: str, text: str) -> bytes:
 
 
 def _content_disposition(name: str, ext: str) -> str:
-    """RFC 5987 Content-Disposition: supports non-ASCII filenames."""
+
     from urllib.parse import quote
+
     full = f"{name}.{ext}"
     encoded = quote(full)
     # ASCII fallback: non-ASCII chars replaced with _
     ascii_safe = full.encode("ascii", "replace").decode().replace("?", "_")
-    return f'attachment; filename="{ascii_safe}"; filename*=UTF-8\'\'{encoded}'
+    return f"attachment; filename=\"{ascii_safe}\"; filename*=UTF-8''{encoded}"
 
 
 @router.get("/api/export_text")
 async def export_text(filename: str, notebook_id: str, fmt: str = "txt"):
-    """Export extracted text/transcript/description as downloadable file."""
+
     filename = safe_filename(filename)
     ext = os.path.splitext(filename)[1].lower()
     is_video = ext in (".mp4", ".avi", ".mov", ".mkv")
@@ -608,7 +595,6 @@ async def export_text(filename: str, notebook_id: str, fmt: str = "txt"):
     stem = os.path.splitext(filename)[0]
 
     if is_media or is_image:
-        # Читаем транскрипт/описание из sidecar JSON
         paths = config.get_notebook_paths(notebook_id)
         json_path = os.path.join(paths["data"], f"{filename}.json")
         if os.path.exists(json_path):
@@ -644,7 +630,6 @@ async def export_text(filename: str, notebook_id: str, fmt: str = "txt"):
         if not text:
             text = f"Содержимое {filename} не найдено."
 
-    # Формируем ответ
     base_name = stem
     ext_map = {"pdf": "pdf", "md": "md"}
     file_ext = ext_map.get(fmt, "txt")

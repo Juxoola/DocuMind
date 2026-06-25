@@ -82,8 +82,7 @@ EMBEDDING_MODEL_NAME = os.getenv("EMBEDDING_MODEL_NAME", "Qwen3-Embedding-0.6B-Q
 RERANKER_MODEL_NAME = os.getenv("RERANKER_MODEL_NAME", "qwen3-reranker-0.6b-q8_0.gguf")
 EMBEDDING_N_PARALLEL = int(os.getenv("EMBEDDING_N_PARALLEL", "2"))
 
-# Параметры RAG-пайплайна: сколько чанков искать на файл (top_k),
-# пул для реранкера, итоговое число, пороговые фильтры.
+# Параметры RAG-пайплайна: top_k, пул реранкера, итоговое число, пороговые фильтры
 RAG_TOP_K_PER_FILE = int(os.getenv("RAG_TOP_K_PER_FILE", 5))
 RAG_RERANK_POOL = int(os.getenv("RAG_RERANK_POOL", 30))
 RAG_FINAL_TOP_N = int(os.getenv("RAG_FINAL_TOP_N", 15))
@@ -166,9 +165,7 @@ def _load_config_sync():
 _load_config_sync()
 
 
-# Поиск GGUF-файла: сначала абсолютный путь, потом по имени через
-# gguf_manager, затем рекурсивный обход GGUF_SEARCH_DIRS.
-# Результат кешируется (lru_cache на 64 записи).
+# Поиск GGUF-файла: абсолютный путь → имя через gguf_manager → обход GGUF_SEARCH_DIRS (lru_cache)
 @lru_cache(maxsize=64)
 def resolve_model_path(path_or_filename: str) -> str:
     if not path_or_filename:

@@ -128,7 +128,7 @@ async def find_gguf_by_name(filename: str) -> str | None:
 
 
 def find_gguf_by_name_sync(filename: str) -> str | None:
-    """Sync-версия для вызова из sync-контекстов (config.resolve_model_path)."""
+
     if not filename:
         return None
     name = os.path.basename(filename)

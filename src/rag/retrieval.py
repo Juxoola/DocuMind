@@ -12,6 +12,7 @@ import time as _time
 async def _empty_list():
     return []
 
+
 import httpx
 import numpy as np
 from llama_index.core import QueryBundle, Settings, VectorStoreIndex
@@ -39,17 +40,15 @@ from src.rag.state import (
 
 logger = logging.getLogger(__name__)
 
-# Переиспользуемые HTTP-клиенты для реранкинга (избегают нового TCP-подключения на каждый вызов)
+# Переиспользуемые HTTP-клиенты для реранкинга и кэш проверки работоспособности LLM
 _async_rerank_http = httpx.AsyncClient(timeout=60)
 
-# Кэш проверки работоспособности LLM: url -> (is_healthy, timestamp)
 _qe_health_cache: dict[str, tuple[bool, float]] = {}
 _qe_health_cache_lock = threading.Lock()
 _QE_HEALTH_TTL = 30.0
 
 
 async def _is_llm_healthy(url: str) -> bool:
-    """Проверка работоспособности LLM с кэшем TTL 30 сек для избежания overhead на каждый запрос."""
     now = _time.time()
     with _qe_health_cache_lock:
         cached = _qe_health_cache.get(url)
@@ -562,11 +561,6 @@ def _filter_chunks(all_nodes):
             all_nodes = above_ratio
 
     return all_nodes
-
-
-# ---------------------------------------------------------------------------
-# Оркестратор
-# ---------------------------------------------------------------------------
 
 
 # Гибридный поиск: векторный (ChromaDB) + BM25 со слиянием по взаимному рангу (RRF), опциональный реранкинг через GGUF
