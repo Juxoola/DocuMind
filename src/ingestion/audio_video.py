@@ -7,6 +7,7 @@ import subprocess
 import threading
 import uuid
 
+import aiofiles
 import cv2
 import numpy as np
 import orjson
@@ -267,8 +268,9 @@ async def process_audio_video(
             "pipe:1",
         ]
 
-        process = await asyncio.to_thread(
-            lambda: subprocess.Popen(cmd, stdout=subprocess.PIPE, bufsize=10**7)
+        process = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
         )
         if notebook_id is not None:
             register_subprocess(notebook_id, process)
@@ -293,8 +295,7 @@ async def process_audio_video(
                     raise IngestionCancelled(
                         f"Cancelled during frame extraction at {format_seconds(current_sec)}"
                     )
-                frame_counter += 1
-                raw_frame = await asyncio.to_thread(process.stdout.read, chunk_size)
+                raw_frame = await process.stdout.read(chunk_size)
                 if not raw_frame or len(raw_frame) != chunk_size:
                     break
                 thumb = np.frombuffer(raw_frame, dtype="uint8").reshape(
@@ -343,7 +344,7 @@ async def process_audio_video(
         finally:
             process.stdout.close()
             process.kill()
-            process.wait(timeout=30)
+            await asyncio.wait_for(process.wait(), timeout=30)
             if notebook_id is not None:
                 unregister_subprocess(notebook_id, process)
 
@@ -447,11 +448,7 @@ async def process_audio_video(
         "frames": frame_data,
     }
 
-    def _write_metadata():
-        with open(
-            os.path.join(os.path.dirname(file_path), f"{file_name}.json"), "w", encoding="utf-8"
-        ) as f:
-            f.write(orjson.dumps(metadata_json, option=orjson.OPT_INDENT_2).decode())
-
-    await asyncio.to_thread(_write_metadata)
+    metadata_path = os.path.join(os.path.dirname(file_path), f"{file_name}.json")
+    async with aiofiles.open(metadata_path, "w", encoding="utf-8") as f:
+        await f.write(orjson.dumps(metadata_json, option=orjson.OPT_INDENT_2).decode())
     return nodes

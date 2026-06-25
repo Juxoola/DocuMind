@@ -4,12 +4,12 @@ import asyncio
 import logging
 import os
 
-import config
 import orjson
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
+import config
 from src.gguf.scanner import scan_gguf_dirs
 from src.gguf.server import (
     count_running_servers,
@@ -35,13 +35,13 @@ async def api_scan_gguf_models():
 
 @router.get("/api/gguf-loaded")
 async def api_gguf_loaded_models():
-    loaded = get_loaded_models()
+    loaded = await get_loaded_models()
     return {"loaded_models": [os.path.basename(p) for p in loaded]}
 
 
 @router.get("/api/gguf-status")
 async def api_gguf_status():
-    count = count_running_servers()
+    count = await count_running_servers()
     return {"running_count": count}
 
 
@@ -214,13 +214,13 @@ async def api_preload_llm(request: PreloadLlmRequest):
 
 @router.get("/api/llm-status")
 async def api_llm_status():
-    return get_llm_status()
+    return await get_llm_status()
 
 
 @router.get("/api/context-usage")
 async def api_context_usage():
     try:
-        st = get_llm_status()
+        st = await get_llm_status()
         port = st.get("port")
         state = st.get("state")
         if not port or state not in ("ready", "loading"):
@@ -279,7 +279,7 @@ async def api_llm_status_stream():
         last_key = None
         try:
             while True:
-                st = get_llm_status()
+                st = await get_llm_status()
                 key = (st.get("state"), st.get("phase"), st.get("port"), st.get("error"))
                 if key != last_key:
                     payload = orjson.dumps(st).decode()

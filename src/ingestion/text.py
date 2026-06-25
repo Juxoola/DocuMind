@@ -5,6 +5,7 @@ import logging
 import os
 import uuid
 
+import aiofiles
 import fitz
 import orjson
 from llama_index.core.schema import TextNode
@@ -171,9 +172,7 @@ async def process_pdf(
                     tasks = []
                     for page_num in range(batch_start, batch_end):
                         tasks.append(
-                            _analyze_and_build_page(
-                                page_num, doc, images_dir, file_name, splitter
-                            )
+                            _analyze_and_build_page(page_num, doc, images_dir, file_name, splitter)
                         )
                     return await asyncio.gather(*tasks)
 
@@ -227,9 +226,12 @@ async def process_pdf(
                     await asyncio.gather(*[_describe_frame(f) for f in batch])
 
                     if batch_end < n:
-                        logger.info(f"[Vision] Батч {batch_start+1}-{batch_end}/{n} готов, перезапуск vision...")
+                        logger.info(
+                            f"[Vision] Батч {batch_start + 1}-{batch_end}/{n} готов, перезапуск vision..."
+                        )
                         await unload_all_models(role="vision")
                         import gc
+
                         gc.collect()
                         await asyncio.sleep(1)
                         shared_llm_url = await get_vision_url(llm_settings)
@@ -240,9 +242,7 @@ async def process_pdf(
                 results.sort(key=lambda x: x[0]["page"])
                 for frame_info, desc in results:
                     if desc and "Изображение без описания" not in desc:
-                        full_text = (
-                            f"Изображение PDF {file_name} стр {frame_info['page']}: {desc}"
-                        )
+                        full_text = f"Изображение PDF {file_name} стр {frame_info['page']}: {desc}"
                         if len(full_text) <= config.GGUF_CTX_EMBED_CHARS:
                             nodes.append(
                                 TextNode(
@@ -284,6 +284,7 @@ async def process_pdf(
             # Освобождаем память после обработки всех страниц
             results.clear()
             import gc
+
             gc.collect()
 
             if shared_llm_url and not keep_vision_alive:
@@ -298,13 +299,9 @@ async def process_pdf(
                 "frames": frame_data,
             }
 
-            def _write_metadata():
-                with open(
-                    os.path.join(os.path.dirname(file_path), f"{file_name}.json"), "w", encoding="utf-8"
-                ) as f:
-                    f.write(orjson.dumps(metadata_json, option=orjson.OPT_INDENT_2).decode())
-
-            await asyncio.to_thread(_write_metadata)
+            metadata_path = os.path.join(os.path.dirname(file_path), f"{file_name}.json")
+            async with aiofiles.open(metadata_path, "w", encoding="utf-8") as f:
+                await f.write(orjson.dumps(metadata_json, option=orjson.OPT_INDENT_2).decode())
     finally:
         doc.close()
     return nodes
@@ -346,7 +343,7 @@ async def _convert_via_libreoffice(file_path):
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
     )
-    stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=120)
+    _stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=120)
     pdf_path = os.path.splitext(file_path)[0] + ".pdf"
     if proc.returncode == 0 and os.path.exists(pdf_path):
         logger.info(f"[DOCX] Сконвертировано в PDF через LibreOffice: {os.path.basename(pdf_path)}")
@@ -465,7 +462,9 @@ async def _process_pptx_textonly(file_path, file_name):
             for i, slide in enumerate(prs.slides):
                 text = "\n".join([sh.text for sh in slide.shapes if hasattr(sh, "text")])
                 if text.strip():
-                    nodes.append(TextNode(text=text, metadata={"file_name": file_name, "page": i + 1}))
+                    nodes.append(
+                        TextNode(text=text, metadata={"file_name": file_name, "page": i + 1})
+                    )
             if nodes:
                 logger.info(f"[PPTX] Fallback: {len(nodes)} слайдов через python-pptx (без Vision)")
                 return nodes

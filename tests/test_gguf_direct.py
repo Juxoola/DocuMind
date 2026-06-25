@@ -169,7 +169,7 @@ class TestLlmLoadState:
         """get_llm_status возвращает все ключи."""
         from src.gguf.server import get_llm_status
 
-        status = get_llm_status()
+        status = asyncio.run(get_llm_status())
         for key in ("state", "phase", "model", "port", "error"):
             assert key in status, f"Ключ '{key}' отсутствует в get_llm_status()"
 
@@ -221,9 +221,7 @@ class TestServerReady:
             from unittest.mock import AsyncMock
 
             mock_ctx = AsyncMock()
-            mock_ctx.__aenter__.return_value.get = AsyncMock(
-                side_effect=TimeoutError("timeout")
-            )
+            mock_ctx.__aenter__.return_value.get = AsyncMock(side_effect=TimeoutError("timeout"))
             MockAC.return_value = mock_ctx
             from src.gguf.server import is_server_ready
 

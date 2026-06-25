@@ -177,12 +177,11 @@ async def _start_llm_server_sync(gguf_path: str, mmproj_path: str, current_confi
     raise TimeoutError("Сервер не ответил за 60 секунд")
 
 
-def unload_rag_models_safe():
-
+async def unload_rag_models_safe():
     try:
         from src.rag.models import unload_rag_models
 
-        unload_rag_models(hard=False)
+        await asyncio.to_thread(unload_rag_models, hard=False)
     except Exception:
         pass
 
@@ -306,8 +305,8 @@ async def get_gguf_llm(
             }
         )
         _server_configs[gguf_path] = current_config
-        unload_rag_models_safe()
 
+    await unload_rag_models_safe()
     await unload_all_models(role="llm")
 
     if not os.path.exists(gguf_path):
@@ -426,7 +425,7 @@ async def preload_gguf_llm(
         try:
             with _lock:
                 _llm_load_state["phase"] = "starting"
-            unload_rag_models_safe()
+            await unload_rag_models_safe()
             await unload_all_models(role="llm")
             if not os.path.exists(gguf_path):
                 raise FileNotFoundError(f"GGUF модель не найдена: {gguf_path}")
@@ -458,8 +457,7 @@ async def preload_gguf_llm(
     return {"status": "loading", "task_id": task_id, "model": os.path.basename(gguf_path)}
 
 
-def get_llm_status() -> dict:
-
+async def get_llm_status() -> dict:
     with _lock:
         state = _llm_load_state.copy()
     if state.get("started_at") and state.get("state") == "loading":
@@ -506,7 +504,7 @@ async def get_gguf_embedding_url(
             else:
                 logger.info(f"[GGUF Server] Перезапуск {role} {os.path.basename(gguf_path)}...")
 
-        unload_rag_models_safe()
+        await unload_rag_models_safe()
 
     await unload_all_models(role=role)
 
@@ -724,8 +722,7 @@ async def get_vision_server(
     raise TimeoutError("Vision-сервер не ответил за 60 секунд")
 
 
-def get_active_embedding_parallel(gguf_path: str = None) -> int:
-
+async def get_active_embedding_parallel(gguf_path: str = None) -> int:
     with _lock:
         if gguf_path:
             cfg = _server_configs.get(gguf_path)
@@ -774,8 +771,7 @@ async def kill_stray_servers():
             logger.debug(f"[GGUF Server] Не удалось остановить {os.path.basename(path)}: {e}")
 
 
-def count_running_servers() -> int:
-
+async def count_running_servers() -> int:
     with _lock:
         alive = 0
         for path, proc in _server_processes.items():
@@ -857,14 +853,14 @@ async def unload_all_models(role: str = None):
     await asyncio.sleep(0.1)
 
 
-def get_loaded_models():
+async def get_loaded_models():
     with _lock:
         return [
             path for path in _server_processes.keys() if _server_roles.get(path, "llm") == "llm"
         ]
 
 
-def get_active_llm_url() -> str | None:
+async def get_active_llm_url() -> str | None:
     with _lock:
         for path, process in _server_processes.items():
             if _server_roles.get(path) == "llm" and _proc_alive(process):

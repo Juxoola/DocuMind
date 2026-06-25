@@ -12,9 +12,11 @@ from llama_index.vector_stores.chroma import ChromaVectorStore
 import config
 from src.rag.bm25 import _schedule_bm25_rebuild
 from src.rag.models import init_settings
-from src.rag.state import _CLIENT_CACHE_MAXSIZE, _client_cache, _client_cache_lock
+from src.rag.state import _CLIENT_CACHE_MAXSIZE, _client_cache
 
 logger = logging.getLogger(__name__)
+
+_client_cache_lock = asyncio.Lock()
 
 
 # Макс. символов на чанк для embedding — запас 12000 (≈3000 токенов) от лимита контекста
@@ -53,7 +55,7 @@ async def get_vector_store(notebook_id: str):
     paths = config.get_notebook_paths(notebook_id)
     db_path = paths["chroma_db"]
 
-    with _client_cache_lock:
+    async with _client_cache_lock:
         if db_path in _client_cache:
             _client_cache.move_to_end(db_path)
             _, vector_store = _client_cache[db_path]
@@ -75,7 +77,7 @@ async def get_vector_store(notebook_id: str):
     db, chroma_collection = await asyncio.to_thread(_create_chroma_client)
     vector_store = ChromaVectorStore(chroma_collection=chroma_collection)
 
-    with _client_cache_lock:
+    async with _client_cache_lock:
         if db_path in _client_cache:
             try:
                 db.close()
@@ -89,9 +91,9 @@ async def get_vector_store(notebook_id: str):
     return vector_store
 
 
-def close_all_clients():
+async def close_all_clients():
     global _client_cache
-    with _client_cache_lock:
+    async with _client_cache_lock:
         for path, (client, _) in _client_cache.items():
             try:
                 client.close()
@@ -100,12 +102,12 @@ def close_all_clients():
         _client_cache.clear()
 
 
-def close_notebook_client(notebook_id: str):
+async def close_notebook_client(notebook_id: str):
     global _client_cache
     from config import get_notebook_paths
 
     db_path = get_notebook_paths(notebook_id)["chroma_db"]
-    with _client_cache_lock:
+    async with _client_cache_lock:
         entry = _client_cache.pop(db_path, None)
     if entry is not None:
         client, _ = entry

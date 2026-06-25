@@ -61,19 +61,19 @@ def client():
     # ── 2. Внешние пакеты — только sys.modules ──
     with patch.dict(sys.modules, _HEAVY_PACKAGES, clear=False):
         # ── 3. Проектные модули — импортируем и назначаем атрибуты ──
+        from unittest.mock import AsyncMock
+
         import src.rag.bm25
         import src.rag.indexing
         import src.rag.models
         import src.rag.prompt
         import src.rag.retrieval
 
-        from unittest.mock import AsyncMock
-
         src.rag.retrieval.retrieve_nodes = MagicMock(return_value=[])
         src.rag.prompt.build_file_context = MagicMock(return_value=([], ""))
         src.rag.prompt.make_prompt = MagicMock(return_value="prompt")
         src.rag.indexing.build_index = AsyncMock()
-        src.rag.indexing.close_all_clients = MagicMock()
+        src.rag.indexing.close_all_clients = AsyncMock()
         src.rag.models.preload_all_models = MagicMock()
         src.rag.models.unload_rag_models = AsyncMock()
         src.rag.indexing.get_vector_store = AsyncMock()
@@ -87,11 +87,11 @@ def client():
         src.gguf.server.preload_gguf_llm = AsyncMock(
             return_value={"status": "ready", "port": 49152}
         )
-        src.gguf.server.get_llm_status = MagicMock(return_value={"state": "idle", "port": None})
+        src.gguf.server.get_llm_status = AsyncMock(return_value={"state": "idle", "port": None})
         src.gguf.server.unload_all_models = AsyncMock()
         src.gguf.server.kill_stray_servers = AsyncMock()
-        src.gguf.server.count_running_servers = MagicMock(return_value=0)
-        src.gguf.server.get_loaded_models = MagicMock(return_value=[])
+        src.gguf.server.count_running_servers = AsyncMock(return_value=0)
+        src.gguf.server.get_loaded_models = AsyncMock(return_value=[])
         src.gguf.models = MagicMock()
         src.gguf.models.detect_model_family = MagicMock(return_value="qwen")
         src.gguf.streaming = MagicMock()

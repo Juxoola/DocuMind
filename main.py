@@ -1,10 +1,10 @@
 """DocuMind — основной модуль."""
 
+import asyncio
 import logging
 import os
 import re
 import sys
-import threading
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -70,7 +70,16 @@ async def lifespan(app: FastAPI):
 
     await migrate_old_data()
 
-    threading.Thread(target=preload_all_models, daemon=True).start()
+    async def _preload_task():
+        try:
+            from src.rag.models import preload_all_models as _preload
+
+            await _preload()
+        except Exception as e:
+            logger.warning(f"Предзагрузка моделей не удалась: {e}")
+
+    _bg_tasks: set[asyncio.Task] = set()
+    _bg_tasks.add(asyncio.create_task(_preload_task()))
 
     yield
 
@@ -82,19 +91,11 @@ async def lifespan(app: FastAPI):
         await unload_all_models()
         await kill_stray_servers()
 
-def preload_all_models():
-    try:
-        import asyncio
-        from src.rag.models import preload_all_models as _preload
-
-        asyncio.run(_preload())
-    except Exception as e:
-        logger.warning(f"Предзагрузка моделей не удалась: {e}")
-
 
 def _shutdown_models():
     try:
         import asyncio
+
         from src.gguf.server import kill_stray_servers, unload_all_models
 
         async def _do_shutdown():

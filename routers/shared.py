@@ -7,7 +7,6 @@ import logging
 import os
 import shutil
 import stat
-import subprocess
 import sys
 import tempfile
 import threading
@@ -154,13 +153,17 @@ async def robust_rmtree(path: str, max_retries: int = 3, delay: float = 0.5) -> 
 
     if sys.platform == "win32":
         try:
-            result = await asyncio.to_thread(
-                subprocess.run,
-                ["cmd.exe", "/c", "rmdir", "/s", "/q", path],
-                capture_output=True,
-                text=True,
-                timeout=5,
+            proc = await asyncio.create_subprocess_exec(
+                "cmd.exe",
+                "/c",
+                "rmdir",
+                "/s",
+                "/q",
+                path,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
             )
+            await asyncio.wait_for(proc.communicate(), timeout=5)
             if not os.path.exists(path):
                 return True, None
         except Exception:
@@ -174,13 +177,16 @@ async def robust_rmtree(path: str, max_retries: int = 3, delay: float = 0.5) -> 
     except Exception:
         if sys.platform == "win32":
             try:
-                await asyncio.to_thread(
-                    subprocess.run,
-                    ["cmd.exe", "/c", "move", path, deferred],
-                    capture_output=True,
-                    text=True,
-                    timeout=10,
+                proc = await asyncio.create_subprocess_exec(
+                    "cmd.exe",
+                    "/c",
+                    "move",
+                    path,
+                    deferred,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
                 )
+                await asyncio.wait_for(proc.communicate(), timeout=10)
                 if not os.path.exists(path):
                     return True, None
             except Exception:

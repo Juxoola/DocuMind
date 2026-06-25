@@ -125,7 +125,7 @@ _QUERY_GEN_PROMPT = (
 async def _get_qe_llm():
     from src.gguf.server import get_active_llm_url
 
-    url = get_active_llm_url()
+    url = await get_active_llm_url()
     if url:
         logger.debug(f"[QE] Используем GGUF LLM для Query Expansion: {url}")
     else:

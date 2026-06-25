@@ -108,7 +108,7 @@ async def delete_notebook(nb_id: str):
     try:
         from src.rag.indexing import close_notebook_client
 
-        close_notebook_client(nb_id)
+        await close_notebook_client(nb_id)
     except Exception as e:
         logger.debug(f"[delete_notebook] close_notebook_client: {e}")
 

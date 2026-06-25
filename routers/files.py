@@ -112,7 +112,7 @@ async def upload_file(
 
     await save_upload()
 
-    q = queue.Queue()
+    q: queue.Queue = queue.Queue()
     effective_llm_url = llm_url
     effective_llm_api_key = llm_api_key
     effective_llm_model = llm_model
@@ -152,8 +152,7 @@ async def upload_file(
     task_id = _uuid.uuid4().hex
     q.put({"type": "started", "task_id": task_id, "filename": file.filename})
 
-    def process_task():
-
+    async def process_task():
         start_time = time.time()
         cancel_event = upload_cancel_flags.setdefault(task_id, threading.Event())
         cancel_event.clear()
@@ -185,21 +184,17 @@ async def upload_file(
             from src.ingestion import ingest_file
             from src.rag.indexing import build_index
 
-            async def _run_pipeline():
-                nodes = await ingest_file(
-                    file_path,
-                    notebook_id,
-                    progress_cb=prog,
-                    llm_settings=llm_settings,
-                    cancel_check=cancel_event.is_set,
-                    keep_vision_alive=not is_last_in_batch,
-                    keep_whisper_alive=False,
-                )
-                prog(90, "Построение индекса (ChromaDB)...")
-                await build_index(nodes, notebook_id)
-                return nodes
-
-            nodes = asyncio.run(_run_pipeline())
+            nodes = await ingest_file(
+                file_path,
+                notebook_id,
+                progress_cb=prog,
+                llm_settings=llm_settings,
+                cancel_check=cancel_event.is_set,
+                keep_vision_alive=not is_last_in_batch,
+                keep_whisper_alive=False,
+            )
+            prog(90, "Построение индекса (ChromaDB)...")
+            await build_index(nodes, notebook_id)
             from src.rag.retrieval import invalidate_index_cache
 
             invalidate_index_cache(notebook_id)
@@ -214,19 +209,19 @@ async def upload_file(
                 try:
                     from src.gguf.server import unload_all_models
 
-                    asyncio.run(unload_all_models(role="llm"))
+                    await unload_all_models(role="llm")
                 except Exception as llm_err:
                     logger.error(f"[INGESTION] Ошибка выгрузки vision-сервера: {llm_err}")
                 try:
                     from src.ingestion import unload_whisper_model
 
-                    asyncio.run(unload_whisper_model())
+                    await unload_whisper_model()
                 except Exception as whisper_err:
                     logger.error(f"[INGESTION] Ошибка выгрузки WhisperX: {whisper_err}")
                 try:
                     from src.rag.bm25 import flush_bm25_rebuild
 
-                    asyncio.run(flush_bm25_rebuild(notebook_id))
+                    await flush_bm25_rebuild(notebook_id)
                 except Exception as bm25_err:
                     logger.info(f"[INGESTION] Не удалось форсировать BM25 rebuild: {bm25_err}")
                 with _ingestion_lock:
@@ -257,7 +252,7 @@ async def upload_file(
             try:
                 from src.gguf.server import kill_stray_servers
 
-                asyncio.run(kill_stray_servers())
+                await kill_stray_servers()
             except Exception:
                 logger.debug("cancel: не удалось убить llama-server")
             try:
@@ -286,9 +281,9 @@ async def upload_file(
             try:
                 from src.rag.indexing import get_vector_store
 
-                vector_store = asyncio.run(get_vector_store(notebook_id))
+                vector_store = await get_vector_store(notebook_id)
                 collection = vector_store._collection
-                collection.delete(where={"file_name": file.filename})
+                await asyncio.to_thread(collection.delete, where={"file_name": file.filename})
             except Exception:
                 logger.debug("cancel: не удалось очистить векторные индексы для %s", file.filename)
             with _ingestion_lock:
@@ -312,11 +307,11 @@ async def upload_file(
             try:
                 from src.ingestion import cleanup_gpu
 
-                cleanup_gpu()
+                await asyncio.to_thread(cleanup_gpu)
             except Exception:
                 logger.debug("finally: не удалось вызвать cleanup_gpu")
 
-    _task = asyncio.create_task(asyncio.to_thread(process_task))
+    _task = asyncio.create_task(process_task())
     _background_tasks.add(_task)
     _task.add_done_callback(_background_tasks.discard)
 
@@ -397,11 +392,8 @@ async def delete_file(filename: str, notebook_id: str):
         await _sync_remove_with_retry(file_path)
     from src.rag.indexing import get_vector_store
 
-    def _delete_chromadb_entries():
-        vs = asyncio.run(get_vector_store(notebook_id))
-        vs._collection.delete(where={"file_name": filename})
-
-    await asyncio.to_thread(_delete_chromadb_entries)
+    vector_store = await get_vector_store(notebook_id)
+    await asyncio.to_thread(lambda: vector_store._collection.delete(where={"file_name": filename}))
     from src.rag.retrieval import invalidate_index_cache
 
     invalidate_index_cache(notebook_id)
@@ -678,13 +670,13 @@ async def clear_notebook(notebook_id: str):
     from src.rag.indexing import close_all_clients as _close_all
 
     async def _clear_data():
-        await asyncio.to_thread(_close_all)
+        await _close_all()
         paths = config.get_notebook_paths(notebook_id)
         for d in ("data", "chroma_db", "images"):
             p = paths[d]
             if os.path.exists(p):
                 await robust_rmtree(p)
-            await asyncio.to_thread(os.makedirs, p, exist_ok=True)
+            await aiofiles.os.makedirs(p, exist_ok=True)
 
     await _clear_data()
     return {"status": "ok"}

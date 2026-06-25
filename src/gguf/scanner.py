@@ -10,7 +10,9 @@ import aiofiles.os
 import orjson
 
 import config
-from src.gguf.state import _GGUF_CACHE_FILE, _GGUF_CACHE_TTL_SEC, _gguf_cache_lock
+from src.gguf.state import _GGUF_CACHE_FILE, _GGUF_CACHE_TTL_SEC
+
+_gguf_cache_lock = asyncio.Lock()
 
 logger = logging.getLogger(__name__)
 
@@ -65,7 +67,7 @@ async def _scan_gguf_dirs_uncached() -> list[dict]:
 
 async def scan_gguf_dirs() -> list[dict]:
 
-    with _gguf_cache_lock:
+    async with _gguf_cache_lock:
         cached = None
         try:
             if await aiofiles.os.path.exists(_GGUF_CACHE_FILE):
@@ -107,7 +109,7 @@ async def scan_gguf_dirs() -> list[dict]:
 
 async def invalidate_scan_cache():
 
-    with _gguf_cache_lock:
+    async with _gguf_cache_lock:
         try:
             if await aiofiles.os.path.exists(_GGUF_CACHE_FILE):
                 await aiofiles.os.remove(_GGUF_CACHE_FILE)

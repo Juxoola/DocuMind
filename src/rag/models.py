@@ -1,5 +1,6 @@
 """Инициализация, предзагрузка и выгрузка RAG-моделей (embedding, reranker, LLM)."""
 
+import asyncio
 import logging
 
 import torch
@@ -7,7 +8,10 @@ from llama_index.core import Settings
 from llama_index.llms.openai import OpenAI
 
 import config
-from src.rag.state import _init_lock, _model_cache, _model_cache_lock
+from src.rag.state import _model_cache
+
+_init_lock = asyncio.Lock()
+_model_cache_lock = asyncio.Lock()
 
 logger = logging.getLogger(__name__)
 
@@ -16,8 +20,8 @@ async def init_settings(max_tokens=1024):
     global _model_cache
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
-    with _init_lock:
-        with _model_cache_lock:
+    async with _init_lock:
+        async with _model_cache_lock:
             if "embed_model" not in _model_cache:
                 await _init_embed_model()
             Settings.embed_model = _model_cache["embed_model"]
@@ -50,7 +54,7 @@ async def _init_embed_model():
     try:
         from src.gguf.server import get_active_embedding_parallel
 
-        n_parallel = get_active_embedding_parallel(model_path)
+        n_parallel = await get_active_embedding_parallel(model_path)
     except Exception:
         n_parallel = 1
     logger.info(
@@ -99,13 +103,11 @@ def unload_rag_models(hard=True):
     if not _model_cache:
         return
 
-    with _init_lock:
-        with _model_cache_lock:
-            if hard:
-                logger.info("[RAG] Выгрузка всех моделей (Embedding, Reranker)...")
-                _model_cache.clear()
-            else:
-                logger.info("[RAG] Мягкая очистка (Эмбеддинги и Реранкер остаются в памяти)...")
+    if hard:
+        logger.info("[RAG] Выгрузка всех моделей (Embedding, Reranker)...")
+        _model_cache.clear()
+    else:
+        logger.info("[RAG] Мягкая очистка (Эмбеддинги и Реранкер остаются в памяти)...")
 
     from src.ingestion.utils import cleanup_gpu
 
