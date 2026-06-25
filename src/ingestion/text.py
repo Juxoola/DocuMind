@@ -277,7 +277,7 @@ async def process_pdf(
                         )
                     else:
                         try:
-                            os.remove(frame_info["path"])
+                            await aiofiles.os.remove(frame_info["path"])
                         except Exception:
                             pass
 
@@ -348,7 +348,7 @@ async def _convert_via_libreoffice(file_path):
     if proc.returncode == 0 and os.path.exists(pdf_path):
         logger.info(f"[DOCX] Сконвертировано в PDF через LibreOffice: {os.path.basename(pdf_path)}")
         try:
-            os.remove(file_path)
+            await aiofiles.os.remove(file_path)
         except OSError:
             pass
         return pdf_path

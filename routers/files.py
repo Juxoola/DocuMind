@@ -257,13 +257,13 @@ async def upload_file(
                 logger.debug("cancel: не удалось убить llama-server")
             try:
                 if os.path.exists(file_path):
-                    os.remove(file_path)
+                    await aiofiles.os.remove(file_path)
             except Exception:
                 logger.debug("cancel: не удалось удалить %s", file_path)
             sidecar = os.path.join(os.path.dirname(file_path), f"{file.filename}.json")
             try:
                 if os.path.exists(sidecar):
-                    os.remove(sidecar)
+                    await aiofiles.os.remove(sidecar)
             except Exception:
                 logger.debug("cancel: не удалось удалить sidecar %s", sidecar)
             try:
@@ -273,7 +273,7 @@ async def upload_file(
                     for f in os.listdir(images_dir):
                         if f.startswith("p_") or f.startswith("v_") or stem in f:
                             try:
-                                os.remove(os.path.join(images_dir, f))
+                                await aiofiles.os.remove(os.path.join(images_dir, f))
                             except Exception:
                                 logger.debug("cancel: не удалось удалить %s", f)
             except Exception:
