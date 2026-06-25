@@ -83,16 +83,6 @@ SYSTEM_PROMPT_RULES = {
     ),
 }
 
-ANSWER_MODES = (
-    "concise",
-    "detailed",
-    "moderate",
-    "summary",
-    "step_by_step",
-    "checklist",
-    "expert",
-    "eli5",
-)
 
 SYSTEM_PROMPT_CITATION = (
     "ПРАВИЛА ЦИТИРОВАНИЯ:\n"
@@ -117,16 +107,6 @@ SYSTEM_PROMPT_HISTORY = (
     "- В контексте может быть история предыдущих вопросов и ответов.\n"
     "- Отвечай ТОЛЬКО на ПОСЛЕДНИЙ вопрос пользователя.\n"
     "- НЕ повторяй ответы на предыдущие вопросы — они уже даны.\n"
-)
-
-
-SYSTEM_PROMPT = (
-    SYSTEM_PROMPT_BASE
-    + "\n"
-    + SYSTEM_PROMPT_RULES[ANSWER_MODE_DEFAULT]
-    + "\n"
-    + SYSTEM_PROMPT_CITATION
-    + SYSTEM_PROMPT_HISTORY
 )
 
 

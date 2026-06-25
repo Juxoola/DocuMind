@@ -43,13 +43,9 @@ CORS_ORIGINS = [
     if o.strip()
 ]
 
-GGUF_SERVER_STARTUP_TIMEOUT = int(os.getenv("GGUF_SERVER_STARTUP_TIMEOUT", 30))
-GGUF_HEALTH_CHECK_TIMEOUT = int(os.getenv("GGUF_HEALTH_CHECK_TIMEOUT", 2))
-GGUF_SERVER_STOP_TIMEOUT = int(os.getenv("GGUF_SERVER_STOP_TIMEOUT", 5))
 LM_STUDIO_HTTP_TIMEOUT = int(os.getenv("LM_STUDIO_HTTP_TIMEOUT", 60))
 HTTP_POOL_SIZE_MAIN = int(os.getenv("HTTP_POOL_SIZE_MAIN", 10))
 HTTP_POOL_SIZE_INGEST = int(os.getenv("HTTP_POOL_SIZE_INGEST", 10))
-HTTP_POOL_SIZE_RERANK = int(os.getenv("HTTP_POOL_SIZE_RERANK", 4))
 
 LM_STUDIO_URL = os.getenv("LM_STUDIO_URL", "http://localhost:1234/v1")
 
@@ -99,8 +95,6 @@ RAG_RRF_K = int(os.getenv("RAG_RRF_K", 60))
 RAG_TOP_K_RATIO = float(os.getenv("RAG_TOP_K_RATIO", "0.1"))
 
 GGUF_SEARCH_DIRS = os.getenv("GGUF_SEARCH_DIRS", "F:/llm;" + os.path.join(BASE_DIR, "models"))
-GGUF_SERVER_PORT = int(os.getenv("GGUF_SERVER_PORT", 8081))
-GGUF_SERVER_HOST = os.getenv("GGUF_SERVER_HOST", "127.0.0.1")
 GGUF_THREADS = int(os.getenv("GGUF_THREADS", 0))
 GGUF_CTX_SIZE = int(os.getenv("GGUF_CTX_SIZE", 32768))
 GGUF_CTX_EMBED_CHARS = int(os.getenv("GGUF_CTX_EMBED_CHARS", 4096))
@@ -113,9 +107,6 @@ VISION_MIN_P = float(os.getenv("VISION_MIN_P", 0.05))
 VISION_CONCURRENCY = int(os.getenv("VISION_CONCURRENCY", 4))
 
 CHAT_TEMPERATURE = float(os.getenv("CHAT_TEMPERATURE", 0.7))
-CHAT_REPEAT_PENALTY = float(os.getenv("CHAT_REPEAT_PENALTY", 1.1))
-CHAT_TOP_P = float(os.getenv("CHAT_TOP_P", 0.95))
-CHAT_MIN_P = float(os.getenv("CHAT_MIN_P", 0.05))
 
 RAG_CONFIG_FILE = os.path.join(BASE_DIR, "rag_config.json")
 

@@ -15,24 +15,10 @@ import time
 from ctypes import wintypes
 
 import httpx
-import requests
-import requests.adapters
 
 import config
 
 logger = logging.getLogger(__name__)
-
-
-def make_http_session(pool_size: int = 10) -> requests.Session:
-    s = requests.Session()
-    adapter = requests.adapters.HTTPAdapter(pool_connections=pool_size, pool_maxsize=pool_size)
-    s.mount("http://", adapter)
-    s.mount("https://", adapter)
-    return s
-
-
-# HTTP-сессия с пулом соединений — используется всеми роутерами для внешних API-вызовов (LLM, эмбеддинги).
-_http_session = make_http_session(config.HTTP_POOL_SIZE_MAIN)
 
 # Асинхронная HTTP-сессия — для async-эндпоинтов (chat streaming, vision OCR).
 # Клиент создаётся лениво и сбрасывается, если текущий event loop отличается

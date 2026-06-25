@@ -4,7 +4,6 @@
 Тестируем:
 - get_notebook_paths: структура путей
 - get_system_prompt: все 8 режимов, fallback на default
-- SYSTEM_PROMPT — обратная совместимость
 - safe_filename (из main.py) — path traversal, null-байты, reserved names
 - resolve_model_path: пустой ввод, существующий путь
 """
@@ -44,7 +43,7 @@ class TestGetNotebookPaths:
 
 
 class TestGetSystemPrompt:
-    @pytest.mark.parametrize("mode", prompts.ANSWER_MODES)
+    @pytest.mark.parametrize("mode", list(prompts.SYSTEM_PROMPT_RULES.keys()))
     def test_all_known_modes_return_prompt(self, mode):
         prompt = prompts.get_system_prompt(mode)
         assert prompt
@@ -70,9 +69,6 @@ class TestGetSystemPrompt:
         prompt = prompts.get_system_prompt("")
         default = prompts.get_system_prompt(prompts.ANSWER_MODE_DEFAULT)
         assert prompt == default
-
-    def test_system_prompt_compat_matches_concise(self):
-        assert prompts.SYSTEM_PROMPT == prompts.get_system_prompt("concise")
 
     @pytest.mark.parametrize(
         "mode,keyword",
@@ -121,13 +117,8 @@ class TestConfigValues:
         assert config.RAG_RERANK_POOL > 0
         assert config.RAG_FINAL_TOP_N > 0
 
-    def test_answer_modes_tuple(self):
-        assert isinstance(prompts.ANSWER_MODES, tuple)
-        assert len(prompts.ANSWER_MODES) == 8
-        assert all(isinstance(m, str) for m in prompts.ANSWER_MODES)
-
     def test_get_system_prompt_contains_answer_modes(self):
-        for mode in prompts.ANSWER_MODES:
+        for mode in prompts.SYSTEM_PROMPT_RULES.keys():
             assert mode in prompts.SYSTEM_PROMPT_RULES
 
 

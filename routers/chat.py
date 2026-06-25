@@ -337,7 +337,5 @@ async def chat(request: ChatRequest):
             error_text = "Внутренняя ошибка сервера. Попробуйте позже."
             yield f"data: {orjson.dumps({'type': 'error', 'text': error_text}).decode()}\n\n"
             yield "data: [DONE]\n\n"
-        finally:
-            pass
 
     return StreamingResponse(generate(), media_type="text/event-stream")

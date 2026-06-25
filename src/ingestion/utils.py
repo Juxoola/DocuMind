@@ -8,9 +8,6 @@ import threading
 
 import torch
 
-import config
-from routers.shared import make_http_session
-
 logger = logging.getLogger(__name__)
 # Предупреждения библиотек подавлены в main.py (до импорта сторонних модулей)
 
@@ -33,7 +30,6 @@ try:
 except Exception:
     pass
 
-_http_session = make_http_session(config.HTTP_POOL_SIZE_INGEST)
 
 _active_subprocesses: dict = {}
 _subprocesses_lock = threading.Lock()

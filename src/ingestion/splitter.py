@@ -48,9 +48,3 @@ def _get_splitter():
 
         _splitter_cache = SentenceSplitter(chunk_size=2048, chunk_overlap=256)
         return _splitter_cache
-
-
-def _invalidate_splitter_cache():
-    global _splitter_cache
-    with _SPLITTER_LOCK:
-        _splitter_cache = None
