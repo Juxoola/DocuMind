@@ -331,7 +331,7 @@ async def _hybrid_search(index, query: str, allowed_files, bm25_retriever, qe_ll
 
             if num_q > 1 and qe_llm:
                 try:
-                    generated_bundles = fusion_retriever._get_queries(query)
+                    generated_bundles = await asyncio.to_thread(fusion_retriever._get_queries, query)
                     logger.info("  [RAG] 🧠 Сгенерированные поисковые запросы (Query Expansion):")
                     for i, gq in enumerate(generated_bundles, 1):
                         logger.info(f"    {i}. {gq.query_str}")

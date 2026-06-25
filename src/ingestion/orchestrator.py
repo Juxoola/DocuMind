@@ -6,6 +6,7 @@ import os
 import shutil
 import uuid
 
+import aiofiles.os
 from llama_index.core.schema import TextNode
 
 import config
@@ -35,7 +36,7 @@ async def ingest_file(
     ext = os.path.splitext(file_path)[1].lower()
     paths = config.get_notebook_paths(notebook_id)
     images_dir = paths["images"]
-    os.makedirs(images_dir, exist_ok=True)
+    await aiofiles.os.makedirs(images_dir, exist_ok=True)
 
     if _is_cancelled():
         raise IngestionCancelled("Cancelled before media conversion")

@@ -328,7 +328,7 @@ async def process_audio_video(
                                     else:
                                         if frame_list:
                                             try:
-                                                os.remove(frame_list[-1][0])
+                                                await aiofiles.os.remove(frame_list[-1][0])
                                             except Exception:
                                                 pass
                                             frame_list[-1] = (img_path, current_sec)

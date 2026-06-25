@@ -290,8 +290,6 @@ async def get_gguf_llm(
                 logger.info(
                     f"[GGUF Server] Настройки изменились или сервер упал. Перезапуск {os.path.basename(gguf_path)}..."
                 )
-
-    with _lock:
         _llm_load_state.update(
             {
                 "state": "loading",
@@ -504,7 +502,7 @@ async def get_gguf_embedding_url(
             else:
                 logger.info(f"[GGUF Server] Перезапуск {role} {os.path.basename(gguf_path)}...")
 
-        await unload_rag_models_safe()
+    await unload_rag_models_safe()
 
     await unload_all_models(role=role)
 
