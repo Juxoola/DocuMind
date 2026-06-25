@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, FileText, Play, Image as ImageIcon, ExternalLink, Clock, AlertCircle, Download, ChevronDown } from 'lucide-react';
+import { X, FileText, Play, Image as ImageIcon, Clock, AlertCircle, Download, ChevronDown } from 'lucide-react';
 import { cn } from '../lib/utils';
 
 export default function DocumentViewer({ file, notebook, onClose }) {

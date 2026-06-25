@@ -6,17 +6,6 @@ import rehypeKatex from 'rehype-katex';
 import { CitationButton, CitationTooltipPortal } from './CitationTooltip';
 
 // Рендер markdown-сообщений LLM: [N] → кликабельные цитаты, LaTeX, блоки кода
-const CIRCLED_DIGITS = '①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳';
-const CIRCLED_REGEX = /\[([\u2460-\u2473](?:[, ]*[\u2460-\u2473])*)\]/g;
-const _circledRepl = (m) => {
-  const nums = m[1].split(/[, ]+/).filter(Boolean);
-  return nums.map(ch => {
-    const idx = CIRCLED_DIGITS.indexOf(ch) + 1;
-    return idx > 0 ? `[${idx}](#cite:${idx})` : ch;
-  }).join('');
-};
-
-
 export function preProcessMessage(text) {
   if (!text) return '';
 

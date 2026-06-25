@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect, lazy, Suspense } from 'react';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Send, Trash2, Sparkles, Clock, Zap, Cpu, FileText, Settings as SettingsIcon, HardDrive, Square, Image as ImageIcon, Plus, X as XIcon, ChevronRight, ChevronDown, SlidersHorizontal, RefreshCw, Bookmark, BookmarkCheck, Tag as TagIcon, RotateCcw, Eye, Pencil, Copy, Check, ListChecks, ListOrdered, AlignLeft, Scale, GraduationCap, Smile } from 'lucide-react';
+import { Send, Trash2, Sparkles, Clock, Zap, Cpu, FileText, Settings as SettingsIcon, Square, Image as ImageIcon, Plus, X as XIcon, ChevronRight, ChevronDown, SlidersHorizontal, RefreshCw, Bookmark, BookmarkCheck, Copy, Check, ListChecks, ListOrdered, AlignLeft, Scale, GraduationCap, Smile } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
@@ -10,6 +10,7 @@ import 'katex/dist/katex.min.css';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { atomDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import { cn } from '../lib/utils';
+import { preProcessMessage } from '../lib/markdownRender';
 
 // Ленивая загрузка SettingsModal для code-splitting — модалка тяжёлая, грузится по требованию
 const SettingsModal = lazy(() => import('./SettingsModal'));
@@ -250,15 +251,6 @@ const SleekSlider = ({
   );
 };
 
-const CIRCLED_DIGITS = '①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳';
-const CIRCLED_REGEX = /\[([\u2460-\u2473](?:[, ]*[\u2460-\u2473])*)\]/g;
-const _circledRepl = (m) => {
-  const nums = m[1].split(/[, ]+/).filter(Boolean);
-  return nums.map(ch => {
-    const idx = CIRCLED_DIGITS.indexOf(ch) + 1;
-    return idx > 0 ? `[${idx}](#cite:${idx})` : ch;
-  }).join('');
-};
 
 const MessageItem = React.memo(({
   msg,
@@ -364,56 +356,6 @@ const MessageItem = React.memo(({
     } finally {
       setBmSaving(false);
     }
-  };
-  const preProcessMessage = (text) => {
-    if (!text) return "";
-    
-    let processed = text
-      .replace(/\\\[[\s\S]*?\\\]/g, '$$$$$1$$$$')
-      .replace(/\\\(([\s\S]*?)\\\)/g, '$$$1$$');
-
-    const parts = processed.split(/(```[\s\S]*?```)/g);
-    
-    const finalParts = parts.map(part => {
-      if (part.startsWith('```')) return part;
-      
-      const mathBlocks = [];
-      let subPart = part.replace(/(\$\$[\s\S]*?\$\$|\$[^$\n]+?\$)/g, (m) => {
-        mathBlocks.push(m);
-        return `%%MATH_${mathBlocks.length - 1}%%`;
-      });
-
-      subPart = subPart.replace(/(?<!\\in|\\subset|\\subseteq|\\supset)\[(\d+(?:,\s*\d+)*)\]/g, (match, nums) => {
-        return nums.split(',').map(n => {
-          const num = n.trim();
-          return `[${num}](#cite:${num})`;
-        }).join('');
-      });
-
-      return subPart.replace(/%%MATH_(\d+)%%/g, (_, idx) => mathBlocks[parseInt(idx)]);
-    });
-
-    processed = finalParts.join('');
-
-    const thinkFormats = [
-      { open: '<|channel|>', close: '<channel|>' },
-      { open: '<think>', close: '</think>' },
-      { open: '<|think|>', close: '<|/think|>' },
-    ];
-    for (const { open, close } of thinkFormats) {
-      if (!processed.includes(open)) continue;
-      const parts = processed.split(open);
-      const beforeThink = parts[0];
-      const thinkContent = parts[1];
-      if (thinkContent && thinkContent.includes(close)) {
-        const thinkParts = thinkContent.split(close);
-        processed = `${beforeThink}<details class="mb-4 rounded-xl border border-purple-500/20 bg-purple-500/5 overflow-hidden"><summary class="cursor-pointer px-4 py-2 text-[11px] font-bold text-purple-500 hover:bg-purple-500/10 transition-colors select-none">✨ Рассуждения</summary><div class="p-4 text-xs text-muted-foreground/80 italic border-t border-purple-500/10 whitespace-pre-wrap">${thinkParts[0]}</div></details>\n${thinkParts.slice(1).join(close)}`;
-      } else if (thinkContent) {
-        processed = `${beforeThink}<div class="mb-4 rounded-xl border border-purple-500/20 bg-purple-500/5 overflow-hidden"><div class="px-4 py-2 text-[11px] font-bold text-purple-500 flex items-center gap-2"><span class="animate-pulse">✨ Модель рассуждает...</span></div><div class="p-4 text-xs text-muted-foreground/80 italic border-t border-purple-500/10 whitespace-pre-wrap">${thinkContent}</div></div>`;
-      }
-      break;
-    }
-    return processed;
   };
 
   const renderContent = () => {

@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import Sidebar from './Sidebar';
 import ChatArea from './ChatArea';
 import DocumentViewer from './DocumentViewer';
-import { ChevronLeft, ChevronRight, X } from 'lucide-react';
+import { ChevronRight } from 'lucide-react';
 import { cn } from '../lib/utils';
 
 export default function MainApp({ notebook, onExit }) {

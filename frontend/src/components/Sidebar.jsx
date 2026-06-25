@@ -10,7 +10,6 @@ import {
   AlertCircle,
   Database,
   Trash2,
-  Cpu,
   PowerOff,
   Video,
   Music,
