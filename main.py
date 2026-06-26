@@ -94,8 +94,6 @@ async def lifespan(app: FastAPI):
 
 def _shutdown_models():
     try:
-        import asyncio
-
         from src.gguf.server import kill_stray_servers, unload_all_models
 
         async def _do_shutdown():

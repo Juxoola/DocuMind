@@ -476,12 +476,7 @@ def _extract_text_from_file(file_path: str, ext: str) -> str:
         return ""
     try:
         if ext == ".pdf":
-            import fitz
-
-            doc = fitz.open(file_path)
-            text = "\n".join(page.get_text() for page in doc)
-            doc.close()
-            return text
+            return "\n".join(_extract_pdf_text(file_path))
         elif ext in (".txt", ".md", ".csv", ".json", ".log"):
             with open(file_path, encoding="utf-8", errors="replace") as f:
                 return f.read()
@@ -581,9 +576,9 @@ async def export_text(filename: str, notebook_id: str, fmt: str = "txt"):
 
     text = ""
     stem = os.path.splitext(filename)[0]
+    paths = config.get_notebook_paths(notebook_id)
 
     if is_media or is_image:
-        paths = config.get_notebook_paths(notebook_id)
         json_path = os.path.join(paths["data"], f"{filename}.json")
         if os.path.exists(json_path):
             async with aiofiles.open(json_path, "rb") as f:
@@ -607,7 +602,6 @@ async def export_text(filename: str, notebook_id: str, fmt: str = "txt"):
             text = f"Описание/транскрипт для {filename} не найдены."
     else:
         # PDF, DOCX, PPT, TXT — читаем из файла
-        paths = config.get_notebook_paths(notebook_id)
         file_path = os.path.join(paths["data"], filename)
         if ext == ".pdf":
             text = await asyncio.to_thread(
@@ -648,17 +642,11 @@ async def get_video_metadata(filename: str, notebook_id: str):
     paths = config.get_notebook_paths(notebook_id)
     json_path = os.path.join(paths["data"], f"{filename}.json")
 
-    async def _async_read_json():
-        if not os.path.exists(json_path):
-            return None
-        async with aiofiles.open(json_path, "rb") as f:
-            raw = await f.read()
-        return orjson.loads(raw)
-
-    data = await _async_read_json()
-    if data is not None:
-        return JSONResponse(content=data, headers={"Cache-Control": "public, max-age=300"})
-    return {"error": "Метаданные не найдены"}
+    if not os.path.exists(json_path):
+        return {"error": "Метаданные не найдены"}
+    async with aiofiles.open(json_path, "rb") as f:
+        data = orjson.loads(await f.read())
+    return JSONResponse(content=data, headers={"Cache-Control": "public, max-age=300"})
 
 
 @router.delete("/api/clear")

@@ -3,6 +3,7 @@
 import asyncio
 import logging
 import os
+import shutil
 
 import orjson
 from fastapi import APIRouter, HTTPException
@@ -103,8 +104,6 @@ async def _run_nvidia_smi(query_args: list[str], timeout: float = 3) -> str | No
 
 @router.get("/api/vram")
 async def api_vram():
-    import shutil
-
     if not shutil.which("nvidia-smi"):
         return {
             "gpu": {

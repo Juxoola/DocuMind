@@ -11,9 +11,12 @@ import sys
 import tempfile
 import time
 from ctypes import wintypes
+from urllib.parse import urlparse
 
 import aiofiles.os
 import httpx
+import orjson
+from fastapi import HTTPException
 
 import config
 
@@ -70,8 +73,6 @@ async def _cleanup_ingestion_status():
 
 
 def safe_filename(filename: str) -> str:
-    from fastapi import HTTPException
-
     if not filename or not isinstance(filename, str):
         raise HTTPException(status_code=400, detail="Пустое имя файла")
     clean = os.path.basename(filename.replace("\\", "/"))
@@ -212,8 +213,6 @@ def safe_extract_llm_response(data: dict) -> str | None:
 
 
 def sse_event(data: dict) -> str:
-    import orjson
-
     return f"data: {orjson.dumps(data).decode()}\n\n"
 
 
@@ -222,9 +221,6 @@ SSE_DONE = "data: [DONE]\n\n"
 
 def validate_llm_url(url: str) -> None:
     """Проверяет, что URL LLM-сервера указывает на localhost/LAN. Бросает HTTPException при нарушении."""
-    from urllib.parse import urlparse
-
-    from fastapi import HTTPException
 
     parsed = urlparse(url)
     hostname = parsed.hostname or ""
