@@ -17,7 +17,7 @@ from src.rag.state import (
     _bm25_rebuilding,
 )
 
-# Local asyncio.Lock replacements (shadow imported threading-based locks)
+# Локальные замены asyncio.Lock (перекрывают импортированные threading-based блокировки)
 _bm25_pending_lock = asyncio.Lock()
 _bm25_rebuilding_lock = asyncio.Lock()
 _bm25_node_cache_lock = asyncio.Lock()

@@ -191,7 +191,7 @@ class TestDirMtime:
         before = asyncio.run(_dir_mtime(str(tmp_path)))
         time.sleep(1.1)
         (tmp_path / "new_file.txt").write_text("test")
-        # refresh dir mtime
+        # обновляем mtime директории
         after = asyncio.run(_dir_mtime(str(tmp_path)))
         assert after >= before
 

@@ -3,7 +3,6 @@
 import asyncio
 import logging
 import os
-import re
 import sys
 from contextlib import asynccontextmanager
 
@@ -13,6 +12,7 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 import config
+from routers.notebooks import _NB_ID_PATTERN
 
 _LOG_DIR = os.path.join(config.BASE_DIR, "logs")
 os.makedirs(_LOG_DIR, exist_ok=True)
@@ -128,8 +128,6 @@ if os.name == "nt":
         logger.debug(f"SetConsoleCtrlHandler не удался (не критично): {e}")
 
 app = FastAPI(title="DocuMind", lifespan=lifespan)
-
-_NB_ID_PATTERN = re.compile(r"^[a-f0-9]{8}$")
 
 
 # Middleware: проверяет Content-Length для /api/upload до передачи в роутер — отклоняет файлы больше лимита.

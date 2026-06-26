@@ -4,7 +4,7 @@ import asyncio
 import logging
 import time
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
@@ -12,7 +12,7 @@ import config
 from src.rag.prompts import get_system_prompt
 from src.rag.state import RAG_POOL
 
-from .shared import SSE_DONE, get_async_http, safe_extract_llm_response, sse_event
+from .shared import SSE_DONE, get_async_http, safe_extract_llm_response, sse_event, validate_llm_url
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["chat"])
@@ -131,24 +131,7 @@ async def chat(request: ChatRequest):
 
             return StreamingResponse(error_gen(), media_type="text/event-stream")
     elif request.llm_url:
-        from urllib.parse import urlparse
-
-        parsed = urlparse(request.llm_url)
-        hostname = parsed.hostname or ""
-        if (
-            hostname in ("localhost", "127.0.0.1", "::1")
-            or hostname.startswith("192.168.")
-            or hostname.startswith("10.")
-            or hostname.startswith("172.")
-        ):
-            pass
-        elif not hostname:
-            raise HTTPException(status_code=400, detail="Некорректный URL LLM-сервера")
-        else:
-            raise HTTPException(
-                status_code=400,
-                detail="Внешние URL LLM-сервера запрещены из соображений безопасности",
-            )
+        validate_llm_url(request.llm_url)
 
         from llama_index.llms.openai import OpenAI
 

@@ -564,7 +564,7 @@ def _content_disposition(name: str, ext: str) -> str:
 
     full = f"{name}.{ext}"
     encoded = quote(full)
-    # ASCII fallback: non-ASCII chars replaced with _
+    # ASCII-фолбэк: символы вне ASCII заменяются на _
     ascii_safe = full.encode("ascii", "replace").decode().replace("?", "_")
     return f"attachment; filename=\"{ascii_safe}\"; filename*=UTF-8''{encoded}"
 

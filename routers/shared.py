@@ -218,3 +218,23 @@ def sse_event(data: dict) -> str:
 
 
 SSE_DONE = "data: [DONE]\n\n"
+
+
+def validate_llm_url(url: str) -> None:
+    """Проверяет, что URL LLM-сервера указывает на localhost/LAN. Бросает HTTPException при нарушении."""
+    from urllib.parse import urlparse
+
+    from fastapi import HTTPException
+
+    parsed = urlparse(url)
+    hostname = parsed.hostname or ""
+    _LOCAL = ("localhost", "127.0.0.1", "::1")
+    _LAN_PREFIXES = ("192.168.", "10.", "172.")
+    if hostname in _LOCAL or hostname.startswith(_LAN_PREFIXES):
+        return
+    if not hostname:
+        raise HTTPException(status_code=400, detail="Некорректный URL LLM-сервера")
+    raise HTTPException(
+        status_code=400,
+        detail="Внешние URL LLM-сервера запрещены из соображений безопасности",
+    )

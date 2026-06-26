@@ -154,32 +154,13 @@ async def _get_qe_llm():
 
 
 # Слияние по взаимному рангу (RRF): score = sum(1/(k + rank_i)) из каждого источника. k=60 — стандартный параметр
-def _rrf_fuse(vector_results, bm25_results, k: int = None):
+def _rrf_fuse(*result_lists, k: int = None):
     scores: dict = {}
     nodes_by_id: dict = {}
     k = k or config.RAG_RRF_K
 
-    for rank, nws in enumerate(vector_results, start=1):
-        nid = nws.node.node_id
-        scores[nid] = scores.get(nid, 0.0) + 1.0 / (k + rank)
-        nodes_by_id[nid] = nws
-
-    for rank, nws in enumerate(bm25_results, start=1):
-        nid = nws.node.node_id
-        scores[nid] = scores.get(nid, 0.0) + 1.0 / (k + rank)
-        nodes_by_id[nid] = nws
-
-    sorted_ids = sorted(scores.keys(), key=lambda i: scores[i], reverse=True)
-    return [NodeWithScore(node=nodes_by_id[i].node, score=scores[i]) for i in sorted_ids]
-
-
-def _rrf_fuse_across_files(file_results, k: int = None):
-    scores: dict = {}
-    nodes_by_id: dict = {}
-    k = k or config.RAG_RRF_K
-
-    for _fname, per_file_nodes in file_results:
-        for rank, nws in enumerate(per_file_nodes, start=1):
+    for ranking in result_lists:
+        for rank, nws in enumerate(ranking, start=1):
             nid = nws.node.node_id
             scores[nid] = scores.get(nid, 0.0) + 1.0 / (k + rank)
             nodes_by_id[nid] = nws
@@ -400,7 +381,7 @@ async def _hybrid_search(index, query: str, allowed_files, bm25_retriever, qe_ll
                     vec = [n for n in vec_results if n.node.metadata.get("file_name") == fname]
                     fused = _rrf_fuse(vec, bm)
                     file_results.append((fname, fused))
-                all_nodes = _rrf_fuse_across_files(file_results)
+                all_nodes = _rrf_fuse(*(nodes for _, nodes in file_results))
                 if len(all_nodes) > config.RAG_RERANK_POOL:
                     all_nodes = all_nodes[: config.RAG_RERANK_POOL]
                 if bm25_retriever:

@@ -404,6 +404,72 @@ async def _convert_via_com(file_path, app_name, format_code):
     return await asyncio.to_thread(_sync_com)
 
 
+async def _convert_office_to_pdf(file_path, app_name, format_code, textonly_fn, log_prefix):
+    """Конвертация Office-файла в PDF: LibreOffice → COM → извлечение текста."""
+    file_name = os.path.basename(file_path)
+    try:
+        pdf_path = await _convert_via_libreoffice(file_path)
+    except FileNotFoundError:
+        logger.info(f"{log_prefix} LibreOffice не найден, пробую COM-конвертацию...")
+        try:
+            pdf_path = await _convert_via_com(file_path, app_name, format_code)
+        except IngestionCancelled:
+            raise
+        except Exception as e:
+            logger.warning(f"{log_prefix} COM-конвертация тоже не удалась: {e}")
+            return None, await textonly_fn(file_path, file_name)
+    except IngestionCancelled:
+        raise
+    except Exception as e:
+        logger.warning(f"{log_prefix} LibreOffice конвертация не удалась: {e}")
+        try:
+            pdf_path = await _convert_via_com(file_path, app_name, format_code)
+        except IngestionCancelled:
+            raise
+        except Exception:
+            return None, await textonly_fn(file_path, file_name)
+    return os.path.basename(pdf_path), None
+
+
+def _pptx_extract_textonly(file_path, file_name):
+    from pptx import Presentation
+
+    prs = Presentation(file_path)
+    nodes = []
+    for i, slide in enumerate(prs.slides):
+        text = "\n".join([sh.text for sh in slide.shapes if hasattr(sh, "text")])
+        if text.strip():
+            nodes.append(TextNode(text=text, metadata={"file_name": file_name, "page": i + 1}))
+    if nodes:
+        logger.info(
+            f"[PPTX] Резервный вариант: {len(nodes)} слайдов через python-pptx (без Vision)"
+        )
+    return nodes
+
+
+def _docx_extract_textonly(file_path, file_name):
+    import docx as _docx
+
+    text = "\n".join([p.text for p in _docx.Document(file_path).paragraphs])
+    if text.strip():
+        logger.info("[DOCX] Fallback: текст извлечён через python-docx (без Vision)")
+        return [TextNode(text=text, metadata={"file_name": file_name})]
+    return []
+
+
+async def _process_office_textonly(file_path, file_name, extract_fn, log_prefix):
+    """Обёртка: извлечение текста из Office-файла без конвертации."""
+
+    def _sync():
+        try:
+            return extract_fn(file_path, file_name)
+        except Exception as e:
+            logger.warning(f"{log_prefix} резервный вариант тоже не удался: {e}")
+        return []
+
+    return await asyncio.to_thread(_sync)
+
+
 async def process_pptx(
     file_path,
     images_dir,
@@ -414,65 +480,26 @@ async def process_pptx(
     keep_vision_alive=False,
 ):
     file_name = os.path.basename(file_path)
-
-    try:
-        pdf_path = await _convert_via_libreoffice(file_path)
-    except FileNotFoundError:
-        logger.info("[PPTX] LibreOffice не найден, пробую COM-конвертацию...")
-        try:
-            pdf_path = await _convert_via_com(file_path, "Powerpoint.Application", 32)
-        except IngestionCancelled:
-            raise
-        except Exception as e:
-            logger.warning(f"[PPTX] COM-конвертация тоже не удалась: {e}")
-            return await _process_pptx_textonly(file_path, file_name)
-    except IngestionCancelled:
-        raise
-    except Exception as e:
-        logger.warning(f"[PPTX] LibreOffice конвертация не удалась: {e}")
-        try:
-            pdf_path = await _convert_via_com(file_path, "Powerpoint.Application", 32)
-        except IngestionCancelled:
-            raise
-        except Exception:
-            return await _process_pptx_textonly(file_path, file_name)
-
-    file_name = os.path.basename(pdf_path)
+    pdf_name, fallback_nodes = await _convert_office_to_pdf(
+        file_path,
+        "Powerpoint.Application",
+        32,
+        lambda fp, fn: _process_office_textonly(fp, fn, _pptx_extract_textonly, "[PPTX]"),
+        "[PPTX]",
+    )
+    if fallback_nodes is not None:
+        return fallback_nodes
 
     return await process_pdf(
-        pdf_path,
+        os.path.join(os.path.dirname(file_path), pdf_name),
         images_dir,
         llm_settings,
         shared_llm_url,
-        original_filename=file_name,
+        original_filename=pdf_name,
         progress_cb=progress_cb,
         cancel_check=cancel_check,
         keep_vision_alive=keep_vision_alive,
     )
-
-
-async def _process_pptx_textonly(file_path, file_name):
-
-    def _sync_pptx():
-        try:
-            from pptx import Presentation
-
-            prs = Presentation(file_path)
-            nodes = []
-            for i, slide in enumerate(prs.slides):
-                text = "\n".join([sh.text for sh in slide.shapes if hasattr(sh, "text")])
-                if text.strip():
-                    nodes.append(
-                        TextNode(text=text, metadata={"file_name": file_name, "page": i + 1})
-                    )
-            if nodes:
-                logger.info(f"[PPTX] Fallback: {len(nodes)} слайдов через python-pptx (без Vision)")
-                return nodes
-        except Exception as e:
-            logger.warning(f"[PPTX] python-pptx fallback тоже не удался: {e}")
-        return []
-
-    return await asyncio.to_thread(_sync_pptx)
 
 
 async def process_docx(
@@ -485,55 +512,23 @@ async def process_docx(
     keep_vision_alive=False,
 ):
     file_name = os.path.basename(file_path)
-
-    try:
-        pdf_path = await _convert_via_libreoffice(file_path)
-    except FileNotFoundError:
-        logger.info("[DOCX] LibreOffice не найден, пробую COM-конвертацию...")
-        try:
-            pdf_path = await _convert_via_com(file_path, "Word.Application", 17)
-        except IngestionCancelled:
-            raise
-        except Exception as e:
-            logger.warning(f"[DOCX] COM-конвертация тоже не удалась: {e}")
-            return await _process_docx_textonly(file_path, file_name)
-    except IngestionCancelled:
-        raise
-    except Exception as e:
-        logger.warning(f"[DOCX] LibreOffice конвертация не удалась: {e}")
-        try:
-            pdf_path = await _convert_via_com(file_path, "Word.Application", 17)
-        except IngestionCancelled:
-            raise
-        except Exception:
-            return await _process_docx_textonly(file_path, file_name)
-
-    file_name = os.path.basename(pdf_path)
+    pdf_name, fallback_nodes = await _convert_office_to_pdf(
+        file_path,
+        "Word.Application",
+        17,
+        lambda fp, fn: _process_office_textonly(fp, fn, _docx_extract_textonly, "[DOCX]"),
+        "[DOCX]",
+    )
+    if fallback_nodes is not None:
+        return fallback_nodes
 
     return await process_pdf(
-        pdf_path,
+        os.path.join(os.path.dirname(file_path), pdf_name),
         images_dir,
         llm_settings,
         shared_llm_url,
-        original_filename=file_name,
+        original_filename=pdf_name,
         progress_cb=progress_cb,
         cancel_check=cancel_check,
         keep_vision_alive=keep_vision_alive,
     )
-
-
-async def _process_docx_textonly(file_path, file_name):
-
-    def _sync_docx():
-        try:
-            import docx as _docx
-
-            text = "\n".join([p.text for p in _docx.Document(file_path).paragraphs])
-            if text.strip():
-                logger.info("[DOCX] Fallback: текст извлечён через python-docx (без Vision)")
-                return [TextNode(text=text, metadata={"file_name": file_name})]
-        except Exception as e:
-            logger.warning(f"[DOCX] python-docx fallback тоже не удался: {e}")
-        return []
-
-    return await asyncio.to_thread(_sync_docx)

@@ -83,6 +83,24 @@ async def api_gguf_kill_all():
     return {"status": "ok", "msg": "Все процессы llama-server завершены"}
 
 
+async def _run_nvidia_smi(query_args: list[str], timeout: float = 3) -> str | None:
+    """Запуск nvidia-smi с указанными аргументами. Возвращает stdout или None при ошибке."""
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "nvidia-smi",
+            *query_args,
+            "--format=csv,noheader,nounits",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+        if proc.returncode == 0 and stdout:
+            return stdout.decode()
+    except Exception:
+        logger.debug(f"gguf: nvidia-smi не удался ({query_args[0]})")
+    return None
+
+
 @router.get("/api/vram")
 async def api_vram():
     import shutil
@@ -102,60 +120,30 @@ async def api_vram():
             "per_process": [],
             "gguf_servers": await _get_gguf_servers_info(),
         }
-    used_mib = 0
-    total_mib = 0
-    free_mib = 0
-    gpu_name = "unknown"
-    try:
-        proc = await asyncio.create_subprocess_exec(
-            "nvidia-smi",
-            "--query-gpu=name,memory.used,memory.free,memory.total",
-            "--format=csv,noheader,nounits",
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=3)
-        out = type(
-            "Result",
-            (),
-            {"returncode": proc.returncode, "stdout": stdout.decode() if stdout else ""},
-        )()
-        if out.returncode == 0 and out.stdout.strip():
-            parts = [p.strip() for p in out.stdout.strip().split(",")]
-            if len(parts) >= 4:
-                gpu_name = parts[0]
-                used_mib = int(parts[1])
-                free_mib = int(parts[2])
-                total_mib = int(parts[3])
-    except Exception:
-        logger.debug("gguf: не удалось запросить nvidia-smi (GPU)")
+    gpu_name, used_mib, free_mib, total_mib = "unknown", 0, 0, 0
+    gpu_out = await _run_nvidia_smi(["--query-gpu=name,memory.used,memory.free,memory.total"])
+    if gpu_out and gpu_out.strip():
+        parts = [p.strip() for p in gpu_out.strip().split(",")]
+        if len(parts) >= 4:
+            gpu_name, used_mib, free_mib, total_mib = (
+                parts[0],
+                int(parts[1]),
+                int(parts[2]),
+                int(parts[3]),
+            )
+
     per_process = []
-    try:
-        proc = await asyncio.create_subprocess_exec(
-            "nvidia-smi",
-            "--query-compute-apps=pid,process_name,used_memory",
-            "--format=csv,noheader,nounits",
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=3)
-        out = type(
-            "Result",
-            (),
-            {"returncode": proc.returncode, "stdout": stdout.decode() if stdout else ""},
-        )()
-        if out.returncode == 0:
-            for line in out.stdout.strip().splitlines():
-                parts = [p.strip() for p in line.split(",")]
-                if len(parts) >= 3:
-                    try:
-                        per_process.append(
-                            {"pid": int(parts[0]), "name": parts[1], "vram_mib": int(parts[2])}
-                        )
-                    except (ValueError, IndexError):
-                        continue
-    except Exception:
-        logger.debug("gguf: не удалось запросить nvidia-smi (per-process)")
+    proc_out = await _run_nvidia_smi(["--query-compute-apps=pid,process_name,used_memory"])
+    if proc_out:
+        for line in proc_out.strip().splitlines():
+            parts = [p.strip() for p in line.split(",")]
+            if len(parts) >= 3:
+                try:
+                    per_process.append(
+                        {"pid": int(parts[0]), "name": parts[1], "vram_mib": int(parts[2])}
+                    )
+                except (ValueError, IndexError):
+                    continue
     return {
         "gpu": {
             "name": gpu_name,

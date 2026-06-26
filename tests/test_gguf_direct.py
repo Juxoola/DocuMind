@@ -53,7 +53,7 @@ class TestDetectModelFamily:
         ],
     )
     def test_gemma_family(self, name, expected):
-        """Gemma 3 → 'gemma3', Gemma 4 → 'gemma4'."""
+        """Определение семейства Gemma: Gemma 3 → 'gemma3', Gemma 4 → 'gemma4'."""
         assert self._detect(name) == expected
 
     @pytest.mark.parametrize(
@@ -65,7 +65,7 @@ class TestDetectModelFamily:
         ],
     )
     def test_deepseek_family(self, name, expected):
-        """DeepSeek → 'deepseek'."""
+        """Определение семейства DeepSeek → 'deepseek'."""
         assert self._detect(name) == expected
 
     @pytest.mark.parametrize(
@@ -76,7 +76,7 @@ class TestDetectModelFamily:
         ],
     )
     def test_llama_family(self, name, expected):
-        """LLaMA → 'llama'."""
+        """Определение семейства LLaMA → 'llama'."""
         assert self._detect(name) == expected
 
     @pytest.mark.parametrize(

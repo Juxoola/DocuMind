@@ -78,7 +78,7 @@ _patch_whisperx_ffmpeg()
 async def get_or_load_whisper(
     model_name: str = "large-v2", device: str = "cuda", compute_type: str = "int8"
 ):
-    """Load or return cached WhisperX model. Heavy I/O runs in a thread."""
+    """Загрузка или возврат кэшированной модели WhisperX. Тяжёлые I/O выполняются в потоке."""
 
     def _load():
         key = (model_name, device, compute_type)
@@ -158,7 +158,7 @@ async def process_audio_video(
     keep_vision_alive=False,
     keep_whisper_alive=False,
 ):
-    """Main audio/video processing pipeline. GPU-bound transcription runs in a thread."""
+    """Основной пайплайн обработки аудио/видео. Транскрибация на GPU выполняется в потоке."""
 
     def _is_cancelled():
         return bool(cancel_check and cancel_check())
@@ -185,7 +185,7 @@ async def process_audio_video(
         model = await get_or_load_whisper("large-v2", device, "int8")
         prog(18, "Загрузка аудио...")
 
-        # GPU-bound: audio loading + transcription runs entirely in a thread
+        # Тяжёлая GPU-нагрузка: загрузка аудио + транскрибация целиком в потоке
         def _transcribe():
             audio = whisperx.load_audio(file_path)
             dur = len(audio) / 16000

@@ -1,7 +1,7 @@
 """
 Тесты src/rag_pipeline.py (чистые функции RAG).
 
-Тестируем _rrf_fuse, _rrf_fuse_across_files и API отложенной пересборки BM25.
+Тестируем _rrf_fuse и API отложенной пересборки BM25.
 Внешние пакеты (llama_index, torch, chromadb) мокаются через patch.dict(sys.modules, ...)
 — это единственный способ перехватить top-level импорты в src.rag.retrieval
 до загрузки тестируемого модуля.
@@ -127,26 +127,27 @@ class TestRrfFuseAcrossFiles:
     """RRF между файлами — каждый файл имеет равный голос."""
 
     def test_empty_input(self, mock_llama_index):
-        from src.rag.retrieval import _rrf_fuse_across_files
+        from src.rag.retrieval import _rrf_fuse
 
-        assert _rrf_fuse_across_files([]) == []
+        assert _rrf_fuse() == []
 
     def test_single_file(self, mock_llama_index):
         from llama_index.core.schema import NodeWithScore, TextNode
 
-        from src.rag.retrieval import _rrf_fuse_across_files
+        from src.rag.retrieval import _rrf_fuse
 
         nodes = [
             NodeWithScore(node=TextNode(text="A", id_="a1"), score=0.9),
             NodeWithScore(node=TextNode(text="B", id_="b1"), score=0.8),
         ]
-        result = _rrf_fuse_across_files([("file1.pdf", nodes)])
+        file_results = [("file1.pdf", nodes)]
+        result = _rrf_fuse(*(n for _, n in file_results))
         assert len(result) == 2
 
     def test_two_files_equal_weight(self, mock_llama_index):
         from llama_index.core.schema import NodeWithScore, TextNode
 
-        from src.rag.retrieval import _rrf_fuse_across_files
+        from src.rag.retrieval import _rrf_fuse
 
         big = [
             NodeWithScore(
@@ -160,7 +161,8 @@ class TestRrfFuseAcrossFiles:
             NodeWithScore(node=TextNode(text="Other", id_="silver"), score=0.5),
         ]
 
-        result = _rrf_fuse_across_files([("big.pdf", big), ("small.pdf", small)])
+        file_results = [("big.pdf", big), ("small.pdf", small)]
+        result = _rrf_fuse(*(n for _, n in file_results))
         ids = [nws.node.node_id for nws in result]
         assert "golden" in ids[:3], f"golden должен быть в топ-3, got: {ids[:5]}"
 
