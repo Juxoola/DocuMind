@@ -3,7 +3,8 @@
 import logging
 import os
 import threading
-from functools import lru_cache
+import time
+from dataclasses import dataclass
 
 # Отключаем онлайн-проверки Hugging Face (используем только локальный кэш)
 os.environ["HF_HUB_OFFLINE"] = os.getenv("HF_HUB_OFFLINE", "1")
@@ -78,77 +79,114 @@ ALLOWED_UPLOAD_EXTENSIONS = frozenset(
     }
 )
 
-EMBEDDING_MODEL_NAME = os.getenv("EMBEDDING_MODEL_NAME", "Qwen3-Embedding-0.6B-Q8_0.gguf")
-RERANKER_MODEL_NAME = os.getenv("RERANKER_MODEL_NAME", "qwen3-reranker-0.6b-q8_0.gguf")
-EMBEDDING_N_PARALLEL = int(os.getenv("EMBEDDING_N_PARALLEL", "2"))
 
-# Параметры RAG-пайплайна: top_k, пул реранкера, итоговое число, пороговые фильтры
-RAG_TOP_K_PER_FILE = int(os.getenv("RAG_TOP_K_PER_FILE", 5))
-RAG_RERANK_POOL = int(os.getenv("RAG_RERANK_POOL", 30))
-RAG_FINAL_TOP_N = int(os.getenv("RAG_FINAL_TOP_N", 15))
-USE_RERANKER = os.getenv("USE_RERANKER", "true").lower() == "true"
-RAG_QUERY_EXPANSION = os.getenv("RAG_QUERY_EXPANSION", "true").lower() == "true"
-RERANK_SCORE_THRESHOLD = float(os.getenv("RERANK_SCORE_THRESHOLD", "0.1"))
-MIN_FINAL_CHUNKS = int(os.getenv("MIN_FINAL_CHUNKS", "5"))
-RAG_RRF_K = int(os.getenv("RAG_RRF_K", 60))
-RAG_TOP_K_RATIO = float(os.getenv("RAG_TOP_K_RATIO", "0.1"))
+@dataclass(frozen=True)
+class RAGConfig:
+    """Неизменяемый снимок RAG-параметров. Атомарно заменяется при обновлении."""
 
-GGUF_SEARCH_DIRS = os.getenv("GGUF_SEARCH_DIRS", "F:/llm;" + os.path.join(BASE_DIR, "models"))
-GGUF_THREADS = int(os.getenv("GGUF_THREADS", 0))
-GGUF_CTX_SIZE = int(os.getenv("GGUF_CTX_SIZE", 32768))
-GGUF_CTX_EMBED_CHARS = int(os.getenv("GGUF_CTX_EMBED_CHARS", 4096))
-GGUF_GPU_LAYERS = int(os.getenv("GGUF_GPU_LAYERS", -1))
+    embedding_model: str = os.getenv("EMBEDDING_MODEL_NAME", "Qwen3-Embedding-0.6B-Q8_0.gguf")
+    reranker_model: str = os.getenv("RERANKER_MODEL_NAME", "qwen3-reranker-0.6b-q8_0.gguf")
+    embedding_n_parallel: int = int(os.getenv("EMBEDDING_N_PARALLEL", "2"))
+    top_k_per_file: int = int(os.getenv("RAG_TOP_K_PER_FILE", "5"))
+    rerank_pool: int = int(os.getenv("RAG_RERANK_POOL", "30"))
+    final_top_n: int = int(os.getenv("RAG_FINAL_TOP_N", "15"))
+    use_reranker: bool = os.getenv("USE_RERANKER", "true").lower() == "true"
+    query_expansion: bool = os.getenv("RAG_QUERY_EXPANSION", "true").lower() == "true"
+    rerank_score_threshold: float = float(os.getenv("RERANK_SCORE_THRESHOLD", "0.1"))
+    min_final_chunks: int = int(os.getenv("MIN_FINAL_CHUNKS", "5"))
+    rrf_k: int = int(os.getenv("RAG_RRF_K", "60"))
+    top_k_ratio: float = float(os.getenv("RAG_TOP_K_RATIO", "0.1"))
+    gguf_search_dirs: str = os.getenv(
+        "GGUF_SEARCH_DIRS",
+        "F:/llm;" + os.path.join(os.path.dirname(os.path.abspath(__file__)), "models"),
+    )
 
-VISION_TEMPERATURE = float(os.getenv("VISION_TEMPERATURE", 0.1))
-VISION_REPEAT_PENALTY = float(os.getenv("VISION_REPEAT_PENALTY", 1.3))
-VISION_TOP_P = float(os.getenv("VISION_TOP_P", 0.9))
-VISION_MIN_P = float(os.getenv("VISION_MIN_P", 0.05))
-VISION_CONCURRENCY = int(os.getenv("VISION_CONCURRENCY", 4))
 
-CHAT_TEMPERATURE = float(os.getenv("CHAT_TEMPERATURE", 0.7))
+# Атомарно заменяемый снимок — читатели всегда видят консистентное состояние
+rag = RAGConfig()
 
-RAG_CONFIG_FILE = os.path.join(BASE_DIR, "rag_config.json")
+
+def update_rag_config(data: dict) -> None:
+    """Атомарно заменяет глобальный снимок RAG-конфигурации."""
+    global rag
+    rag = RAGConfig(
+        embedding_model=data.get("embedding_model", rag.embedding_model),
+        reranker_model=data.get("reranker_model", rag.reranker_model),
+        embedding_n_parallel=int(data.get("embedding_n_parallel", rag.embedding_n_parallel)),
+        top_k_per_file=data.get("top_k_per_file", rag.top_k_per_file),
+        rerank_pool=data.get("rerank_pool", rag.rerank_pool),
+        final_top_n=data.get("final_top_n", rag.final_top_n),
+        use_reranker=data.get("use_reranker", rag.use_reranker),
+        gguf_search_dirs=data.get("gguf_search_dirs", rag.gguf_search_dirs),
+        query_expansion=data.get("query_expansion", rag.query_expansion),
+        rerank_score_threshold=float(
+            data.get("rerank_score_threshold", rag.rerank_score_threshold)
+        ),
+        min_final_chunks=int(data.get("min_final_chunks", rag.min_final_chunks)),
+        rrf_k=int(data.get("rrf_k", rag.rrf_k)),
+        top_k_ratio=float(data.get("top_k_ratio", rag.top_k_ratio)),
+    )
+
+
+def collect_rag_config() -> dict:
+    """Возвращает текущий снимок как dict (для API / сохранения)."""
+    from dataclasses import asdict
+
+    return asdict(rag)
+
+
+# ── Обратная совместимость: старые module-level атрибуты ──
+# Устаревшие константы — используются в тех местах, где ещё не обновлены ссылки.
+# НОВЫЙ КОД ДОЛЖЕН ИСПОЛЬЗОВАТЬ config.rag.field
+EMBEDDING_MODEL_NAME = rag.embedding_model
+RERANKER_MODEL_NAME = rag.reranker_model
+EMBEDDING_N_PARALLEL = rag.embedding_n_parallel
+RAG_TOP_K_PER_FILE = rag.top_k_per_file
+RAG_RERANK_POOL = rag.rerank_pool
+RAG_FINAL_TOP_N = rag.final_top_n
+USE_RERANKER = rag.use_reranker
+RAG_QUERY_EXPANSION = rag.query_expansion
+RERANK_SCORE_THRESHOLD = rag.rerank_score_threshold
+MIN_FINAL_CHUNKS = rag.min_final_chunks
+RAG_RRF_K = rag.rrf_k
+RAG_TOP_K_RATIO = rag.top_k_ratio
+GGUF_THREADS = int(os.getenv("GGUF_THREADS", "0"))
+GGUF_GPU_LAYERS = int(os.getenv("GGUF_GPU_LAYERS", "-1"))
+VISION_TEMPERATURE = float(os.getenv("VISION_TEMPERATURE", "0.1"))
+VISION_REPEAT_PENALTY = float(os.getenv("VISION_REPEAT_PENALTY", "1.3"))
+VISION_TOP_P = float(os.getenv("VISION_TOP_P", "0.9"))
+VISION_MIN_P = float(os.getenv("VISION_MIN_P", "0.05"))
+CHAT_TEMPERATURE = float(os.getenv("CHAT_TEMPERATURE", "0.7"))
+GGUF_SEARCH_DIRS = rag.gguf_search_dirs
+GGUF_CTX_SIZE = int(os.getenv("GGUF_CTX_SIZE", "32768"))
+GGUF_CTX_EMBED_CHARS = int(os.getenv("GGUF_CTX_EMBED_CHARS", "4096"))
+VISION_CONCURRENCY = int(os.getenv("VISION_CONCURRENCY", "4"))
 
 
 def _apply_rag_config(data: dict) -> None:
-    with _config_lock:
-        global \
-            EMBEDDING_MODEL_NAME, \
-            RERANKER_MODEL_NAME, \
-            EMBEDDING_N_PARALLEL, \
-            RAG_TOP_K_PER_FILE, \
-            RAG_RERANK_POOL, \
-            RAG_FINAL_TOP_N, \
-            USE_RERANKER, \
-            GGUF_SEARCH_DIRS, \
-            RAG_QUERY_EXPANSION, \
-            RERANK_SCORE_THRESHOLD
-        EMBEDDING_MODEL_NAME = data.get("embedding_model", EMBEDDING_MODEL_NAME)
-        RERANKER_MODEL_NAME = data.get("reranker_model", RERANKER_MODEL_NAME)
-        EMBEDDING_N_PARALLEL = int(data.get("embedding_n_parallel", EMBEDDING_N_PARALLEL))
-        RAG_TOP_K_PER_FILE = data.get("top_k_per_file", RAG_TOP_K_PER_FILE)
-        RAG_RERANK_POOL = data.get("rerank_pool", RAG_RERANK_POOL)
-        RAG_FINAL_TOP_N = data.get("final_top_n", RAG_FINAL_TOP_N)
-        USE_RERANKER = data.get("use_reranker", USE_RERANKER)
-        GGUF_SEARCH_DIRS = data.get("gguf_search_dirs", GGUF_SEARCH_DIRS)
-        RAG_QUERY_EXPANSION = data.get("query_expansion", RAG_QUERY_EXPANSION)
-        RERANK_SCORE_THRESHOLD = float(data.get("rerank_score_threshold", RERANK_SCORE_THRESHOLD))
+    """Обновляет снимок + устаревшие module-level переменные."""
+    update_rag_config(data)
+    # Обратная совместимость для кода, который ещё не мигрировал
+    global EMBEDDING_MODEL_NAME, RERANKER_MODEL_NAME, EMBEDDING_N_PARALLEL
+    global RAG_TOP_K_PER_FILE, RAG_RERANK_POOL, RAG_FINAL_TOP_N
+    global USE_RERANKER, RAG_QUERY_EXPANSION, RERANK_SCORE_THRESHOLD, GGUF_SEARCH_DIRS
+    EMBEDDING_MODEL_NAME = rag.embedding_model
+    RERANKER_MODEL_NAME = rag.reranker_model
+    EMBEDDING_N_PARALLEL = rag.embedding_n_parallel
+    RAG_TOP_K_PER_FILE = rag.top_k_per_file
+    RAG_RERANK_POOL = rag.rerank_pool
+    RAG_FINAL_TOP_N = rag.final_top_n
+    USE_RERANKER = rag.use_reranker
+    RAG_QUERY_EXPANSION = rag.query_expansion
+    RERANK_SCORE_THRESHOLD = rag.rerank_score_threshold
+    GGUF_SEARCH_DIRS = rag.gguf_search_dirs
 
 
 def _collect_rag_config() -> dict:
-    with _config_lock:
-        return {
-            "embedding_model": EMBEDDING_MODEL_NAME,
-            "reranker_model": RERANKER_MODEL_NAME,
-            "embedding_n_parallel": EMBEDDING_N_PARALLEL,
-            "top_k_per_file": RAG_TOP_K_PER_FILE,
-            "rerank_pool": RAG_RERANK_POOL,
-            "final_top_n": RAG_FINAL_TOP_N,
-            "use_reranker": USE_RERANKER,
-            "gguf_search_dirs": GGUF_SEARCH_DIRS,
-            "query_expansion": RAG_QUERY_EXPANSION,
-            "rerank_score_threshold": RERANK_SCORE_THRESHOLD,
-        }
+    return collect_rag_config()
+
+
+RAG_CONFIG_FILE = os.path.join(BASE_DIR, "rag_config.json")
 
 
 # Sync загрузка при старте (до async event loop)
@@ -165,12 +203,39 @@ def _load_config_sync():
 _load_config_sync()
 
 
-# Поиск GGUF-файла: абсолютный путь → имя через gguf_manager → обход GGUF_SEARCH_DIRS (lru_cache)
-@lru_cache(maxsize=64)
+# TTL-кэш для resolve_model_path: решает проблему устаревших путей при переименовании моделей.
+_resolve_cache: dict[str, tuple[str, float]] = {}
+_resolve_cache_lock = threading.Lock()
+_RESOLVE_MODEL_TTL = 300.0  # 5 минут
+
+
+def invalidate_model_cache(path_or_filename: str = None) -> None:
+    """Сбрасывает кэш путей моделей. Без аргументов — сбрасывает всё."""
+    with _resolve_cache_lock:
+        if path_or_filename:
+            _resolve_cache.pop(path_or_filename, None)
+        else:
+            _resolve_cache.clear()
+
+
 def resolve_model_path(path_or_filename: str) -> str:
+    """Резолвит путь к GGUF-модели с TTL-кэшированием."""
     if not path_or_filename:
         return ""
 
+    now = time.time()
+    with _resolve_cache_lock:
+        cached = _resolve_cache.get(path_or_filename)
+        if cached and (now - cached[1]) < _RESOLVE_MODEL_TTL:
+            return cached[0]
+
+    result = _resolve_model_path_uncached(path_or_filename)
+    with _resolve_cache_lock:
+        _resolve_cache[path_or_filename] = (result, now)
+    return result
+
+
+def _resolve_model_path_uncached(path_or_filename: str) -> str:
     if os.path.isabs(path_or_filename) and os.path.exists(path_or_filename):
         return os.path.normpath(path_or_filename).lower()
 
@@ -184,7 +249,7 @@ def resolve_model_path(path_or_filename: str) -> str:
     except Exception as e:
         logger.debug(f"[CONFIG] gguf_manager.find_gguf_by_name failed: {e}")
 
-    search_dirs = [d.strip() for d in GGUF_SEARCH_DIRS.split(";") if d.strip()]
+    search_dirs = [d.strip() for d in rag.gguf_search_dirs.split(";") if d.strip()]
     filename = os.path.basename(path_or_filename)
 
     for base_dir in search_dirs:

@@ -4,6 +4,8 @@ import asyncio
 import logging
 import os
 import sys
+import threading
+import time
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -143,6 +145,53 @@ async def enforce_upload_size(request, call_next):
                     )
                 },
             )
+    return await call_next(request)
+
+
+_rate_lock = threading.Lock()
+
+# Rate limiting: простой sliding-window по IP. Лимиты: upload=10/min, chat=30/min, other=60/min.
+_rate_store: dict[str, list[float]] = {}
+_RATE_LIMITS = {
+    "/api/upload": (10, 60),  # 10 запросов в 60 секунд
+    "/api/chat": (30, 60),  # 30 запросов в 60 секунд
+}
+_DEFAULT_RATE = (60, 60)  # 60 запросов в 60 секунд для остальных API
+
+
+def _get_client_ip(request) -> str:
+    forwarded = request.headers.get("x-forwarded-for")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    return request.client.host if request.client else "unknown"
+
+
+@app.middleware("http")
+async def rate_limit_middleware(request, call_next):
+    if not request.url.path.startswith("/api/"):
+        return await call_next(request)
+
+    client_ip = _get_client_ip(request)
+    now = time.time()
+
+    for pattern, (limit, window) in _RATE_LIMITS.items():
+        if request.url.path.startswith(pattern):
+            break
+    else:
+        limit, window = _DEFAULT_RATE
+
+    key = f"{client_ip}:{request.url.path.split('/')[2] if len(request.url.path.split('/')) > 2 else 'root'}"
+    with _rate_lock:
+        timestamps = _rate_store.get(key, [])
+        timestamps = [t for t in timestamps if now - t < window]
+        if len(timestamps) >= limit:
+            return JSONResponse(
+                status_code=429,
+                content={"detail": "Слишком много запросов. Попробуйте позже."},
+            )
+        timestamps.append(now)
+        _rate_store[key] = timestamps
+
     return await call_next(request)
 
 

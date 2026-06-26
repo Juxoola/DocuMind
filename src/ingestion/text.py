@@ -19,50 +19,52 @@ from src.ingestion.vision import describe_image_with_lmstudio, get_vision_url
 logger = logging.getLogger(__name__)
 
 
+def _detect_has_real_graphics(images: list, drawings: list) -> bool:
+    """Определяет, содержит ли страница реальную графику (не фоновые прямоугольники)."""
+    if images:
+        return True
+    graphics_weight = 0
+    horizontal_lines = 0
+    vertical_lines = 0
+    for d in drawings:
+        items = d.get("items", [])
+        if any(i[0] in ["c", "q"] for i in items) or len(items) > 12:
+            return True
+        rect = d.get("rect")
+        fill = d.get("fill")
+        is_page_background = (
+            len(items) == 1
+            and items[0][0] == "re"
+            and fill is not None
+            and all(c >= 0.99 for c in fill)
+            and rect is not None
+            and (rect.x1 - rect.x0) > 200
+            and (rect.y1 - rect.y0) > 200
+        )
+        if is_page_background:
+            continue
+        if rect is not None:
+            w, h = rect.x1 - rect.x0, rect.y1 - rect.y0
+            if w > 30 and h < 3:
+                horizontal_lines += 1
+            elif w < 3 and h > 30:
+                vertical_lines += 1
+        graphics_weight += 1
+    return (
+        graphics_weight > 8
+        or (horizontal_lines >= 3 and vertical_lines >= 1)
+        or (horizontal_lines + vertical_lines >= 6)
+    )
+
+
 async def _analyze_page_for_vision(page):
+    """Анализ страницы PDF: извлекает текст и определяет наличие графики."""
 
     def _sync_analyze():
         text = page.get_text()
         images = page.get_images()
         drawings = page.get_drawings()
-        has_real_graphics = bool(len(images) > 0)
-        if not has_real_graphics:
-            graphics_weight = 0
-            horizontal_lines = 0
-            vertical_lines = 0
-            for d in drawings:
-                items = d.get("items", [])
-                if any(i[0] in ["c", "q"] for i in items) or len(items) > 12:
-                    has_real_graphics = True
-                    break
-                rect = d.get("rect")
-                fill = d.get("fill")
-                is_page_background = (
-                    len(items) == 1
-                    and items[0][0] == "re"
-                    and fill is not None
-                    and all(c >= 0.99 for c in fill)
-                    and rect is not None
-                    and (rect.x1 - rect.x0) > 200
-                    and (rect.y1 - rect.y0) > 200
-                )
-                if is_page_background:
-                    continue
-                if rect is not None:
-                    w, h = rect.x1 - rect.x0, rect.y1 - rect.y0
-                    if w > 30 and h < 3:
-                        horizontal_lines += 1
-                    elif w < 3 and h > 30:
-                        vertical_lines += 1
-                graphics_weight += 1
-            if not has_real_graphics:
-                if (
-                    graphics_weight > 8
-                    or (horizontal_lines >= 3 and vertical_lines >= 1)
-                    or (horizontal_lines + vertical_lines >= 6)
-                ):
-                    has_real_graphics = True
-        return text, has_real_graphics
+        return text, _detect_has_real_graphics(images, drawings)
 
     return await asyncio.to_thread(_sync_analyze)
 
@@ -74,43 +76,7 @@ async def _analyze_and_build_page(page_num, doc, images_dir, file_name, splitter
         text = page.get_text()
         images = page.get_images()
         drawings = page.get_drawings()
-        has_real_graphics = bool(len(images) > 0)
-        if not has_real_graphics:
-            graphics_weight = 0
-            horizontal_lines = 0
-            vertical_lines = 0
-            for d in drawings:
-                items = d.get("items", [])
-                if any(i[0] in ["c", "q"] for i in items) or len(items) > 12:
-                    has_real_graphics = True
-                    break
-                rect = d.get("rect")
-                fill = d.get("fill")
-                is_page_background = (
-                    len(items) == 1
-                    and items[0][0] == "re"
-                    and fill is not None
-                    and all(c >= 0.99 for c in fill)
-                    and rect is not None
-                    and (rect.x1 - rect.x0) > 200
-                    and (rect.y1 - rect.y0) > 200
-                )
-                if is_page_background:
-                    continue
-                if rect is not None:
-                    w, h = rect.x1 - rect.x0, rect.y1 - rect.y0
-                    if w > 30 and h < 3:
-                        horizontal_lines += 1
-                    elif w < 3 and h > 30:
-                        vertical_lines += 1
-                graphics_weight += 1
-            if not has_real_graphics:
-                if (
-                    graphics_weight > 8
-                    or (horizontal_lines >= 3 and vertical_lines >= 1)
-                    or (horizontal_lines + vertical_lines >= 6)
-                ):
-                    has_real_graphics = True
+        has_real_graphics = _detect_has_real_graphics(images, drawings)
 
         local_nodes = []
         image_path = None

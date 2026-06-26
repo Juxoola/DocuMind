@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import threading
 from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor
 
@@ -15,10 +16,10 @@ _CLIENT_CACHE_MAXSIZE = 20
 _client_cache: OrderedDict = OrderedDict()
 _client_cache_lock = asyncio.Lock()
 
-# Кеш VectorStoreIndex — не пересоздаётся при каждом запросе
+# Кеш VectorStoreIndex — не пересоздаётся при каждого запроса
 _INDEX_CACHE_MAXSIZE = 50
 _index_cache: OrderedDict = OrderedDict()
-_index_cache_lock = asyncio.Lock()
+_index_cache_lock = threading.Lock()
 
 # Выделенный пул потоков для RAG-операций (ChromaDB + BM25 + reranking).
 # Отдельный от default executor чтобы не блокировать другие async-задачи.

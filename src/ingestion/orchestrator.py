@@ -1,9 +1,12 @@
 """Оркестрация ингеста: маршрутизация файла по типу к нужному обработчику."""
 
+from __future__ import annotations
+
 import logging
 import os
 import shutil
 import uuid
+from collections.abc import Callable
 
 import aiofiles.os
 from llama_index.core.schema import TextNode
@@ -20,14 +23,14 @@ logger = logging.getLogger(__name__)
 
 
 async def ingest_file(
-    file_path,
-    notebook_id,
-    progress_cb=None,
-    llm_settings=None,
-    cancel_check=None,
-    keep_vision_alive=False,
-    keep_whisper_alive=False,
-):
+    file_path: str,
+    notebook_id: str,
+    progress_cb: Callable[[int, str], None] | None = None,
+    llm_settings: dict | None = None,
+    cancel_check: Callable[[], bool] | None = None,
+    keep_vision_alive: bool = False,
+    keep_whisper_alive: bool = False,
+) -> list[TextNode]:
 
     def _is_cancelled():
         return bool(cancel_check and cancel_check())

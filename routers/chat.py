@@ -18,21 +18,27 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["chat"])
 
 
-class ChatRequest(BaseModel):
+# ── Chat request models (группировка полей) ──────────────────────────────
+
+
+class RAGQuery(BaseModel):
+    """Параметры поискового запроса."""
+
     query: str
     allowed_files: list[str]
-    max_tokens: int = 2048
     notebook_id: str
-    thinking_mode: bool = False
+    history: list[dict] = Field(default_factory=list)
+    image_base64: str | None = None
+    answer_mode: str | None = "concise"
+    context_strategy: str | None = "sliding"
+
+
+class LLMConfig(BaseModel):
+    """Конфигурация LLM-сервера (LLM Studio / GGUF)."""
+
     llm_url: str | None = None
     llm_api_key: str | None = config.LLM_DEFAULT_API_KEY
     llm_model: str | None = config.LLM_DEFAULT_MODEL
-    image_base64: str | None = None
-    answer_mode: str | None = "concise"
-    gguf_kv_quant: int | None = 2
-    repeat_penalty: float | None = 1.1
-    top_p: float | None = 0.95
-    min_p: float | None = 0.05
     use_gguf: str | None = None
     gguf_model_path: str | None = None
     gguf_mmproj_path: str | None = None
@@ -43,10 +49,25 @@ class ChatRequest(BaseModel):
     gguf_batch_size: int | None = 512
     gguf_ubatch_size: int | None = 256
     gguf_flash_attn: str | None = "true"
+    gguf_kv_quant: int | None = 2
+    thinking_mode: bool = False
     thinking_budget: int | None = 1024
-    history: list[dict] = Field(default_factory=list)
-    context_strategy: str | None = "sliding"
     mtp_enabled: bool | None = False
+
+
+class SamplingConfig(BaseModel):
+    """Параметры генерации (temperature, top_p, и т.д.)."""
+
+    max_tokens: int = 2048
+    repeat_penalty: float | None = 1.1
+    top_p: float | None = 0.95
+    min_p: float | None = 0.05
+
+
+# Плоская модель для обратной совместимости с фронтендом.
+# Все поля доступны напрямую: request.query, request.gguf_model_path и т.д.
+class ChatRequest(RAGQuery, LLMConfig, SamplingConfig):
+    pass
 
 
 def _build_chat_messages(

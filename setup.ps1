@@ -54,16 +54,27 @@ if (-not (Test-Path $pip)) {
 }
 
 Write-Color $Colors.Info "[3/7] Установка Python-зависимостей..."
+$python = "$(Join-Path $venvDir 'Scripts' 'python.exe')"
 try {
-    if (Test-Path (Join-Path $ScriptDir "pyproject.toml")) {
-        & "$(Join-Path $venvDir 'Scripts' 'python.exe')" -m pip install -e "$ScriptDir" --quiet 2>&1 | Out-Null
+    & $python -m pip install -e "$ScriptDir" --quiet 2>&1 | Out-Null
+    # CUDA-билды torch: перезаписывают CPU-версию из pyproject.toml
+    $cudaReq = Join-Path $ScriptDir "requirements-cuda.txt"
+    if (Test-Path $cudaReq) {
+        & $python -m pip install -r $cudaReq --quiet 2>&1 | Out-Null
+        # Проверяем что установилась CUDA-сборка
+        $torchInfo = & $python -c "import torch; print(torch.__version__, torch.cuda.is_available())" 2>&1
+        if ($torchInfo -match "cu128" -and $torchInfo -match "True") {
+            Write-Color $Colors.Ok "  Зависимости установлены (torch $(& $python -c 'import torch; print(torch.__version__)'))"
+        } else {
+            Write-Color $Colors.Warn "  Torch установлен без CUDA! Версия: $torchInfo"
+            Write-Color $Colors.Info "  Установите вручную: pip install -r requirements-cuda.txt"
+        }
     } else {
-        & "$(Join-Path $venvDir 'Scripts' 'python.exe')" -m pip install -r "$ScriptDir\requirements.txt" --quiet 2>&1 | Out-Null
+        Write-Color $Colors.Ok "  Зависимости установлены (CPU-only: requirements-cuda.txt не найден)"
     }
-    Write-Color $Colors.Ok "  Зависимости установлены"
 } catch {
     Write-Color $Colors.Warn "  Ошибка установки зависимостей: $_"
-    Write-Color $Colors.Info "  Попробуйте вручную: pip install -r requirements.txt"
+    Write-Color $Colors.Info "  Попробуйте вручную: pip install -e . && pip install -r requirements-cuda.txt"
 }
 
 # ── 3. Node.js и frontend ──

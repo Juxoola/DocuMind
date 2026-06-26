@@ -1,2 +1,0 @@
-# Windows-only: pywin32 для COM-доступа к MS Office (требует установленный Office)
-pywin32
