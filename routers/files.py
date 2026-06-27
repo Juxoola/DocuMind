@@ -34,6 +34,8 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["files"])
 
 
+# ── Получение списка файлов блокнота ──
+
 @router.get("/api/files")
 async def get_files(notebook_id: str):
     from routers.notebooks import validate_nb_id
@@ -327,6 +329,8 @@ async def upload_file(
     return StreamingResponse(event_generator(), media_type="text/event-stream")
 
 
+# ── Отмена загрузки ──
+
 @router.post("/api/upload/cancel")
 async def cancel_upload(notebook_id: str = Query(...), task_id: str = Query(None)):
     try:
@@ -349,6 +353,8 @@ async def cancel_upload(notebook_id: str = Query(...), task_id: str = Query(None
         found = True
     return {"status": "cancel_requested" if found else "no_active_upload"}
 
+
+# ── Удаление файла и очистка индексов ──
 
 @router.delete("/api/files/{filename}")
 async def delete_file(filename: str, notebook_id: str):
@@ -562,6 +568,8 @@ def _content_disposition(name: str, ext: str) -> str:
     return f"attachment; filename=\"{ascii_safe}\"; filename*=UTF-8''{encoded}"
 
 
+
+# ── Экспорт текста и видео-метаданные ──
 @router.get("/api/export_text")
 async def export_text(filename: str, notebook_id: str, fmt: str = "txt"):
 

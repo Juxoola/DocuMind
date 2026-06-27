@@ -22,7 +22,6 @@ os.makedirs(NOTEBOOKS_DIR, exist_ok=True)
 
 
 # Пути для хранения данных каждого notebook: data, chroma_db, images.
-# Кэш результатов: избегает 20+ alloc dict за запрос
 _notebook_paths_cache: dict[str, dict] = {}
 
 
@@ -141,10 +140,6 @@ def collect_rag_config() -> dict:
 
     return asdict(rag)
 
-
-# ── Обратная совместимость: старые module-level атрибуты ──
-# Устаревшие константы — используются в тех местах, где ещё не обновлены ссылки.
-# НОВЫЙ КОД ДОЛЖЕН ИСПОЛЬЗОВАТЬ config.rag.field
 EMBEDDING_MODEL_NAME = rag.embedding_model
 RERANKER_MODEL_NAME = rag.reranker_model
 EMBEDDING_N_PARALLEL = rag.embedding_n_parallel
@@ -191,8 +186,9 @@ def _collect_rag_config() -> dict:
     return collect_rag_config()
 
 
-RAG_CONFIG_FILE = os.path.join(BASE_DIR, "rag_config.json")
 
+
+RAG_CONFIG_FILE = os.path.join(BASE_DIR, "rag_config.json")
 
 # Sync загрузка при старте (до async event loop)
 def _load_config_sync():

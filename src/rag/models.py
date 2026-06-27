@@ -1,4 +1,4 @@
-"""Инициализация, предзагрузка и выгрузка RAG-моделей (embedding, reranker, LLM)."""
+"""Инициализация и lifecycle RAG-моделей: embedding, reranker, LLM."""
 
 import asyncio
 import logging
@@ -12,12 +12,14 @@ from src.rag.state import _model_cache
 
 _init_lock = asyncio.Lock()
 _model_cache_lock = asyncio.Lock()
-# Кэш последнего max_tokens: позволяет пропустить пересоздание Settings.llm
+
+# Кэш последнего max_tokens: пропускает пересоздание Settings.llm при совпадении
 _last_max_tokens: int = 0
 
 logger = logging.getLogger(__name__)
 
 
+# Инициализация глобальных Settings (embedding-модель + LLM) с кэшированием
 async def init_settings(max_tokens=1024):
     global _model_cache, _last_max_tokens
 
@@ -44,6 +46,7 @@ async def init_settings(max_tokens=1024):
     )
 
 
+# Загрузка GGUF embedding-модели через локальный сервер с автоопределением parallelism
 async def _init_embed_model():
     model_name = config.EMBEDDING_MODEL_NAME
 
@@ -83,6 +86,7 @@ async def _init_embed_model():
     )
 
 
+# Предзагрузка embedding и реранкера при старте приложения (lazily для LLM)
 async def preload_all_models():
     logger.info("[RAG] Предзагрузка моделей...")
     try:
@@ -107,6 +111,7 @@ async def preload_all_models():
     logger.info("[RAG] Предзагрузка завершена.")
 
 
+# Выгрузка моделей и очистка GPU-памяти (hard — полная, soft — без эмбеддингов)
 def unload_rag_models(hard=True):
     global _model_cache
     if not _model_cache:

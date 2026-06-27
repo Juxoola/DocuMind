@@ -1,4 +1,4 @@
-"""ChromaDB операции: построение индекса, клиенты, close."""
+"""Управление векторным индексом ChromaDB: создание, кэширование клиентов и удаление."""
 
 import asyncio
 import logging
@@ -19,11 +19,11 @@ logger = logging.getLogger(__name__)
 _client_cache_lock = asyncio.Lock()
 
 
-# Макс. символов на чанк для embedding — запас 12000 (≈3000 токенов) от лимита контекста
+# Лимит длины текста чанка для embedding (≈3000 токенов от лимита контекста)
 _MAX_EMBED_CHARS = 12000
 
 
-# Построение векторного индекса из nodes и запуск фоновой пересборки BM25
+# Построение векторного индекса из узлов и запуск фоновой пересборки BM25
 async def build_index(nodes, notebook_id: str):
     await init_settings()
 
@@ -46,6 +46,7 @@ async def build_index(nodes, notebook_id: str):
     return index
 
 
+# LRU-кэш ChromaDB-клиентов: переиспользование при повторных запросах к одному ноутбуку
 async def get_vector_store(notebook_id: str):
     global _client_cache
     paths = config.get_notebook_paths(notebook_id)
@@ -83,6 +84,7 @@ async def get_vector_store(notebook_id: str):
     return vector_store
 
 
+# Закрытие всех ChromaDB-клиентов (при завершении работы или сбросе кэша)
 async def close_all_clients():
     global _client_cache
     async with _client_cache_lock:
@@ -94,6 +96,7 @@ async def close_all_clients():
         _client_cache.clear()
 
 
+# Закрытие клиента конкретного ноутбука и удаление его коллекции
 async def close_notebook_client(notebook_id: str):
     global _client_cache
     from config import get_notebook_paths

@@ -19,6 +19,7 @@ from src.ingestion.vision import describe_image_with_lmstudio, get_vision_url
 logger = logging.getLogger(__name__)
 
 
+# Анализ графических элементов страницы для определения необходимости Vision
 def _detect_has_real_graphics(images: list, drawings: list) -> bool:
     if images:
         return True
@@ -90,6 +91,7 @@ async def _analyze_and_build_page(page_num, doc, images_dir, file_name, splitter
     return await asyncio.to_thread(_sync_build)
 
 
+# Основной конвейер PDF: извлечение текста, батчевая параллельная обработка, Vision-анализ
 async def process_pdf(
     file_path,
     images_dir,
@@ -269,6 +271,7 @@ async def process_pdf(
     return nodes
 
 
+# Конвертация Office-файлов в PDF: LibreOffice (приоритет), COM (резерв), текстовый fallback
 def _find_soffice():
     import shutil
 
@@ -430,6 +433,7 @@ async def _process_office_textonly(file_path, file_name, extract_fn, log_prefix)
     return await asyncio.to_thread(_sync)
 
 
+# Обработка PPTX/DOCX: конвертация в PDF + Vision или текстовый fallback
 async def process_pptx(
     file_path,
     images_dir,

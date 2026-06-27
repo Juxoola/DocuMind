@@ -34,7 +34,7 @@ _llm_load_state: dict = {
 }
 
 _win32_job = None
-# Win32 Job Object: привязывает llama-server к job, чтобы ОС убила при аварии родителя
+# ── Win32 Job Object: привязывает llama-server к job для аварийного завершения ──
 if os.name == "nt":
     try:
         _win32_job = ctypes.windll.kernel32.CreateJobObjectW(None, None)
@@ -58,7 +58,7 @@ def _assign_to_job(process):
             logger.debug(f"AssignProcessToJobObject failed (non-critical): {e}")
 
 
-# Маппер KV-кеша: числовые коды llama.cpp → строковые флаги
+# ── Маппер KV-кеша: числовые коды llama.cpp → строковые флаги ──
 CACHE_TYPE_MAP = {
     0: "f16",
     1: "f32",

@@ -39,7 +39,6 @@ logging.getLogger("whisperx").setLevel(logging.WARNING)
 
 import warnings
 
-# (?s) — inline DOTALL: . матчит \n (pyannote начинает сообщение с \n)
 warnings.filterwarnings("ignore", message="(?s).*torchcodec is not installed")
 warnings.filterwarnings("ignore", message="(?s).*Could not load libtorchcodec")
 warnings.filterwarnings("ignore", message="(?s).*list_audio_backends")
@@ -130,7 +129,6 @@ if os.name == "nt":
 app = FastAPI(title="DocuMind", lifespan=lifespan)
 
 
-# Middleware: проверяет Content-Length для /api/upload до передачи в роутер — отклоняет файлы больше лимита.
 @app.middleware("http")
 async def enforce_upload_size(request, call_next):
     if request.url.path.startswith("/api/upload"):
@@ -153,10 +151,10 @@ _rate_lock = threading.Lock()
 # Rate limiting: простой sliding-window по IP. Лимиты: upload=10/min, chat=30/min, other=60/min.
 _rate_store: dict[str, list[float]] = {}
 _RATE_LIMITS = {
-    "/api/upload": (10, 60),  # 10 запросов в 60 секунд
-    "/api/chat": (30, 60),  # 30 запросов в 60 секунд
+    "/api/upload": (10, 60),
+    "/api/chat": (30, 60),
 }
-_DEFAULT_RATE = (60, 60)  # 60 запросов в 60 секунд для остальных API
+_DEFAULT_RATE = (60, 60)
 
 
 def _get_client_ip(request) -> str:

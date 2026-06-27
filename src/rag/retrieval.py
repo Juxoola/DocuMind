@@ -1,4 +1,4 @@
-"""Модуль извлечения документов для RAG-пайплайна."""
+"""Гибридный поиск RAG: векторный + BM25 со слиянием по RRF и опциональным реранкингом."""
 
 import asyncio
 import logging
@@ -40,14 +40,13 @@ from src.rag.state import (
 
 logger = logging.getLogger(__name__)
 
-# Переиспользуемые HTTP-клиенты для реранкинга и кэш проверки работоспособности LLM
+# HTTP-клиент для реранкинга, кэш здоровья LLM и предкомпилированные регулярки QE
 _async_rerank_http = httpx.AsyncClient(timeout=60)
 
 _qe_health_cache: dict[str, tuple[bool, float]] = {}
 _qe_health_cache_lock = threading.Lock()
 _QE_HEALTH_TTL = 120.0
 
-# Предкомпилированные регулярки для QE callback (избегаем re.sub на каждый вызов)
 _QE_RE_NUM = re.compile(r"^\d+[\.\)]\s*")
 _QE_RE_BULLET = re.compile(r"^[-\*\+]\s*")
 
@@ -70,8 +69,7 @@ async def _is_llm_healthy(url: str) -> bool:
     return result
 
 
-# Обёртка над BM25Retriever: фильтрует результаты по списку файлов
-# до передачи в RRF-фьюжен, чтобы отключённые файлы не влияли на ранжирование
+# Обёртка над BM25Retriever: фильтрация по списку разрешённых файлов перед RRF-слиянием
 class _FilteredBM25:
     def __init__(self, base, allowed_files):
         self._base = base
@@ -114,7 +112,7 @@ def _file_filter(file_names: str | list[str]):
     )
 
 
-# Расширение запроса (Query Expansion): LLM генерирует 3-5 альтернативных запросов для лучшего покрытия
+# Промпт Query Expansion: LLM генерирует альтернативные поисковые запросы для лучшего покрытия
 _QUERY_GEN_PROMPT = (
     "Ты — эксперт по поиску информации. Сформулируй ровно {num_queries} разных коротких поисковых запроса "
     "на том же языке для поиска справочной теории, правил и формул в учебных материалах на основе следующего задания/вопроса.\n"
@@ -207,6 +205,7 @@ async def _load_bm25_retriever(notebook_id: str):
     return bm25_retriever
 
 
+# Основная логика гибридного поиска: векторный + BM25 с QE и RRF-слиянием
 async def _hybrid_search(index, query: str, allowed_files, bm25_retriever, qe_llm):
     all_nodes = []
 
@@ -567,7 +566,7 @@ def _filter_chunks(all_nodes):
     return all_nodes
 
 
-# Гибридный поиск: векторный (ChromaDB) + BM25 со слиянием по взаимному рангу (RRF), опциональный реранкинг через GGUF
+# Точка входа: полный пайплайн поиска (индекс → гибридный поиск → реранкинг → фильтрация)
 async def retrieve_nodes(query: str, notebook_id: str, allowed_files=None, max_tokens=1024):
     await init_settings(max_tokens=max_tokens)
     vector_store = await get_vector_store(notebook_id)

@@ -13,6 +13,7 @@ from src.ingestion.utils import cleanup_gpu
 logger = logging.getLogger(__name__)
 
 
+# Кодирование изображения в base64 с ресайзом при превышении лимита
 def get_image_base64(image_path, max_dimension=1568):
     try:
         import io
@@ -43,6 +44,7 @@ def make_vision_message(base64_data: str, text: str = "") -> list:
     return msg
 
 
+# Ленивый запуск Vision-сервера при первом обращении
 async def get_vision_url(llm_settings, progress_cb=None):
     if not llm_settings or not llm_settings.get("use_gguf_direct"):
         return None
@@ -93,6 +95,7 @@ def _clean_think_tags(text):
     return text.strip()
 
 
+# Описание изображения через GGUF Vision или LM Studio API с retry
 async def describe_image_with_lmstudio(
     image_path, llm_settings=None, existing_llm_url=None, cancel_check=None
 ):
@@ -115,6 +118,7 @@ async def describe_image_with_lmstudio(
 
 Пиши технически точно, лаконично, без лишних вводных фраз и пояснений процесса."""
 
+    # Основной путь: GGUF Vision через llama-server
     if existing_llm_url:
         for attempt in range(2):
             if cancel_check and cancel_check():
@@ -179,6 +183,7 @@ async def describe_image_with_lmstudio(
                 await asyncio.sleep(1)
         return "Ошибка анализа после всех попыток"
 
+    # Резервный путь: LM Studio API
     api_url = (llm_settings.get("llm_url") if llm_settings else None) or config.LM_STUDIO_URL
     if cancel_check and cancel_check():
         return "Изображение без описания."

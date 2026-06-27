@@ -28,13 +28,13 @@ from src.ingestion.vision import describe_image_with_lmstudio, get_vision_url
 
 logger = logging.getLogger(__name__)
 
+
+# Кэш моделей WhisperX и монопатчинг ffmpeg для совместимости с imageio-ffmpeg
 _whisper_model_cache: dict = {}
 _whisper_lock = threading.Lock()
 
 
-# ── Monkey-patch: whisperx.load_audio вызывает "ffmpeg" из PATH,
-# а imageio-ffmpeg хранит свой bundled ffmpeg в site-packages.
-# Заменяем вызов, чтобы WhisperX использовал тот же ffmpeg, что и ensure_mp3_audio. ──
+# Замена ffmpeg в WhisperX на bundled imageio-ffmpeg
 def _patch_whisperx_ffmpeg():
     try:
         import whisperx.audio as _wa
@@ -75,6 +75,7 @@ def _patch_whisperx_ffmpeg():
 _patch_whisperx_ffmpeg()
 
 
+# Ленивая загрузка моделей WhisperX с кэшированием по (model, device, compute_type)
 async def get_or_load_whisper(
     model_name: str = "large-v2", device: str = "cuda", compute_type: str = "int8"
 ):
@@ -117,6 +118,7 @@ async def unload_whisper_model():
     await asyncio.to_thread(_unload)
 
 
+# Извлечение кадра из видео через FFmpeg с аппаратным ускорением
 async def save_high_res_frame(video_path, time_sec, output_path):
     try:
         from imageio_ffmpeg import get_ffmpeg_exe
@@ -146,6 +148,7 @@ async def save_high_res_frame(video_path, time_sec, output_path):
         logger.warning(f"Ошибка FFmpeg при сохранении кадра: {e}")
 
 
+# Основной конвейер: транскрибация WhisperX → анализ кадров видео → Vision-описание
 async def process_audio_video(
     file_path,
     images_dir,
@@ -175,6 +178,7 @@ async def process_audio_video(
     transcript_data = []
     frame_data = []
 
+    # Транскрибация аудио через WhisperX с VAD
     prog(15, "Загрузка модели WhisperX...")
     device = "cuda" if torch.cuda.is_available() else "cpu"
     try:
@@ -224,6 +228,7 @@ async def process_audio_video(
                 chunk_text = ""
     prog(60, "Транскрибация завершена")
 
+    # Детекция сцен видео: извлечение кадров при изменении содержимого
     if is_video:
         prog(62, "Анализ изменений в видео...")
         cap = cv2.VideoCapture(file_path)
@@ -350,6 +355,7 @@ async def process_audio_video(
 
         gc.collect()
 
+        # Описание извлечённых кадров через Vision с батчевой обработкой
         n = len(frame_list)
         shared_llm_url = None
         if n > 0:
@@ -435,6 +441,7 @@ async def process_audio_video(
         if shared_llm_url and not keep_vision_alive:
             await unload_all_models(role="vision")
 
+    # Сохранение JSON-метаданных с транскриптом и описаниями кадров
     metadata_json = {
         "file_name": file_name,
         "is_video": is_video,

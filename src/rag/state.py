@@ -1,4 +1,4 @@
-"""Глобальное состояние RAG-подсистемы: кеш моделей, клиентов, блокировки и debounce BM25."""
+"""Глобальное состояние RAG-подсистемы: кэши, блокировки и фоновые задачи."""
 
 import asyncio
 import logging
@@ -9,6 +9,7 @@ logger = logging.getLogger(__name__)
 
 _init_lock = asyncio.Lock()
 
+# Кэши моделей и ChromaDB-клиентов с LRU-эвикцией
 _model_cache: dict = {}
 _model_cache_lock = asyncio.Lock()
 _CLIENT_CACHE_MAXSIZE = 20
@@ -19,11 +20,10 @@ _INDEX_CACHE_MAXSIZE = 50
 _index_cache: OrderedDict = OrderedDict()
 _index_cache_lock = asyncio.Lock()
 
-# Выделенный пул потоков для RAG-операций (ChromaDB + BM25 + reranking).
-# Отдельный от default executor чтобы не блокировать другие async-задачи.
+# Выделенный пул потоков для CPU-интенсивных RAG-операций (embedding, reranking, BM25)
 RAG_POOL = ThreadPoolExecutor(max_workers=4, thread_name_prefix="rag")
 
-# Debounce BM25: несколько вызовов подряд сбрасывают таймер (10с покоя)
+# Debounce-механизм фоновой пересборки BM25: повторные вызовы сбрасывают таймер
 _BM25_DEBOUNCE_SEC = 10.0
 _bm25_pending_timers: dict = {}
 _bm25_pending_dbpath: dict = {}

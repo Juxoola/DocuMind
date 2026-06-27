@@ -9,8 +9,9 @@ import threading
 import torch
 
 logger = logging.getLogger(__name__)
-# Предупреждения библиотек подавлены в main.py (до импорта сторонних модулей)
 
+
+# Патчинг inspect.getmodule для подавления ошибок + настройка DLL-директории torch
 _orig_getmodule = _inspect_module.getmodule
 
 
@@ -31,6 +32,7 @@ except Exception:
     pass
 
 
+# Реестр дочерних процессов для отслеживания и завершения
 _active_subprocesses: dict = {}
 _subprocesses_lock = threading.Lock()
 
@@ -52,24 +54,25 @@ def unregister_subprocess(notebook_id, popen):
             _active_subprocesses.pop(notebook_id, None)
 
 
-# Убивает все ffmpeg/subprocess процессы блокнота — используется при cancel
+# Принудительное завершение процессов блокнота при отмене
 def kill_subprocesses(notebook_id):
     with _subprocesses_lock:
         procs = _active_subprocesses.pop(notebook_id, [])
     for p in procs:
         try:
             if p.poll() is None:
-                p.kill()  # SIGKILL — мгновенное завершение
+                p.kill()
         except Exception:
             pass
     return len(procs)
 
 
+# Исключение отмены операции ингестации
 class IngestionCancelled(Exception):
     pass
 
 
-# Очистка видеопамяти перед тяжёлыми задачами (выгрузка RAG-моделей)
+# Очистка видеопамяти перед тяжёлыми задачами
 def cleanup_gpu():
 
     gc.collect()

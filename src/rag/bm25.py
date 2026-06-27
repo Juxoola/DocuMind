@@ -1,4 +1,4 @@
-"""BM25 lifecycle: сборка, debounce, отмена, проверка готовности."""
+"""Жизненный цикл BM25-индекса: инкрементальная сборка, debounce, отмена и проверка готовности."""
 
 import asyncio
 import logging
@@ -17,7 +17,7 @@ from src.rag.state import (
     _bm25_rebuilding,
 )
 
-# Локальные замены asyncio.Lock (перекрывают импортированные threading-based блокировки)
+# Локальные asyncio.Lock вместо импортированных threading-based блокировок
 _bm25_pending_lock = asyncio.Lock()
 _bm25_rebuilding_lock = asyncio.Lock()
 _bm25_node_cache_lock = asyncio.Lock()
@@ -26,6 +26,7 @@ logger = logging.getLogger(__name__)
 _bm25_tasks: set[asyncio.Task] = set()
 
 
+# Инкрементальная сборка BM25: из кэша узлов или полная загрузка из ChromaDB
 async def _rebuild_bm25_bg(notebook_id: str, db_path: str, new_nodes: list = None):
     _PAGE_SIZE = 2000
     try:
@@ -102,6 +103,7 @@ async def _rebuild_bm25_bg(notebook_id: str, db_path: str, new_nodes: list = Non
         logger.warning(f"[RAG] Ошибка фоновой сборки BM25: {e}")
 
 
+# Планирование rebuild с debounce: повторные вызовы сбрасывают предыдущий таймер
 async def _schedule_bm25_rebuild(notebook_id: str, db_path: str, new_nodes: list = None):
     async with _bm25_pending_lock:
         old = _bm25_pending_timers.get(notebook_id)
@@ -153,6 +155,7 @@ async def cancel_bm25_rebuild(notebook_id: str):
                 logger.debug(f"[cancel_bm25_rebuild] task.cancel: {e}")
 
 
+# Принудительный flush: немедленный rebuild без ожидания debounce
 async def flush_bm25_rebuild(
     notebook_id: str,
     db_path: str = None,
@@ -199,6 +202,7 @@ async def flush_bm25_rebuild(
             _bm25_rebuilding.discard(notebook_id)
 
 
+# Проверка готовности BM25: файл существует, нет pending-таймеров и нет активной сборки
 async def is_bm25_ready(notebook_id: str) -> bool:
     paths = config.get_notebook_paths(notebook_id)
     bm25_dir = os.path.join(paths["base"], "bm25")

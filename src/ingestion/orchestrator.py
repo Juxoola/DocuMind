@@ -22,6 +22,7 @@ from src.ingestion.vision import describe_image_with_lmstudio, get_vision_url
 logger = logging.getLogger(__name__)
 
 
+# Основная точка входа: маршрутизация файла по расширению к обработчику
 async def ingest_file(
     file_path: str,
     notebook_id: str,
@@ -40,6 +41,7 @@ async def ingest_file(
     images_dir = paths["images"]
     await aiofiles.os.makedirs(images_dir, exist_ok=True)
 
+    # Предварительная конвертация медиафайлов перед обработкой
     if _is_cancelled():
         raise IngestionCancelled("Cancelled before media conversion")
 
@@ -54,6 +56,7 @@ async def ingest_file(
     if _is_cancelled():
         raise IngestionCancelled("Cancelled after media conversion")
 
+    # Диспетчеризация по типу файла: аудио/видео, документы, изображения, текст
     if ext in [".mp4", ".avi", ".mkv", ".mov", ".mp3"]:
         return await process_audio_video(
             file_path,
@@ -115,6 +118,7 @@ async def ingest_file(
     return nodes
 
 
+# Обработка изображений через Vision с сохранением метаданных
 async def process_image(
     file_path,
     images_dir,
@@ -136,6 +140,7 @@ async def process_image(
     nodes = []
     frame_data = []
 
+    # Запуск Vision-сервера и получение описания изображения
     if _is_cancelled():
         from src.ingestion.utils import IngestionCancelled
 
@@ -186,6 +191,7 @@ async def process_image(
     else:
         logger.info("[IMAGE] Vision не настроен — пропуск анализа изображения")
 
+    # Сохранение JSON-метаданных с описанием изображения
     if frame_data:
         metadata_json = {
             "file_name": file_name,

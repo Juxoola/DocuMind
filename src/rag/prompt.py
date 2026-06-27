@@ -1,4 +1,4 @@
-"""Построение контекста, промптов и получение URL эмбеддинг-сервера."""
+"""Построение промпта и контекста для RAG-ответа."""
 
 import asyncio
 import logging
@@ -11,6 +11,7 @@ from src.rag.state import _model_cache
 logger = logging.getLogger(__name__)
 
 
+# Формирование контекста из найденных фрагментов с проверкой изображений
 async def build_file_context(nodes, notebook_id: str):
     paths = config.get_notebook_paths(notebook_id)
 
@@ -59,6 +60,7 @@ async def build_file_context(nodes, notebook_id: str):
     return sources, context_str
 
 
+# Сборка итогового промпта из системного промпта, контекста и вопроса
 def make_prompt(
     query: str,
     context_str: str,
@@ -75,6 +77,7 @@ def make_prompt(
     )
 
 
+# Получение URL работающего эмбеддинг-сервера из кэша моделей
 def get_embedding_url() -> str | None:
     global _model_cache
     embed = _model_cache.get("embed_model")

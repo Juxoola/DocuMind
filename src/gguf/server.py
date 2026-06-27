@@ -25,7 +25,7 @@ from src.gguf.state import (
 
 logger = logging.getLogger(__name__)
 
-# Переиспользуемый HTTP-клиент для health-check polling (is_server_ready)
+# ── Переиспользуемый HTTP-клиент для health-check (один коннект на все polling-циклы) ──
 _health_http: httpx.AsyncClient | None = None
 _health_http_lock = asyncio.Lock()
 
@@ -39,7 +39,7 @@ async def _get_health_client() -> httpx.AsyncClient:
     return _health_http
 
 
-# Выделение порта, убийство процесса, ожидание готовности сервера.
+# ── Утилиты: выделение порта, убийство процесса, ожидание готовности сервера ──
 def _allocate_port() -> int:
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -253,7 +253,7 @@ def _build_llm_config(
     }
 
 
-# Нормализация путей, построение конфига и загрузка LLM: общая логика для sync и background вариантов.
+# ── Нормализация путей и построение конфига: общая логика для sync и background ──
 def _resolve_llm_config(
     gguf_path: str, mmproj_path: str = None, **kwargs
 ) -> tuple[str, str | None, dict]:
@@ -652,7 +652,7 @@ async def count_running_servers() -> int:
         return alive
 
 
-# Выгрузка процессов через taskkill/pkill + cleanup GPU через torch.cuda.empty_cache
+# ── Выгрузка всех процессов и очистка GPU ──
 
 
 async def unload_all_models(role: str = None):

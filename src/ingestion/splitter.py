@@ -5,10 +5,13 @@ import threading
 
 logger = logging.getLogger(__name__)
 
+
+# Кэш сплиттера с двойной проверкой для потокобезопасности
 _SPLITTER_LOCK = threading.Lock()
 _splitter_cache = None
 
 
+# Создание сплиттера: приоритет SemanticSplitter, fallback на SentenceSplitter
 def _get_splitter():
     global _splitter_cache
 
@@ -19,6 +22,7 @@ def _get_splitter():
         if _splitter_cache is not None:
             return _splitter_cache
 
+        # Попытка инициализации семантического сплиттера с эмбеддингами
         try:
             from llama_index.core.node_parser import SemanticSplitterNodeParser
             from llama_index.embeddings.openai import OpenAIEmbedding
@@ -44,6 +48,7 @@ def _get_splitter():
                 f"[Splitter] SemanticSplitter недоступен, fallback на SentenceSplitter: {e}"
             )
 
+        # Fallback:SentenceSplitter без эмбеддингов
         from llama_index.core.node_parser import SentenceSplitter
 
         _splitter_cache = SentenceSplitter(chunk_size=2048, chunk_overlap=256)
