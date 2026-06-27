@@ -197,7 +197,7 @@ async def upload_file(
             await build_index(nodes, notebook_id)
             from src.rag.retrieval import invalidate_index_cache
 
-            invalidate_index_cache(notebook_id)
+            await invalidate_index_cache(notebook_id)
 
             elapsed = time.time() - start_time
             mins = int(elapsed // 60)
@@ -392,7 +392,7 @@ async def delete_file(filename: str, notebook_id: str):
     await asyncio.to_thread(vector_store._collection.delete, where={"file_name": filename})
     from src.rag.retrieval import invalidate_index_cache
 
-    invalidate_index_cache(notebook_id)
+    await invalidate_index_cache(notebook_id)
     try:
         from src.bookmarks import mark_stale_for_file
 

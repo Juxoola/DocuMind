@@ -3,7 +3,6 @@
 import asyncio
 import os
 import sys
-import threading
 import time as _time
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -293,45 +292,48 @@ class TestFilterChunks:
 class TestInvalidateIndexCache:
     """Очистка кеша VectorStoreIndex."""
 
-    def test_invalidate_specific_notebook(self):
+    @pytest.mark.asyncio
+    async def test_invalidate_specific_notebook(self):
         from src.rag.retrieval import _index_cache
 
         _index_cache.clear()
         _index_cache["nb1"] = MagicMock()
         _index_cache["nb2"] = MagicMock()
 
-        with patch("src.rag.retrieval._index_cache_lock", threading.Lock()):
+        with patch("src.rag.retrieval._index_cache_lock", asyncio.Lock()):
             from src.rag.retrieval import invalidate_index_cache
 
-            invalidate_index_cache("nb1")
+            await invalidate_index_cache("nb1")
 
         assert "nb1" not in _index_cache
         assert "nb2" in _index_cache
 
-    def test_invalidate_all(self):
+    @pytest.mark.asyncio
+    async def test_invalidate_all(self):
         from src.rag.retrieval import _index_cache
 
         _index_cache.clear()
         _index_cache["nb1"] = MagicMock()
         _index_cache["nb2"] = MagicMock()
 
-        with patch("src.rag.retrieval._index_cache_lock", threading.Lock()):
+        with patch("src.rag.retrieval._index_cache_lock", asyncio.Lock()):
             from src.rag.retrieval import invalidate_index_cache
 
-            invalidate_index_cache()
+            await invalidate_index_cache()
 
         assert len(_index_cache) == 0
 
-    def test_invalidate_nonexistent_is_noop(self):
+    @pytest.mark.asyncio
+    async def test_invalidate_nonexistent_is_noop(self):
         from src.rag.retrieval import _index_cache
 
         _index_cache.clear()
         _index_cache["nb1"] = MagicMock()
 
-        with patch("src.rag.retrieval._index_cache_lock", threading.Lock()):
+        with patch("src.rag.retrieval._index_cache_lock", asyncio.Lock()):
             from src.rag.retrieval import invalidate_index_cache
 
-            invalidate_index_cache("nonexistent")
+            await invalidate_index_cache("nonexistent")
 
         assert "nb1" in _index_cache
 
@@ -414,14 +416,10 @@ class TestIsLlmHealthy:
 
         _qe_health_cache.clear()
 
-        mock_context = AsyncMock()
-        mock_context.__aenter__ = AsyncMock(return_value=mock_context)
-        mock_context.__aexit__ = AsyncMock(return_value=False)
-        mock_context.get = AsyncMock(return_value=MagicMock())
+        mock_client = AsyncMock()
+        mock_client.get = AsyncMock(return_value=MagicMock())
 
-        with patch("src.rag.retrieval.httpx") as mock_httpx:
-            mock_httpx.AsyncClient.return_value = mock_context
-
+        with patch("src.rag.retrieval._async_rerank_http", mock_client):
             from src.rag.retrieval import _is_llm_healthy
 
             result = asyncio.run(_is_llm_healthy("http://test:1234/v1"))
@@ -435,14 +433,10 @@ class TestIsLlmHealthy:
 
         _qe_health_cache.clear()
 
-        mock_context = AsyncMock()
-        mock_context.__aenter__ = AsyncMock(return_value=mock_context)
-        mock_context.__aexit__ = AsyncMock(return_value=False)
-        mock_context.get = AsyncMock(side_effect=ConnectionError("refused"))
+        mock_client = AsyncMock()
+        mock_client.get = AsyncMock(side_effect=ConnectionError("refused"))
 
-        with patch("src.rag.retrieval.httpx") as mock_httpx:
-            mock_httpx.AsyncClient.return_value = mock_context
-
+        with patch("src.rag.retrieval._async_rerank_http", mock_client):
             from src.rag.retrieval import _is_llm_healthy
 
             result = asyncio.run(_is_llm_healthy("http://test:1234/v1"))

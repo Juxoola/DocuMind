@@ -45,7 +45,7 @@ _async_rerank_http = httpx.AsyncClient(timeout=60)
 
 _qe_health_cache: dict[str, tuple[bool, float]] = {}
 _qe_health_cache_lock = threading.Lock()
-_QE_HEALTH_TTL = 30.0
+_QE_HEALTH_TTL = 120.0
 
 
 async def _is_llm_healthy(url: str) -> bool:
@@ -56,8 +56,8 @@ async def _is_llm_healthy(url: str) -> bool:
         return cached[0]
     try:
         health_url = url.replace("/v1", "").rstrip("/") + "/health"
-        async with httpx.AsyncClient(timeout=1) as client:
-            await client.get(health_url)
+        resp = await _async_rerank_http.get(health_url, timeout=1)
+        resp.raise_for_status()
         result = True
     except Exception:
         result = False
@@ -78,8 +78,8 @@ class _FilteredBM25:
         return [r for r in results if r.node.metadata.get("file_name") in self._allowed]
 
 
-def invalidate_index_cache(notebook_id: str = None):
-    with _index_cache_lock:
+async def invalidate_index_cache(notebook_id: str = None):
+    async with _index_cache_lock:
         if notebook_id:
             _index_cache.pop(notebook_id, None)
         else:
@@ -151,6 +151,11 @@ async def _get_qe_llm():
             }
         },
     )
+
+
+# Кэш результатов QE: избегает повторных LLM-вызова для одинаковых запросов
+_qe_result_cache: dict[str, tuple[list, float]] = {}
+_QE_RESULT_TTL = 60.0
 
 
 # Слияние по взаимному рангу (RRF): score = sum(1/(k + rank_i)) из каждого источника. k=60 — стандартный параметр
@@ -311,17 +316,34 @@ async def _hybrid_search(index, query: str, allowed_files, bm25_retriever, qe_ll
                 fusion_retriever._get_queries = custom_get_queries
 
             if num_q > 1 and qe_llm:
-                try:
-                    generated_bundles = await asyncio.to_thread(
-                        fusion_retriever._get_queries, query
-                    )
-                    logger.info("  [RAG] 🧠 Сгенерированные поисковые запросы (Query Expansion):")
-                    for i, gq in enumerate(generated_bundles, 1):
-                        logger.info(f"    {i}. {gq.query_str}")
-                except Exception as qe_err:
-                    logger.warning(
-                        f"Не удалось получить сгенерированные запросы для лога: {qe_err}"
-                    )
+                # Проверяем кэш результатов QE
+                import hashlib as _hashlib
+
+                _qe_cache_key = _hashlib.md5(query.encode()).hexdigest()
+                _now = _time.time()
+                with _qe_health_cache_lock:
+                    cached_qe = _qe_result_cache.get(_qe_cache_key)
+                if cached_qe and (_now - cached_qe[1]) < _QE_RESULT_TTL:
+                    generated_bundles = cached_qe[0]
+                    logger.info("  [RAG] 🧠 QE из кэша (60с TTL):")
+                else:
+                    try:
+                        generated_bundles = await asyncio.to_thread(
+                            fusion_retriever._get_queries, query
+                        )
+                        # Сохраняем в кэш
+                        with _qe_health_cache_lock:
+                            _qe_result_cache[_qe_cache_key] = (generated_bundles, _now)
+                        logger.info(
+                            "  [RAG] 🧠 Сгенерированные поисковые запросы (Query Expansion):"
+                        )
+                    except Exception as qe_err:
+                        logger.warning(
+                            f"Не удалось получить сгенерированные запросы для лога: {qe_err}"
+                        )
+                        generated_bundles = []
+                for i, gq in enumerate(generated_bundles, 1):
+                    logger.info(f"    {i}. {gq.query_str}")
 
             all_nodes = await asyncio.to_thread(fusion_retriever.retrieve, query)
             all_nodes = [n for n in all_nodes if n.node.metadata.get("file_name") in allowed_files]
@@ -373,15 +395,18 @@ async def _hybrid_search(index, query: str, allowed_files, bm25_retriever, qe_ll
                 for fn in allowed_files:
                     vec_results.extend(vec_by_file.get(fn, [])[:top_k_per_file])
 
-                file_results = []
+                # Плоский RRF: один вызов вместо N+1 (per-file + global)
+                all_vec = []
+                all_bm = []
                 for fname in allowed_files:
-                    bm = [n for n in bm25_all if n.node.metadata.get("file_name") == fname][
+                    all_vec.extend(
+                        n for n in vec_results if n.node.metadata.get("file_name") == fname
+                    )
+                    per_bm = [n for n in bm25_all if n.node.metadata.get("file_name") == fname][
                         :top_k_per_file
                     ]
-                    vec = [n for n in vec_results if n.node.metadata.get("file_name") == fname]
-                    fused = _rrf_fuse(vec, bm)
-                    file_results.append((fname, fused))
-                all_nodes = _rrf_fuse(*(nodes for _, nodes in file_results))
+                    all_bm.extend(per_bm)
+                all_nodes = _rrf_fuse(all_vec, all_bm)
                 if len(all_nodes) > config.RAG_RERANK_POOL:
                     all_nodes = all_nodes[: config.RAG_RERANK_POOL]
                 if bm25_retriever:
@@ -551,14 +576,14 @@ async def retrieve_nodes(query: str, notebook_id: str, allowed_files=None, max_t
     await init_settings(max_tokens=max_tokens)
     vector_store = await get_vector_store(notebook_id)
 
-    with _index_cache_lock:
+    async with _index_cache_lock:
         index = _index_cache.get(notebook_id)
         if index is not None:
             _index_cache.move_to_end(notebook_id)
 
     if index is None:
         new_index = await asyncio.to_thread(VectorStoreIndex.from_vector_store, vector_store)
-        with _index_cache_lock:
+        async with _index_cache_lock:
             index = _index_cache.get(notebook_id)
             if index is None:
                 if len(_index_cache) >= _INDEX_CACHE_MAXSIZE:

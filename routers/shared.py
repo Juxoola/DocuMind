@@ -218,6 +218,35 @@ def sse_event(data: dict) -> str:
 
 SSE_DONE = "data: [DONE]\n\n"
 
+# Буферизация SSE-событий: копит токены и отправляет пачками по 3-5 или по таймеру 20ms.
+# Снижает overhead on yield() и orjson.dumps() при стриминге.
+import time as _time
+
+
+class SSEBatchBuffer:
+    __slots__ = ("_buf", "_interval", "_last_flush", "_min_tokens")
+
+    def __init__(self, min_tokens: int = 3, interval: float = 0.02):
+        self._buf: list[str] = []
+        self._min_tokens = min_tokens
+        self._interval = interval
+        self._last_flush = _time.monotonic()
+
+    def append(self, token: str) -> str | None:
+        self._buf.append(token)
+        now = _time.monotonic()
+        if len(self._buf) >= self._min_tokens or (now - self._last_flush) >= self._interval:
+            return self.flush()
+        return None
+
+    def flush(self) -> str | None:
+        if not self._buf:
+            return None
+        text = "".join(self._buf)
+        self._buf.clear()
+        self._last_flush = _time.monotonic()
+        return sse_event({"type": "chunk", "text": text})
+
 
 def validate_llm_url(url: str) -> None:
     """Проверяет, что URL LLM-сервера указывает на localhost/LAN. Бросает HTTPException при нарушении."""

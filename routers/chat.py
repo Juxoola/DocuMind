@@ -12,7 +12,14 @@ import config
 from src.rag.prompts import get_system_prompt
 from src.rag.state import RAG_POOL
 
-from .shared import SSE_DONE, get_async_http, safe_extract_llm_response, sse_event, validate_llm_url
+from .shared import (
+    SSE_DONE,
+    SSEBatchBuffer,
+    get_async_http,
+    safe_extract_llm_response,
+    sse_event,
+    validate_llm_url,
+)
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["chat"])
@@ -244,6 +251,7 @@ async def chat(request: ChatRequest):
                 )
                 phase = "think_detect"
                 buf = ""
+                sse_buf = SSEBatchBuffer()
                 async_gen = stream_gguf_chat(
                     llm_url=active_llm,
                     messages=messages_for_chat,
@@ -297,15 +305,22 @@ async def chat(request: ChatRequest):
                             safe = buf[: -len(CLOSE_TAG)] if len(buf) > len(CLOSE_TAG) else ""
                             if safe:
                                 yield sse_event({"type": "thinking_chunk", "text": safe})
-                                buf = buf[len(safe) :]
                     elif phase == "answer":
-                        yield sse_event({"type": "chunk", "text": buf})
+                        flushed = sse_buf.append(buf)
+                        if flushed:
+                            yield flushed
                         buf = ""
                 if buf and phase == "thinking":
                     yield sse_event({"type": "thinking_chunk", "text": buf})
                     yield sse_event({"type": "thinking_done"})
                 elif buf and phase == "answer":
-                    yield sse_event({"type": "chunk", "text": buf})
+                    flushed = sse_buf.append(buf)
+                    if flushed:
+                        yield flushed
+                # Финальный сброс буфера
+                final = sse_buf.flush()
+                if final:
+                    yield final
             else:
                 chat_messages = _build_chat_messages(
                     request.answer_mode, context, request.history, request.query
@@ -321,6 +336,7 @@ async def chat(request: ChatRequest):
                     return
 
                 queue = asyncio.Queue()
+                sse_buf = SSEBatchBuffer()
 
                 def _sync_producer():
                     try:
@@ -337,7 +353,13 @@ async def chat(request: ChatRequest):
                     if delta is None:
                         break
                     token_count += 1
-                    yield sse_event({"type": "chunk", "text": delta})
+                    flushed = sse_buf.append(delta)
+                    if flushed:
+                        yield flushed
+                # Финальный сброс буфера
+                final = sse_buf.flush()
+                if final:
+                    yield final
 
             elapsed = time.time() - global_start_time
             yield sse_event(
