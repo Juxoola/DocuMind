@@ -78,7 +78,6 @@ _patch_whisperx_ffmpeg()
 async def get_or_load_whisper(
     model_name: str = "large-v2", device: str = "cuda", compute_type: str = "int8"
 ):
-    """Загрузка или возврат кэшированной модели WhisperX. Тяжёлые I/O выполняются в потоке."""
 
     def _load():
         key = (model_name, device, compute_type)
@@ -158,7 +157,6 @@ async def process_audio_video(
     keep_vision_alive=False,
     keep_whisper_alive=False,
 ):
-    """Основной пайплайн обработки аудио/видео. Транскрибация на GPU выполняется в потоке."""
 
     def _is_cancelled():
         return bool(cancel_check and cancel_check())
@@ -185,7 +183,6 @@ async def process_audio_video(
         model = await get_or_load_whisper("large-v2", device, "int8")
         prog(18, "Загрузка аудио...")
 
-        # Тяжёлая GPU-нагрузка: загрузка аудио + транскрибация целиком в потоке
         def _transcribe():
             audio = whisperx.load_audio(file_path)
             dur = len(audio) / 16000
@@ -377,7 +374,6 @@ async def process_audio_video(
                 results.append((idx, path, t, desc))
 
         try:
-            # Батчи по 20 кадров: между батчами перезапускаем vision для очистки CUDA memory pool
             for batch_start in range(0, n, VISION_BATCH_SIZE):
                 if _is_cancelled():
                     raise IngestionCancelled(f"Cancelled at batch {batch_start}")
@@ -431,7 +427,6 @@ async def process_audio_video(
             frame_data.append({"time": t, "image_path": path, "description": desc})
             prog(65 + int((idx + 1) / n * 22) if n else 87, f"Описание: {idx + 1}/{n}")
 
-        # Освобождаем память после обработки всех кадров
         results.clear()
         import gc
 

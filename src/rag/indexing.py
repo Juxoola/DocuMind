@@ -27,7 +27,6 @@ _MAX_EMBED_CHARS = 12000
 async def build_index(nodes, notebook_id: str):
     await init_settings()
 
-    # Defensive truncate: обрезаем чанки > лимита embedding-контекста (SemanticSplitter даёт >4000 токенов)
     for node in nodes:
         if len(node.text) > _MAX_EMBED_CHARS:
             logger.warning(

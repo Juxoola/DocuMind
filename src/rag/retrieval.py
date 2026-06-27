@@ -157,12 +157,10 @@ async def _get_qe_llm():
     )
 
 
-# Кэш результатов QE: избегает повторных LLM-вызова для одинаковых запросов
 _qe_result_cache: dict[str, tuple[list, float]] = {}
 _QE_RESULT_TTL = 60.0
 
 
-# Слияние по взаимному рангу (RRF): score = sum(1/(k + rank_i)) из каждого источника. k=60 — стандартный параметр
 def _rrf_fuse(*result_lists, k: int = None):
     scores: dict = {}
     nodes_by_id: dict = {}
@@ -178,9 +176,6 @@ def _rrf_fuse(*result_lists, k: int = None):
     return [NodeWithScore(node=nodes_by_id[i].node, score=scores[i]) for i in sorted_ids]
 
 
-# ---------------------------------------------------------------------------
-# Подфункции pipeline
-# ---------------------------------------------------------------------------
 
 
 async def _load_bm25_retriever(notebook_id: str):
@@ -320,7 +315,6 @@ async def _hybrid_search(index, query: str, allowed_files, bm25_retriever, qe_ll
                 fusion_retriever._get_queries = custom_get_queries
 
             if num_q > 1 and qe_llm:
-                # Проверяем кэш результатов QE
                 import hashlib as _hashlib
 
                 _qe_cache_key = _hashlib.md5(query.encode()).hexdigest()
@@ -335,7 +329,6 @@ async def _hybrid_search(index, query: str, allowed_files, bm25_retriever, qe_ll
                         generated_bundles = await asyncio.to_thread(
                             fusion_retriever._get_queries, query
                         )
-                        # Сохраняем в кэш
                         with _qe_health_cache_lock:
                             _qe_result_cache[_qe_cache_key] = (generated_bundles, _now)
                         logger.info(
@@ -399,7 +392,6 @@ async def _hybrid_search(index, query: str, allowed_files, bm25_retriever, qe_ll
                 for fn in allowed_files:
                     vec_results.extend(vec_by_file.get(fn, [])[:top_k_per_file])
 
-                # Плоский RRF: один вызов вместо N+1 (per-file + global)
                 all_vec = []
                 all_bm = []
                 for fname in allowed_files:

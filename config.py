@@ -116,7 +116,6 @@ rag = RAGConfig()
 
 
 def update_rag_config(data: dict) -> None:
-    """Атомарно заменяет глобальный снимок RAG-конфигурации."""
     global rag
     rag = RAGConfig(
         embedding_model=data.get("embedding_model", rag.embedding_model),
@@ -138,7 +137,6 @@ def update_rag_config(data: dict) -> None:
 
 
 def collect_rag_config() -> dict:
-    """Возвращает текущий снимок как dict (для API / сохранения)."""
     from dataclasses import asdict
 
     return asdict(rag)
@@ -173,9 +171,7 @@ VISION_CONCURRENCY = int(os.getenv("VISION_CONCURRENCY", "4"))
 
 
 def _apply_rag_config(data: dict) -> None:
-    """Обновляет снимок + устаревшие module-level переменные."""
     update_rag_config(data)
-    # Обратная совместимость для кода, который ещё не мигрировал
     global EMBEDDING_MODEL_NAME, RERANKER_MODEL_NAME, EMBEDDING_N_PARALLEL
     global RAG_TOP_K_PER_FILE, RAG_RERANK_POOL, RAG_FINAL_TOP_N
     global USE_RERANKER, RAG_QUERY_EXPANSION, RERANK_SCORE_THRESHOLD, GGUF_SEARCH_DIRS
@@ -215,11 +211,10 @@ _load_config_sync()
 # TTL-кэш для resolve_model_path: решает проблему устаревших путей при переименовании моделей.
 _resolve_cache: dict[str, tuple[str, float]] = {}
 _resolve_cache_lock = threading.Lock()
-_RESOLVE_MODEL_TTL = 300.0  # 5 минут
+_RESOLVE_MODEL_TTL = 300.0
 
 
 def invalidate_model_cache(path_or_filename: str = None) -> None:
-    """Сбрасывает кэш путей моделей. Без аргументов — сбрасывает всё."""
     with _resolve_cache_lock:
         if path_or_filename:
             _resolve_cache.pop(path_or_filename, None)
@@ -228,7 +223,6 @@ def invalidate_model_cache(path_or_filename: str = None) -> None:
 
 
 def resolve_model_path(path_or_filename: str) -> str:
-    """Резолвит путь к GGUF-модели с TTL-кэшированием."""
     if not path_or_filename:
         return ""
 

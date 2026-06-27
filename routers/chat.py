@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["chat"])
 
 
-# ── Chat request models (группировка полей) ──────────────────────────────
+# ── Модели запросов чата (группировка полей) ─────────────────────────────
 
 
 class RAGQuery(BaseModel):
@@ -317,7 +317,6 @@ async def chat(request: ChatRequest):
                     flushed = sse_buf.append(buf)
                     if flushed:
                         yield flushed
-                # Финальный сброс буфера
                 final = sse_buf.flush()
                 if final:
                     yield final
@@ -356,7 +355,6 @@ async def chat(request: ChatRequest):
                     flushed = sse_buf.append(delta)
                     if flushed:
                         yield flushed
-                # Финальный сброс буфера
                 final = sse_buf.flush()
                 if final:
                     yield final

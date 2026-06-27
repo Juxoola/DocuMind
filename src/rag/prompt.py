@@ -14,7 +14,6 @@ logger = logging.getLogger(__name__)
 async def build_file_context(nodes, notebook_id: str):
     paths = config.get_notebook_paths(notebook_id)
 
-    # Пакетная проверка существования изображений (1 batch vs N sync calls)
     img_paths = {
         node.node.metadata.get("image_path")
         for node in nodes
@@ -60,8 +59,6 @@ async def build_file_context(nodes, notebook_id: str):
     return sources, context_str
 
 
-# Формирует финальный промпт: системный промпт (с правилами ответа
-# и цитирования), контекст из источников и вопрос пользователя.
 def make_prompt(
     query: str,
     context_str: str,

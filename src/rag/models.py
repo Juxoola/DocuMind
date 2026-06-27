@@ -21,7 +21,6 @@ logger = logging.getLogger(__name__)
 async def init_settings(max_tokens=1024):
     global _model_cache, _last_max_tokens
 
-    # Early return: если embed_model уже загружен и max_tokens не изменился
     async with _model_cache_lock:
         embed_ready = "embed_model" in _model_cache
     if embed_ready and max_tokens == _last_max_tokens:

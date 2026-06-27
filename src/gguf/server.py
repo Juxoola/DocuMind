@@ -468,7 +468,6 @@ async def get_gguf_embedding_url(
     else:
         cmd.extend(["--reranking"])
 
-    # SemanticSplitterNodeParser даёт чанки до ~4000 токенов → min_ctx_per_slot=4096
     min_ctx_per_slot = 4096
     ctx = str(max(4096, n_parallel * min_ctx_per_slot))
     if is_reranker:
@@ -514,7 +513,6 @@ async def get_vision_server(
     n_parallel: int = 1,
     custom_args: list[str] | None = None,
 ) -> str:
-    """Vision-сервер: отдельный процесс с role='vision', не зависит от основного LLM."""
     server_key = f"vision:{gguf_path}"
 
     current_config = {

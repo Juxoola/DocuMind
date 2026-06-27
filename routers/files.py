@@ -414,7 +414,6 @@ async def get_source_content(filename: str, notebook_id: str):
     paths = config.get_notebook_paths(notebook_id)
     file_path = os.path.join(paths["data"], filename)
 
-    # Для PDF — чередование текста страниц и описаний изображений
     if ext == ".pdf":
         text = await asyncio.to_thread(_build_interleaved_text, file_path, paths["data"], filename)
         if text:
@@ -536,7 +535,6 @@ def _build_pdf(title: str, text: str) -> bytes:
         story.write_stabilized(writer, contentfn, rectfn, em=10)
         writer.close()
 
-        # write_stabilized не сжимает контент — пересохраняем со сжатием
         doc = fitz.open(out_path)
         compressed_path = f"_export_{os.getpid()}_c.pdf"
         doc.save(compressed_path, garbage=4, deflate=True)
@@ -560,7 +558,6 @@ def _content_disposition(name: str, ext: str) -> str:
 
     full = f"{name}.{ext}"
     encoded = quote(full)
-    # ASCII-фолбэк: символы вне ASCII заменяются на _
     ascii_safe = full.encode("ascii", "replace").decode().replace("?", "_")
     return f"attachment; filename=\"{ascii_safe}\"; filename*=UTF-8''{encoded}"
 
@@ -602,7 +599,6 @@ async def export_text(filename: str, notebook_id: str, fmt: str = "txt"):
         if not text:
             text = f"Описание/транскрипт для {filename} не найдены."
     else:
-        # PDF, DOCX, PPT, TXT — читаем из файла
         file_path = os.path.join(paths["data"], filename)
         if ext == ".pdf":
             text = await asyncio.to_thread(

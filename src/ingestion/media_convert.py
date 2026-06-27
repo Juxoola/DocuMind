@@ -273,7 +273,6 @@ async def ensure_mp3_audio(file_path, prog_cb=None):
         await aiofiles.os.remove(file_path)
         logger.info(f"[media_convert] {os.path.basename(file_path)} → mp3")
         return temp_path
-    # Конвертация не удалась — удаляем битый mp3, возвращаем оригинал
     try:
         if os.path.exists(temp_path):
             await aiofiles.os.remove(temp_path)

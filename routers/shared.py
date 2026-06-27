@@ -35,7 +35,6 @@ async def get_async_http() -> httpx.AsyncClient:
     current_loop = asyncio.get_running_loop()
 
     async with _http_lock:
-        # Сброс клиента, если loop сменился (threading/multiprocessing).
         if current_loop is not None and _async_http_loop is not current_loop:
             _async_http = None
             _async_http_loop = current_loop
@@ -249,7 +248,6 @@ class SSEBatchBuffer:
 
 
 def validate_llm_url(url: str) -> None:
-    """Проверяет, что URL LLM-сервера указывает на localhost/LAN. Бросает HTTPException при нарушении."""
 
     parsed = urlparse(url)
     hostname = parsed.hostname or ""

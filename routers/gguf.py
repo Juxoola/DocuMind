@@ -85,7 +85,6 @@ async def api_gguf_kill_all():
 
 
 async def _run_nvidia_smi(query_args: list[str], timeout: float = 3) -> str | None:
-    """Запуск nvidia-smi с указанными аргументами. Возвращает stdout или None при ошибке."""
     try:
         proc = await asyncio.create_subprocess_exec(
             "nvidia-smi",

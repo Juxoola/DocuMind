@@ -20,7 +20,6 @@ logger = logging.getLogger(__name__)
 
 
 def _detect_has_real_graphics(images: list, drawings: list) -> bool:
-    """Определяет, содержит ли страница реальную графику (не фоновые прямоугольники)."""
     if images:
         return True
     graphics_weight = 0
@@ -58,7 +57,6 @@ def _detect_has_real_graphics(images: list, drawings: list) -> bool:
 
 
 async def _analyze_page_for_vision(page):
-    """Анализ страницы PDF: извлекает текст и определяет наличие графики."""
 
     def _sync_analyze():
         text = page.get_text()
@@ -183,7 +181,6 @@ async def process_pdf(
                                 65 + int(done_count / n * 25), f"Описание PDF: {done_count}/{n}"
                             )
 
-                # Батчи по 20 — между батчами перезапускаем vision для очистки CUDA
                 for batch_start in range(0, n, VISION_BATCH_SIZE):
                     if _is_cancelled():
                         raise IngestionCancelled(f"Cancelled at batch {batch_start}")
@@ -247,7 +244,6 @@ async def process_pdf(
                         except Exception:
                             pass
 
-            # Освобождаем память после обработки всех страниц
             results.clear()
             import gc
 
@@ -371,7 +367,6 @@ async def _convert_via_com(file_path, app_name, format_code):
 
 
 async def _convert_office_to_pdf(file_path, app_name, format_code, textonly_fn, log_prefix):
-    """Конвертация Office-файла в PDF: LibreOffice → COM → извлечение текста."""
     file_name = os.path.basename(file_path)
     try:
         pdf_path = await _convert_via_libreoffice(file_path)
@@ -424,7 +419,6 @@ def _docx_extract_textonly(file_path, file_name):
 
 
 async def _process_office_textonly(file_path, file_name, extract_fn, log_prefix):
-    """Обёртка: извлечение текста из Office-файла без конвертации."""
 
     def _sync():
         try:

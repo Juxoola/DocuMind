@@ -88,7 +88,6 @@ class UpdateRagConfigRequest(BaseModel):
     @field_validator("embedding_model", "reranker_model")
     @classmethod
     def validate_model_name(cls, v: str) -> str:
-        # Фронтенд отправляет полные пути из сканера — принимаем как есть, запрещаем traversal
         v = v.strip()
         if ".." in v:
             raise ValueError("путь не должен содержать '..'")
@@ -101,7 +100,6 @@ class UpdateRagConfigRequest(BaseModel):
 async def update_rag_config(req: UpdateRagConfigRequest):
     from src.rag.models import preload_all_models, unload_rag_models
 
-    # Запоминаем старые модели для сравнения
     old_embedding = config.EMBEDDING_MODEL_NAME
     old_reranker = config.RERANKER_MODEL_NAME
 
@@ -123,7 +121,6 @@ async def update_rag_config(req: UpdateRagConfigRequest):
 
     if embedding_changed or reranker_changed:
         logger.info("[Settings] Модели изменились — выгрузка старых и загрузка новых...")
-        # Выгрузка старых llama-server + очистка кэша и загрузка новых моделей
         try:
             await preload_all_models()
             logger.info("[Settings] Новые модели загружены.")
