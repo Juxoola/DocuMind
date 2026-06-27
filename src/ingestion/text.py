@@ -11,6 +11,7 @@ import orjson
 from llama_index.core.schema import TextNode
 
 import config
+from routers.shared import get_async_http
 from src.gguf.server import unload_all_models
 from src.ingestion.splitter import _get_splitter
 from src.ingestion.utils import IngestionCancelled
@@ -28,10 +29,12 @@ def _detect_has_real_graphics(images: list, drawings: list) -> bool:
     vertical_lines = 0
     for d in drawings:
         items = d.get("items", [])
+        # Кривые (Bezier) или сложные composition — настоящая графика
         if any(i[0] in ["c", "q"] for i in items) or len(items) > 12:
             return True
         rect = d.get("rect")
         fill = d.get("fill")
+        # Пропускаем фоновые прямоугольники (белый фон страницы)
         is_page_background = (
             len(items) == 1
             and items[0][0] == "re"
@@ -42,6 +45,19 @@ def _detect_has_real_graphics(images: list, drawings: list) -> bool:
             and (rect.y1 - rect.y0) > 200
         )
         if is_page_background:
+            continue
+        # Пропускаем простые рамки (code blocks, border boxes):
+        # один прямоугольник без заливки, шире чем высокий (горизонтальная рамка)
+        is_simple_frame = (
+            len(items) == 1
+            and items[0][0] == "re"
+            and (fill is None or all(c >= 0.95 for c in fill))
+            and rect is not None
+            and (rect.x1 - rect.x0) > (rect.y1 - rect.y0) * 1.5
+            and (rect.x1 - rect.x0) > 100
+            and (rect.y1 - rect.y0) > 3
+        )
+        if is_simple_frame:
             continue
         if rect is not None:
             w, h = rect.x1 - rect.x0, rect.y1 - rect.y0
@@ -78,15 +94,134 @@ async def _analyze_and_build_page(page_num, doc, images_dir, file_name, splitter
         has_real_graphics = _detect_has_real_graphics(images, drawings)
 
         local_nodes = []
-        image_path = None
         if text and text.strip():
             local_nodes = splitter.get_nodes_from_documents(
                 [TextNode(text=text, metadata={"file_name": file_name, "page": page_num + 1})]
             )
+
+        # Извлечение встроенных изображений по одному с кропом по координатам
+        image_paths = []
         if has_real_graphics and page is not None:
-            image_path = os.path.join(images_dir, f"p_{page_num + 1}_{uuid.uuid4().hex[:6]}.png")
-            page.get_pixmap(dpi=150).save(image_path)
-        return page_num, local_nodes, image_path
+            seen_xrefs = set()
+            for img_info in images:
+                xref = img_info[0]
+                if xref in seen_xrefs:
+                    continue
+                seen_xrefs.add(xref)
+                try:
+                    rects = page.get_image_rects(xref)
+                    if not rects:
+                        continue
+                    base_image = page.parent.extract_image(xref)
+                    if not base_image or not base_image.get("image"):
+                        continue
+                    ext = base_image.get("ext", "png")
+                    if ext == "jpeg":
+                        ext = "jpg"
+                    for rect in rects:
+                        # Пропускаем tiny изображения (иконки, маркеры)
+                        w, h = rect.width, rect.height
+                        if w < 50 or h < 50:
+                            continue
+                        try:
+                            clip = fitz.Rect(rect)
+                            pix = page.get_pixmap(clip=clip, dpi=150)
+                            img_name = f"p_{page_num + 1}_x{xref}_{uuid.uuid4().hex[:4]}.{ext}"
+                            img_path = os.path.join(images_dir, img_name)
+                            pix.save(img_path)
+                            image_paths.append(img_path)
+                        except Exception:
+                            continue
+                except Exception:
+                    continue
+
+            # Fallback: кластеризация vector drawings → кроп регионов
+            if not image_paths:
+                drawing_rects = []
+                page_rect = page.rect
+                for d in drawings:
+                    rect = d.get("rect")
+                    if rect is None:
+                        continue
+                    items = d.get("items", [])
+                    fill = d.get("fill")
+                    # Пропускаем фоновые прямоугольники
+                    is_bg = (
+                        len(items) == 1
+                        and items[0][0] == "re"
+                        and fill is not None
+                        and all(c >= 0.99 for c in fill)
+                        and rect.width > 200
+                        and rect.height > 200
+                    )
+                    if is_bg:
+                        continue
+                    # Пропускаем простые рамки (code blocks, border boxes)
+                    is_simple_frame = (
+                        len(items) == 1
+                        and items[0][0] == "re"
+                        and (fill is None or all(c >= 0.95 for c in fill))
+                        and (rect.x1 - rect.x0) > (rect.y1 - rect.y0) * 1.5
+                        and (rect.x1 - rect.x0) > 100
+                        and (rect.y1 - rect.y0) > 3
+                    )
+                    if is_simple_frame:
+                        continue
+                    if rect.width < 10 or rect.height < 10:
+                        continue
+                    # Пропускаем элементы на границе страницы (колонтитулы)
+                    if rect.y0 < 30 or rect.y1 > page_rect.height - 30:
+                        continue
+                    drawing_rects.append(fitz.Rect(rect))
+
+                # Кластеризация: объединяем близкие rect'ы (порог 50px)
+                clusters = []
+                for r in drawing_rects:
+                    merged = False
+                    for ci, cluster in enumerate(clusters):
+                        # expanded = cluster + 50px padding
+                        expanded = fitz.Rect(
+                            cluster.x0 - 50,
+                            cluster.y0 - 50,
+                            cluster.x1 + 50,
+                            cluster.y1 + 50,
+                        )
+                        if expanded.intersects(r):
+                            clusters[ci] = cluster | r  # объединение
+                            merged = True
+                            break
+                    if not merged:
+                        clusters.append(r)
+
+                # Рендер каждого кластера с padding
+                PAD = 20
+                for i, cluster_rect in enumerate(clusters):
+                    clip = fitz.Rect(
+                        max(0, cluster_rect.x0 - PAD),
+                        max(0, cluster_rect.y0 - PAD),
+                        min(page_rect.width, cluster_rect.x1 + PAD),
+                        min(page_rect.height, cluster_rect.y1 + PAD),
+                    )
+                    # Пропускаем слишком маленькие кластеры
+                    if clip.width < 40 or clip.height < 40:
+                        continue
+                    try:
+                        pix = page.get_pixmap(clip=clip, dpi=150)
+                        img_name = f"p_{page_num + 1}_d{i}_{uuid.uuid4().hex[:4]}.png"
+                        img_path = os.path.join(images_dir, img_name)
+                        pix.save(img_path)
+                        image_paths.append(img_path)
+                    except Exception:
+                        continue
+
+                # Fallback: если кластеризация ничего не дала — полная страница
+                if not image_paths:
+                    img_name = f"p_{page_num + 1}_{uuid.uuid4().hex[:6]}.png"
+                    img_path = os.path.join(images_dir, img_name)
+                    page.get_pixmap(dpi=150).save(img_path)
+                    image_paths.append(img_path)
+
+        return page_num, local_nodes, image_paths
 
     return await asyncio.to_thread(_sync_build)
 
@@ -122,12 +257,12 @@ async def process_pdf(
             for page_num in range(total_pages):
                 if _is_cancelled():
                     raise IngestionCancelled(f"Cancelled at page {page_num + 1}")
-                pn, local_nodes, image_path = await _analyze_and_build_page(
+                pn, local_nodes, image_paths = await _analyze_and_build_page(
                     page_num, doc, images_dir, file_name, splitter
                 )
                 nodes.extend(local_nodes)
-                if image_path:
-                    frame_list.append({"page": pn + 1, "path": image_path})
+                for img_p in image_paths or []:
+                    frame_list.append({"page": pn + 1, "path": img_p})
         else:
             for batch_start in range(0, total_pages, BATCH_SIZE):
                 if _is_cancelled():
@@ -143,10 +278,10 @@ async def process_pdf(
                     return await asyncio.gather(*tasks)
 
                 page_results = await _process_batch_pages(batch_start, batch_end)
-                for page_num_result, local_nodes, image_path in page_results:
+                for page_num_result, local_nodes, image_paths in page_results:
                     nodes.extend(local_nodes)
-                    if image_path:
-                        frame_list.append({"page": page_num_result + 1, "path": image_path})
+                    for img_p in image_paths or []:
+                        frame_list.append({"page": page_num_result + 1, "path": img_p})
 
         if frame_list:
             if shared_llm_url is None:
@@ -163,7 +298,7 @@ async def process_pdf(
                 sem = asyncio.Semaphore(v_conc)
                 done_count = 0
                 results = []
-                VISION_BATCH_SIZE = 20
+                VISION_BATCH_SIZE = 100
 
                 async def _describe_frame(frame_info):
                     nonlocal done_count
@@ -191,18 +326,18 @@ async def process_pdf(
                     await asyncio.gather(*[_describe_frame(f) for f in batch])
 
                     if batch_end < n:
-                        logger.info(
-                            f"[Vision] Батч {batch_start + 1}-{batch_end}/{n} готов, перезапуск vision..."
-                        )
-                        await unload_all_models(role="vision")
-                        import gc
-
-                        gc.collect()
-                        await asyncio.sleep(1)
-                        shared_llm_url = await get_vision_url(llm_settings)
-                        if not shared_llm_url:
-                            logger.warning("[Vision] Не удалось перезапустить vision-сервер")
-                            break
+                        # Watchdog контролирует RAM — restart только при unhealthy
+                        try:
+                            http = await get_async_http()
+                            resp = await http.get(f"{shared_llm_url}/health", timeout=2)
+                            resp.raise_for_status()
+                        except Exception:
+                            logger.warning("[Vision] Сервер unhealthy, перезапуск...")
+                            await unload_all_models(role="vision")
+                            shared_llm_url = await get_vision_url(llm_settings)
+                            if not shared_llm_url:
+                                logger.warning("[Vision] Не удалось перезапустить vision-сервер")
+                                break
 
                 results.sort(key=lambda x: x[0]["page"])
                 for frame_info, desc in results:

@@ -12,6 +12,9 @@ from src.ingestion.utils import cleanup_gpu
 
 logger = logging.getLogger(__name__)
 
+# Глобальный URL vision-сервера: обновляется при restart watchdog
+_vision_url: str | None = None
+
 
 # Кодирование изображения в base64 с ресайзом при превышении лимита
 def get_image_base64(image_path, max_dimension=1568):
@@ -71,7 +74,7 @@ async def get_vision_url(llm_settings, progress_cb=None):
         v_max_tokens = int(llm_settings.get("vision_max_tokens") or 4096)
         v_threads = int(llm_settings.get("vision_threads") or 0)
 
-        return await get_vision_server(
+        url = await get_vision_server(
             gguf_path=g_path,
             mmproj_path=m_path,
             ctx_size=4096,
@@ -79,13 +82,27 @@ async def get_vision_url(llm_settings, progress_cb=None):
             n_batch=v_b,
             n_ubatch=v_ub,
             flash_attn=v_fa,
-            n_parallel=1,
+            n_parallel=v_conc,
             n_threads=v_threads or None,
             custom_args=[],
         )
+        global _vision_url
+        _vision_url = url
+        return url
     except Exception as e:
         logger.error(f"[Vision] Ошибка ленивого запуска: {e}")
         return None
+
+
+def set_vision_url(url: str | None):
+    """Обновить глобальный vision URL (вызывается watchdog при restart)."""
+    global _vision_url
+    _vision_url = url
+
+
+def get_current_vision_url() -> str | None:
+    """Получить текущий vision URL (без запуска нового сервера)."""
+    return _vision_url
 
 
 def _clean_think_tags(text):
@@ -119,7 +136,9 @@ async def describe_image_with_lmstudio(
 Пиши технически точно, лаконично, без лишних вводных фраз и пояснений процесса."""
 
     # Основной путь: GGUF Vision через llama-server
-    if existing_llm_url:
+    # Если existing_llm_url недоступен — fallback на глобальный _vision_url (обновляется watchdog)
+    vision_url = existing_llm_url or _vision_url
+    if vision_url:
         for attempt in range(2):
             if cancel_check and cancel_check():
                 logger.info("[Ingestion] Отмена: vision запрос пропущен")
@@ -134,6 +153,10 @@ async def describe_image_with_lmstudio(
                 v_min_p = float(llm_settings.get("vision_min_p") or config.VISION_MIN_P)
                 v_pres = float(llm_settings.get("vision_presence_penalty") or 0.0)
                 v_freq = float(llm_settings.get("vision_frequency_penalty") or 0.0)
+
+                # Если текущий URL недоступен — попробовать глобальный
+                if _vision_url and _vision_url != vision_url:
+                    vision_url = _vision_url
 
                 payload = {
                     "messages": [
@@ -154,7 +177,7 @@ async def describe_image_with_lmstudio(
                 }
                 client = await get_async_http()
                 r = await client.post(
-                    f"{existing_llm_url}/v1/chat/completions",
+                    f"{vision_url}/v1/chat/completions",
                     json=payload,
                     timeout=30,
                 )

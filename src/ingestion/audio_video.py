@@ -15,6 +15,7 @@ import torch
 from llama_index.core.schema import TextNode
 
 import config
+from routers.shared import get_async_http
 from src.gguf.server import unload_all_models
 from src.ingestion.splitter import _get_splitter
 from src.ingestion.utils import (
@@ -363,7 +364,7 @@ async def process_audio_video(
             shared_llm_url = await get_vision_url(llm_settings, progress_cb=prog)
 
         v_conc = int(llm_settings.get("vision_concurrency") or config.VISION_CONCURRENCY)
-        VISION_BATCH_SIZE = 20
+        VISION_BATCH_SIZE = 100
 
         sem = asyncio.Semaphore(v_conc)
         splitter = _get_splitter()
@@ -391,18 +392,18 @@ async def process_audio_video(
                 await asyncio.gather(*batch_tasks)
 
                 if batch_end < n:
-                    logger.info(
-                        f"[Vision] Батч {batch_start + 1}-{batch_end}/{n} готов, перезапуск vision-сервера..."
-                    )
-                    await unload_all_models(role="vision")
-                    import gc
-
-                    gc.collect()
-                    await asyncio.sleep(1)
-                    shared_llm_url = await get_vision_url(llm_settings)
-                    if not shared_llm_url:
-                        logger.warning("[Vision] Не удалось перезапустить vision-сервер")
-                        break
+                    # Watchdog контролирует RAM — restart только при unhealthy
+                    try:
+                        http = await get_async_http()
+                        resp = await http.get(f"{shared_llm_url}/health", timeout=2)
+                        resp.raise_for_status()
+                    except Exception:
+                        logger.warning("[Vision] Сервер unhealthy, перезапуск...")
+                        await unload_all_models(role="vision")
+                        shared_llm_url = await get_vision_url(llm_settings)
+                        if not shared_llm_url:
+                            logger.warning("[Vision] Не удалось перезапустить vision-сервер")
+                            break
         except IngestionCancelled:
             raise
 

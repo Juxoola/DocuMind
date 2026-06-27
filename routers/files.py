@@ -36,6 +36,7 @@ router = APIRouter(tags=["files"])
 
 # ── Получение списка файлов блокнота ──
 
+
 @router.get("/api/files")
 async def get_files(notebook_id: str):
     from routers.notebooks import validate_nb_id
@@ -78,7 +79,7 @@ async def upload_file(
     vision_min_p: float | None = 0.05,
     vision_presence_penalty: float | None = 0.0,
     vision_frequency_penalty: float | None = 0.0,
-    vision_concurrency: int | None = 1,
+    vision_concurrency: int | None = None,
     vision_kv_quant: int | None = 2,
     vision_mtp_enabled: bool | None = False,
 ):
@@ -331,6 +332,7 @@ async def upload_file(
 
 # ── Отмена загрузки ──
 
+
 @router.post("/api/upload/cancel")
 async def cancel_upload(notebook_id: str = Query(...), task_id: str = Query(None)):
     try:
@@ -355,6 +357,7 @@ async def cancel_upload(notebook_id: str = Query(...), task_id: str = Query(None
 
 
 # ── Удаление файла и очистка индексов ──
+
 
 @router.delete("/api/files/{filename}")
 async def delete_file(filename: str, notebook_id: str):
@@ -566,7 +569,6 @@ def _content_disposition(name: str, ext: str) -> str:
     encoded = quote(full)
     ascii_safe = full.encode("ascii", "replace").decode().replace("?", "_")
     return f"attachment; filename=\"{ascii_safe}\"; filename*=UTF-8''{encoded}"
-
 
 
 # ── Экспорт текста и видео-метаданные ──

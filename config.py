@@ -140,6 +140,7 @@ def collect_rag_config() -> dict:
 
     return asdict(rag)
 
+
 EMBEDDING_MODEL_NAME = rag.embedding_model
 RERANKER_MODEL_NAME = rag.reranker_model
 EMBEDDING_N_PARALLEL = rag.embedding_n_parallel
@@ -160,7 +161,7 @@ VISION_TOP_P = float(os.getenv("VISION_TOP_P", "0.9"))
 VISION_MIN_P = float(os.getenv("VISION_MIN_P", "0.05"))
 CHAT_TEMPERATURE = float(os.getenv("CHAT_TEMPERATURE", "0.7"))
 GGUF_SEARCH_DIRS = rag.gguf_search_dirs
-GGUF_CTX_SIZE = int(os.getenv("GGUF_CTX_SIZE", "32768"))
+GGUF_CTX_SIZE = int(os.getenv("GGUF_CTX_SIZE", "16384"))
 GGUF_CTX_EMBED_CHARS = int(os.getenv("GGUF_CTX_EMBED_CHARS", "4096"))
 VISION_CONCURRENCY = int(os.getenv("VISION_CONCURRENCY", "4"))
 
@@ -186,9 +187,8 @@ def _collect_rag_config() -> dict:
     return collect_rag_config()
 
 
-
-
 RAG_CONFIG_FILE = os.path.join(BASE_DIR, "rag_config.json")
+
 
 # Sync загрузка при старте (до async event loop)
 def _load_config_sync():
