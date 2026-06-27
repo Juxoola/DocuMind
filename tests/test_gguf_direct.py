@@ -12,7 +12,7 @@
 import asyncio
 import os
 import sys
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -178,51 +178,28 @@ class TestServerReady:
     """Проверка is_server_ready (с моком async httpx)."""
 
     def test_ready_when_200(self):
-        with patch("src.gguf.server.httpx.AsyncClient") as MockAC:
-            from unittest.mock import AsyncMock
+        mock_client = AsyncMock()
+        mock_client.get = AsyncMock(return_value=MagicMock(status_code=200))
 
-            mock_ctx = AsyncMock()
-            mock_ctx.__aenter__.return_value.get = AsyncMock(
-                return_value=MagicMock(status_code=200)
-            )
-            MockAC.return_value = mock_ctx
+        with patch("src.gguf.server._get_health_client", return_value=mock_client):
             from src.gguf.server import is_server_ready
 
             assert asyncio.run(is_server_ready(8081)) is True
 
     def test_not_ready_when_not_200(self):
-        with patch("src.gguf.server.httpx.AsyncClient") as MockAC:
-            from unittest.mock import AsyncMock
+        mock_client = AsyncMock()
+        mock_client.get = AsyncMock(return_value=MagicMock(status_code=503))
 
-            mock_ctx = AsyncMock()
-            mock_ctx.__aenter__.return_value.get = AsyncMock(
-                return_value=MagicMock(status_code=503)
-            )
-            MockAC.return_value = mock_ctx
+        with patch("src.gguf.server._get_health_client", return_value=mock_client):
             from src.gguf.server import is_server_ready
 
             assert asyncio.run(is_server_ready(8081)) is False
 
     def test_not_ready_when_exception(self):
-        with patch("src.gguf.server.httpx.AsyncClient") as MockAC:
-            from unittest.mock import AsyncMock
+        mock_client = AsyncMock()
+        mock_client.get = AsyncMock(side_effect=Exception("Connection refused"))
 
-            mock_ctx = AsyncMock()
-            mock_ctx.__aenter__.return_value.get = AsyncMock(
-                side_effect=Exception("Connection refused")
-            )
-            MockAC.return_value = mock_ctx
-            from src.gguf.server import is_server_ready
-
-            assert asyncio.run(is_server_ready(8081)) is False
-
-    def test_not_ready_when_timeout(self):
-        with patch("src.gguf.server.httpx.AsyncClient") as MockAC:
-            from unittest.mock import AsyncMock
-
-            mock_ctx = AsyncMock()
-            mock_ctx.__aenter__.return_value.get = AsyncMock(side_effect=TimeoutError("timeout"))
-            MockAC.return_value = mock_ctx
+        with patch("src.gguf.server._get_health_client", return_value=mock_client):
             from src.gguf.server import is_server_ready
 
             assert asyncio.run(is_server_ready(8081)) is False

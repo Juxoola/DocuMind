@@ -1,5 +1,6 @@
 """Построение контекста, промптов и получение URL эмбеддинг-сервера."""
 
+import asyncio
 import logging
 import os
 
@@ -13,6 +14,16 @@ logger = logging.getLogger(__name__)
 async def build_file_context(nodes, notebook_id: str):
     paths = config.get_notebook_paths(notebook_id)
 
+    # Пакетная проверка существования изображений (1 batch vs N sync calls)
+    img_paths = {
+        node.node.metadata.get("image_path")
+        for node in nodes
+        if node.node.metadata.get("image_path")
+    }
+    existing_imgs = set()
+    if img_paths:
+        existing_imgs = await asyncio.to_thread(lambda: {p for p in img_paths if os.path.exists(p)})
+
     sources = []
     context_parts = []
 
@@ -22,7 +33,7 @@ async def build_file_context(nodes, notebook_id: str):
         img_path = meta.get("image_path", None)
         img_url = (
             f"/files/{notebook_id}/images/" + os.path.basename(img_path)
-            if img_path and os.path.exists(img_path)
+            if img_path and img_path in existing_imgs
             else None
         )
         text = node.node.get_content()

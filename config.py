@@ -22,14 +22,23 @@ os.makedirs(NOTEBOOKS_DIR, exist_ok=True)
 
 
 # Пути для хранения данных каждого notebook: data, chroma_db, images.
+# Кэш результатов: избегает 20+ alloc dict за запрос
+_notebook_paths_cache: dict[str, dict] = {}
+
+
 def get_notebook_paths(notebook_id: str):
+    cached = _notebook_paths_cache.get(notebook_id)
+    if cached is not None:
+        return cached
     nb_path = os.path.join(NOTEBOOKS_DIR, notebook_id)
-    return {
+    paths = {
         "base": nb_path,
         "data": os.path.join(nb_path, "data"),
         "chroma_db": os.path.join(nb_path, "chroma_db"),
         "images": os.path.join(nb_path, "images"),
     }
+    _notebook_paths_cache[notebook_id] = paths
+    return paths
 
 
 HOST = os.getenv("HOST", "127.0.0.1")

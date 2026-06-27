@@ -32,6 +32,7 @@ def temp_notebooks_dir(monkeypatch):
 
     monkeypatch.setattr(cfg, "NOTEBOOKS_DIR", tmp)
     monkeypatch.setattr(cfg, "BASE_DIR", PROJECT_ROOT)
+    cfg._notebook_paths_cache.clear()
     # Создаём поддиректории
     os.makedirs(tmp, exist_ok=True)
     yield tmp

@@ -47,6 +47,10 @@ _qe_health_cache: dict[str, tuple[bool, float]] = {}
 _qe_health_cache_lock = threading.Lock()
 _QE_HEALTH_TTL = 120.0
 
+# Предкомпилированные регулярки для QE callback (избегаем re.sub на каждый вызов)
+_QE_RE_NUM = re.compile(r"^\d+[\.\)]\s*")
+_QE_RE_BULLET = re.compile(r"^[-\*\+]\s*")
+
 
 async def _is_llm_healthy(url: str) -> bool:
     now = _time.time()
@@ -272,8 +276,8 @@ async def _hybrid_search(index, query: str, allowed_files, bm25_retriever, qe_ll
                             line = line.strip()
                             if not line:
                                 continue
-                            line = re.sub(r"^\d+[\.\)]\s*", "", line)
-                            line = re.sub(r"^[-\*\+]\s*", "", line)
+                            line = _QE_RE_NUM.sub("", line)
+                            line = _QE_RE_BULLET.sub("", line)
                             line = line.strip()
                             if line:
                                 queries.append(line)

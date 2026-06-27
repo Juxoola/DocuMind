@@ -25,6 +25,19 @@ from src.gguf.state import (
 
 logger = logging.getLogger(__name__)
 
+# Переиспользуемый HTTP-клиент для health-check polling (is_server_ready)
+_health_http: httpx.AsyncClient | None = None
+_health_http_lock = asyncio.Lock()
+
+
+async def _get_health_client() -> httpx.AsyncClient:
+    global _health_http
+    if _health_http is None or _health_http.is_closed:
+        async with _health_http_lock:
+            if _health_http is None or _health_http.is_closed:
+                _health_http = httpx.AsyncClient(timeout=1)
+    return _health_http
+
 
 # Выделение порта, убийство процесса, ожидание готовности сервера.
 def _allocate_port() -> int:
@@ -109,9 +122,9 @@ def _proc_alive(proc) -> bool:
 
 async def is_server_ready(port: int) -> bool:
     try:
-        async with httpx.AsyncClient(timeout=1) as client:
-            r = await client.get(f"http://127.0.0.1:{port}/health")
-            return r.status_code == 200
+        client = await _get_health_client()
+        r = await client.get(f"http://127.0.0.1:{port}/health")
+        return r.status_code == 200
     except Exception:
         return False
 
@@ -664,25 +677,30 @@ async def unload_all_models(role: str = None):
             if _proc_alive(process):
                 to_kill.append((path, process, _server_ports.get(path)))
 
-    async with httpx.AsyncClient(timeout=0.5) as client:
-        for path, process, port in to_kill:
-            if port:
-                try:
-                    await client.post(f"http://127.0.0.1:{port}/slots/0/clear")
-                except Exception:
-                    pass
+    async def _stop_one(path, process, port):
+        if port:
             try:
-                await _kill_server_process(process)
-                try:
-                    await asyncio.wait_for(process.wait(), timeout=10)
-                except Exception:
-                    pass
-                for _ in range(10):
-                    if not _proc_alive(process):
-                        break
-                    await asyncio.sleep(0.5)
-            except Exception as e:
-                logger.error(f"[GGUF Server] Ошибка при остановке {os.path.basename(path)}: {e}")
+                client = await _get_health_client()
+                await client.post(f"http://127.0.0.1:{port}/slots/0/clear")
+            except Exception:
+                pass
+        try:
+            await _kill_server_process(process)
+            try:
+                await asyncio.wait_for(process.wait(), timeout=10)
+            except Exception:
+                pass
+            for _ in range(10):
+                if not _proc_alive(process):
+                    break
+                await asyncio.sleep(0.5)
+        except Exception as e:
+            logger.error(f"[GGUF Server] Ошибка при остановке {os.path.basename(path)}: {e}")
+
+    await asyncio.gather(
+        *[_stop_one(p, proc, port) for p, proc, port in to_kill],
+        return_exceptions=True,
+    )
 
     async with _lock:
         for path in to_remove:

@@ -35,7 +35,7 @@ async def _scan_gguf_dirs_uncached() -> list[dict]:
         if not await aiofiles.os.path.exists(base_dir):
             continue
         for dirpath, dirnames, filenames in await asyncio.to_thread(
-            lambda: list(os.walk(base_dir))
+            lambda d=base_dir: list(os.walk(d))
         ):
             gguf_files = sorted(
                 [

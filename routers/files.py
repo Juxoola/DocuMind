@@ -17,6 +17,7 @@ from fastapi import APIRouter, File, HTTPException, Query, UploadFile
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 
 import config
+from src.rag.state import RAG_POOL
 
 from .shared import (
     _background_tasks,
@@ -318,7 +319,7 @@ async def upload_file(
     async def event_generator():
         loop = asyncio.get_running_loop()
         while True:
-            msg = await loop.run_in_executor(None, q.get)
+            msg = await loop.run_in_executor(RAG_POOL, q.get)
             yield sse_event(msg)
             if msg["type"] in ("done", "error", "cancelled"):
                 break
@@ -367,13 +368,13 @@ async def delete_file(filename: str, notebook_id: str):
         gc.collect()
 
         async def _sync_remove_with_retry(fp: str):
-            for i in range(10):
+            for i in range(5):
                 try:
                     await aiofiles.os.remove(fp)
                     return
                 except PermissionError:
-                    if i < 4:
-                        await asyncio.sleep(1)
+                    if i < 2:
+                        await asyncio.sleep(0.2)
                         continue
                     try:
                         tmp = fp + f".del{i}"
@@ -381,9 +382,9 @@ async def delete_file(filename: str, notebook_id: str):
                         await aiofiles.os.remove(tmp)
                         return
                     except Exception:
-                        if i == 9:
+                        if i == 4:
                             raise
-                        await asyncio.sleep(1)
+                        await asyncio.sleep(0.2)
 
         await _sync_remove_with_retry(file_path)
     from src.rag.indexing import get_vector_store
