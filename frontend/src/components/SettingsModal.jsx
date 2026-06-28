@@ -17,7 +17,7 @@ export default function SettingsModal({ isOpen, onClose, settings, onSave }) {
     const [expandedDirs, setExpandedDirs] = useState({});
     const [llmLoadState, setLlmLoadState] = useState({ state: 'idle', phase: null, model: null, elapsed: 0, eta: null, error: null });
     const [ggufConfig, setGgufConfig] = useState({ search_dirs: '', gguf_kv_quant: 8, presence_penalty: 0.0, frequency_penalty: 0.0, repeat_penalty: 1.1, top_p: 0.9, min_p: 0.05 });
-    const [ragConfig, setRagConfig] = useState({ embedding_model: '', reranker_model: '', embedding_n_parallel: 2, top_k_per_file: 5, rerank_pool: 30, final_top_n: 10, use_reranker: true, query_expansion: true, rerank_score_threshold: 0.1 });
+    const [ragConfig, setRagConfig] = useState({ embedding_model: '', reranker_model: '', embedding_n_parallel: 2, top_k_per_file: 5, rerank_pool: 30, final_top_n: 10, use_reranker: true, query_expansion: true, rerank_score_threshold: 0.1, surya_mode: 'layout_only' });
 
     useEffect(() => {
         if (isOpen) {
@@ -276,9 +276,7 @@ export default function SettingsModal({ isOpen, onClose, settings, onSave }) {
                         <button
                             onClick={async () => {
                                 onSave(localSettings);
-                                if (activeTab === 'rag') {
-                                    await updateRagConfig();
-                                }
+                                await updateRagConfig();
                                 if (ggufConfig.search_dirs !== undefined) {
                                     await updateSearchDirs(ggufConfig.search_dirs);
                                 }

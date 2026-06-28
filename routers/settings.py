@@ -37,8 +37,6 @@ class UpdateModelDirsRequest(BaseModel):
         for part in parts:
             if ".." in part:
                 raise ValueError(f"запрещён path traversal: {part}")
-            if os.path.isabs(part):
-                raise ValueError(f"абсолютные пути запрещены: {part}")
         return v
 
 
