@@ -442,13 +442,30 @@ async def get_source_content(filename: str, notebook_id: str):
 
 
 def _extract_pdf_text(file_path: str) -> list[str]:
+    """Извлечение текста из PDF через pymupdf4llm (markdown) или fallback на fitz."""
+    try:
+        import pymupdf4llm
 
-    import fitz
-
-    doc = fitz.open(file_path)
-    pages = [page.get_text() for page in doc]
-    doc.close()
-    return pages
+        chunks = pymupdf4llm.to_markdown(file_path, page_chunks=True, write_images=False)
+        pages = []
+        for chunk in chunks:
+            text = chunk.get("text", "")
+            # Очистка markdown от артефактов pymupdf4llm
+            import re
+            text = re.sub(r"^(#{1,6})\s*\*\*(.+?)\*\*\s*$", r"\1 \2", text, flags=re.MULTILINE)
+            text = re.sub(r"\*\*==>.+?intentionally omitted.+?<==\*\*", "", text)
+            text = re.sub(r"\*\*(.+?\.{3,}\d+)\*\*", r"\1", text)
+            text = re.sub(r"\n\s*\d{1,3}\s*\n", "\n", text)
+            text = text.replace("\\n", "\n")
+            text = re.sub(r"\n{3,}", "\n\n", text)
+            pages.append(text)
+        return pages
+    except ImportError:
+        import fitz
+        doc = fitz.open(file_path)
+        pages = [page.get_text() for page in doc]
+        doc.close()
+        return pages
 
 
 def _build_interleaved_text(file_path: str, data_dir: str, filename: str) -> str:
