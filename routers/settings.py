@@ -74,15 +74,15 @@ async def get_rag_config():
 
 # Валидация параметров конфигурации RAG
 class UpdateRagConfigRequest(BaseModel):
-    embedding_model: str = Field(..., min_length=1, max_length=256)
-    reranker_model: str = Field(..., min_length=1, max_length=256)
-    embedding_n_parallel: int = Field(..., ge=1, le=8)
-    top_k_per_file: int = Field(..., ge=1, le=100)
-    rerank_pool: int = Field(..., ge=1, le=200)
-    final_top_n: int = Field(..., ge=1, le=50)
-    use_reranker: bool
+    embedding_model: str = Field(default="")
+    reranker_model: str = Field(default="")
+    embedding_n_parallel: int = Field(default=2, ge=1, le=8)
+    top_k_per_file: int = Field(default=5, ge=1, le=100)
+    rerank_pool: int = Field(default=30, ge=1, le=200)
+    final_top_n: int = Field(default=10, ge=1, le=50)
+    use_reranker: bool = True
     query_expansion: bool = True
-    rerank_score_threshold: float = Field(..., ge=0.0, le=1.0)
+    rerank_score_threshold: float = Field(default=0.1, ge=0.0, le=1.0)
     surya_mode: str = Field(default="layout_only")
 
     @field_validator("embedding_model", "reranker_model")
@@ -111,8 +111,10 @@ async def update_rag_config(req: UpdateRagConfigRequest):
     old_reranker = config.RERANKER_MODEL_NAME
 
     with config._config_lock:
-        config.EMBEDDING_MODEL_NAME = req.embedding_model
-        config.RERANKER_MODEL_NAME = req.reranker_model
+        if req.embedding_model:
+            config.EMBEDDING_MODEL_NAME = req.embedding_model
+        if req.reranker_model:
+            config.RERANKER_MODEL_NAME = req.reranker_model
         config.EMBEDDING_N_PARALLEL = req.embedding_n_parallel
         config.RAG_TOP_K_PER_FILE = req.top_k_per_file
         config.RAG_RERANK_POOL = req.rerank_pool
