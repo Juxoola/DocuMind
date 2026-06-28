@@ -48,7 +48,7 @@ async def update_model_dirs(req: UpdateModelDirsRequest):
         config.GGUF_SEARCH_DIRS = req.dirs
         data = config._collect_rag_config()
     await save_rag_config(config.RAG_CONFIG_FILE, data)
-    config.resolve_model_path.cache_clear()
+    config.invalidate_model_cache()
     try:
         from src.gguf.scanner import invalidate_scan_cache
 
@@ -138,6 +138,6 @@ async def update_rag_config(req: UpdateRagConfigRequest):
             logger.warning(f"[Settings] Ошибка предзагрузки моделей: {e}")
     else:
         unload_rag_models(hard=True)
-        config.resolve_model_path.cache_clear()
+        config.invalidate_model_cache()
 
     return {"status": "ok"}
