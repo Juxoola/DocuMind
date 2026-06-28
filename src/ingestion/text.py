@@ -20,68 +20,7 @@ from src.ingestion.vision import describe_image_with_lmstudio, get_vision_url
 logger = logging.getLogger(__name__)
 
 
-# Анализ графических элементов страницы для определения необходимости Vision
-def _detect_has_real_graphics(images: list, drawings: list) -> bool:
-    if images:
-        return True
-    graphics_weight = 0
-    horizontal_lines = 0
-    vertical_lines = 0
-    for d in drawings:
-        items = d.get("items", [])
-        # Кривые (Bezier) или сложные composition — настоящая графика
-        if any(i[0] in ["c", "q"] for i in items) or len(items) > 12:
-            return True
-        rect = d.get("rect")
-        fill = d.get("fill")
-        # Пропускаем фоновые прямоугольники (белый фон страницы)
-        is_page_background = (
-            len(items) == 1
-            and items[0][0] == "re"
-            and fill is not None
-            and all(c >= 0.99 for c in fill)
-            and rect is not None
-            and (rect.x1 - rect.x0) > 200
-            and (rect.y1 - rect.y0) > 200
-        )
-        if is_page_background:
-            continue
-        # Пропускаем простые рамки (code blocks, border boxes):
-        # один прямоугольник без заливки, шире чем высокий (горизонтальная рамка)
-        is_simple_frame = (
-            len(items) == 1
-            and items[0][0] == "re"
-            and (fill is None or all(c >= 0.95 for c in fill))
-            and rect is not None
-            and (rect.x1 - rect.x0) > (rect.y1 - rect.y0) * 1.5
-            and (rect.x1 - rect.x0) > 100
-            and (rect.y1 - rect.y0) > 3
-        )
-        if is_simple_frame:
-            continue
-        if rect is not None:
-            w, h = rect.x1 - rect.x0, rect.y1 - rect.y0
-            if w > 30 and h < 3:
-                horizontal_lines += 1
-            elif w < 3 and h > 30:
-                vertical_lines += 1
-        graphics_weight += 1
-    return (
-        graphics_weight > 8
-        or (horizontal_lines >= 3 and vertical_lines >= 1)
-        or (horizontal_lines + vertical_lines >= 6)
-    )
-
-
-async def _analyze_page_for_vision(page):
-
-    def _sync_analyze():
-        text = page.get_text()
-        images = page.get_images()
-        drawings = page.get_drawings()
-        return text, _detect_has_real_graphics(images, drawings)
-
-    return await asyncio.to_thread(_sync_analyze)
+# Извлечение текста и встроенных изображений со страницы PDF
 
 
 async def _analyze_and_build_page(page_num, doc, images_dir, file_name, splitter):
@@ -90,8 +29,6 @@ async def _analyze_and_build_page(page_num, doc, images_dir, file_name, splitter
         page = doc.load_page(page_num)
         text = page.get_text()
         images = page.get_images()
-        drawings = page.get_drawings()
-        has_real_graphics = _detect_has_real_graphics(images, drawings)
 
         local_nodes = []
         if text and text.strip():
@@ -99,127 +36,39 @@ async def _analyze_and_build_page(page_num, doc, images_dir, file_name, splitter
                 [TextNode(text=text, metadata={"file_name": file_name, "page": page_num + 1})]
             )
 
-        # Извлечение встроенных изображений по одному с кропом по координатам
+        # Извлечение встроенных изображений (фото, скриншоты)
         image_paths = []
-        if has_real_graphics and page is not None:
-            seen_xrefs = set()
-            for img_info in images:
-                xref = img_info[0]
-                if xref in seen_xrefs:
+        seen_xrefs = set()
+        for img_info in images:
+            xref = img_info[0]
+            if xref in seen_xrefs:
+                continue
+            seen_xrefs.add(xref)
+            try:
+                rects = page.get_image_rects(xref)
+                if not rects:
                     continue
-                seen_xrefs.add(xref)
-                try:
-                    rects = page.get_image_rects(xref)
-                    if not rects:
-                        continue
-                    base_image = page.parent.extract_image(xref)
-                    if not base_image or not base_image.get("image"):
-                        continue
-                    ext = base_image.get("ext", "png")
-                    if ext == "jpeg":
-                        ext = "jpg"
-                    for rect in rects:
-                        # Пропускаем tiny изображения (иконки, маркеры)
-                        w, h = rect.width, rect.height
-                        if w < 50 or h < 50:
-                            continue
-                        try:
-                            clip = fitz.Rect(rect)
-                            pix = page.get_pixmap(clip=clip, dpi=150)
-                            img_name = f"p_{page_num + 1}_x{xref}_{uuid.uuid4().hex[:4]}.{ext}"
-                            img_path = os.path.join(images_dir, img_name)
-                            pix.save(img_path)
-                            image_paths.append(img_path)
-                        except Exception:
-                            continue
-                except Exception:
+                base_image = page.parent.extract_image(xref)
+                if not base_image or not base_image.get("image"):
                     continue
-
-            # Fallback: кластеризация vector drawings → кроп регионов
-            if not image_paths:
-                drawing_rects = []
-                page_rect = page.rect
-                for d in drawings:
-                    rect = d.get("rect")
-                    if rect is None:
-                        continue
-                    items = d.get("items", [])
-                    fill = d.get("fill")
-                    # Пропускаем фоновые прямоугольники
-                    is_bg = (
-                        len(items) == 1
-                        and items[0][0] == "re"
-                        and fill is not None
-                        and all(c >= 0.99 for c in fill)
-                        and rect.width > 200
-                        and rect.height > 200
-                    )
-                    if is_bg:
-                        continue
-                    # Пропускаем простые рамки (code blocks, border boxes)
-                    is_simple_frame = (
-                        len(items) == 1
-                        and items[0][0] == "re"
-                        and (fill is None or all(c >= 0.95 for c in fill))
-                        and (rect.x1 - rect.x0) > (rect.y1 - rect.y0) * 1.5
-                        and (rect.x1 - rect.x0) > 100
-                        and (rect.y1 - rect.y0) > 3
-                    )
-                    if is_simple_frame:
-                        continue
-                    if rect.width < 10 or rect.height < 10:
-                        continue
-                    # Пропускаем элементы на границе страницы (колонтитулы)
-                    if rect.y0 < 30 or rect.y1 > page_rect.height - 30:
-                        continue
-                    drawing_rects.append(fitz.Rect(rect))
-
-                # Кластеризация: объединяем близкие rect'ы (порог 50px)
-                clusters = []
-                for r in drawing_rects:
-                    merged = False
-                    for ci, cluster in enumerate(clusters):
-                        # expanded = cluster + 50px padding
-                        expanded = fitz.Rect(
-                            cluster.x0 - 50,
-                            cluster.y0 - 50,
-                            cluster.x1 + 50,
-                            cluster.y1 + 50,
-                        )
-                        if expanded.intersects(r):
-                            clusters[ci] = cluster | r  # объединение
-                            merged = True
-                            break
-                    if not merged:
-                        clusters.append(r)
-
-                # Рендер каждого кластера с padding
-                PAD = 20
-                for i, cluster_rect in enumerate(clusters):
-                    clip = fitz.Rect(
-                        max(0, cluster_rect.x0 - PAD),
-                        max(0, cluster_rect.y0 - PAD),
-                        min(page_rect.width, cluster_rect.x1 + PAD),
-                        min(page_rect.height, cluster_rect.y1 + PAD),
-                    )
-                    # Пропускаем слишком маленькие кластеры
-                    if clip.width < 40 or clip.height < 40:
+                ext = base_image.get("ext", "png")
+                if ext == "jpeg":
+                    ext = "jpg"
+                for rect in rects:
+                    w, h = rect.width, rect.height
+                    if w < 50 or h < 50:
                         continue
                     try:
+                        clip = fitz.Rect(rect)
                         pix = page.get_pixmap(clip=clip, dpi=150)
-                        img_name = f"p_{page_num + 1}_d{i}_{uuid.uuid4().hex[:4]}.png"
+                        img_name = f"p_{page_num + 1}_x{xref}_{uuid.uuid4().hex[:4]}.{ext}"
                         img_path = os.path.join(images_dir, img_name)
                         pix.save(img_path)
                         image_paths.append(img_path)
                     except Exception:
                         continue
-
-                # Fallback: если кластеризация ничего не дала — полная страница
-                if not image_paths:
-                    img_name = f"p_{page_num + 1}_{uuid.uuid4().hex[:6]}.png"
-                    img_path = os.path.join(images_dir, img_name)
-                    page.get_pixmap(dpi=150).save(img_path)
-                    image_paths.append(img_path)
+            except Exception:
+                continue
 
         return page_num, local_nodes, image_paths
 
