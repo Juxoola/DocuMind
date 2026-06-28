@@ -2,6 +2,8 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { X, FileText, Play, Image as ImageIcon, Clock, AlertCircle, Download, ChevronDown } from 'lucide-react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { cn } from '../lib/utils';
 
 export default function DocumentViewer({ file, notebook, onClose }) {
@@ -280,9 +282,11 @@ export default function DocumentViewer({ file, notebook, onClose }) {
                   </div>
                   <div className="w-full md:w-1/2 space-y-3">
                     <h4 className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Описание</h4>
-                    <p className="text-xs leading-relaxed text-foreground/80 font-medium whitespace-pre-wrap">
-                      {f.description}
-                    </p>
+                    <div className="text-xs leading-relaxed text-foreground/80 font-medium prose prose-invert prose-xs max-w-none">
+                      <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                        {f.description || ''}
+                      </ReactMarkdown>
+                    </div>
                   </div>
                 </div>
               </motion.div>
@@ -290,9 +294,9 @@ export default function DocumentViewer({ file, notebook, onClose }) {
           </div>
         ) : showRawText ? (
           <div className="flex-1 p-8 overflow-y-auto custom-scrollbar prose prose-invert prose-sm max-w-none min-h-0">
-            <pre className="whitespace-pre-wrap font-sans text-xs leading-loose text-foreground/80">
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>
               {content || 'Текст пуст или извлекается...'}
-            </pre>
+            </ReactMarkdown>
           </div>
         ) : isPdf ? (
           <iframe 
@@ -416,12 +420,14 @@ export default function DocumentViewer({ file, notebook, onClose }) {
                           </div>
                         )}
                         
-                        <p className={cn(
-                          "text-xs leading-relaxed transition-colors",
+                        <div className={cn(
+                          "text-xs leading-relaxed transition-colors prose prose-invert prose-xs max-w-none",
                           isActive ? "text-foreground font-medium" : "text-foreground/70"
                         )}>
-                          {ev.text || ev.description}
-                        </p>
+                          <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                            {ev.text || ev.description || ''}
+                          </ReactMarkdown>
+                        </div>
                       </motion.div>
                     );
                   })
