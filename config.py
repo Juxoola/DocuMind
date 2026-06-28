@@ -104,6 +104,7 @@ class RAGConfig:
     min_final_chunks: int = int(os.getenv("MIN_FINAL_CHUNKS", "5"))
     rrf_k: int = int(os.getenv("RAG_RRF_K", "60"))
     top_k_ratio: float = float(os.getenv("RAG_TOP_K_RATIO", "0.1"))
+    surya_mode: str = os.getenv("SURYA_MODE", "layout_only")  # disabled | layout_only | full
     gguf_search_dirs: str = os.getenv(
         "GGUF_SEARCH_DIRS",
         "F:/llm;" + os.path.join(os.path.dirname(os.path.abspath(__file__)), "models"),
@@ -132,6 +133,7 @@ def update_rag_config(data: dict) -> None:
         min_final_chunks=int(data.get("min_final_chunks", rag.min_final_chunks)),
         rrf_k=int(data.get("rrf_k", rag.rrf_k)),
         top_k_ratio=float(data.get("top_k_ratio", rag.top_k_ratio)),
+        surya_mode=data.get("surya_mode", rag.surya_mode),
     )
 
 
@@ -164,6 +166,7 @@ GGUF_SEARCH_DIRS = rag.gguf_search_dirs
 GGUF_CTX_SIZE = int(os.getenv("GGUF_CTX_SIZE", "16384"))
 GGUF_CTX_EMBED_CHARS = int(os.getenv("GGUF_CTX_EMBED_CHARS", "4096"))
 VISION_CONCURRENCY = int(os.getenv("VISION_CONCURRENCY", "4"))
+SURYA_MODE = rag.surya_mode
 
 
 def _apply_rag_config(data: dict) -> None:
@@ -171,6 +174,7 @@ def _apply_rag_config(data: dict) -> None:
     global EMBEDDING_MODEL_NAME, RERANKER_MODEL_NAME, EMBEDDING_N_PARALLEL
     global RAG_TOP_K_PER_FILE, RAG_RERANK_POOL, RAG_FINAL_TOP_N
     global USE_RERANKER, RAG_QUERY_EXPANSION, RERANK_SCORE_THRESHOLD, GGUF_SEARCH_DIRS
+    global SURYA_MODE
     EMBEDDING_MODEL_NAME = rag.embedding_model
     RERANKER_MODEL_NAME = rag.reranker_model
     EMBEDDING_N_PARALLEL = rag.embedding_n_parallel
@@ -181,6 +185,7 @@ def _apply_rag_config(data: dict) -> None:
     RAG_QUERY_EXPANSION = rag.query_expansion
     RERANK_SCORE_THRESHOLD = rag.rerank_score_threshold
     GGUF_SEARCH_DIRS = rag.gguf_search_dirs
+    SURYA_MODE = rag.surya_mode
 
 
 def _collect_rag_config() -> dict:

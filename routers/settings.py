@@ -70,6 +70,7 @@ async def get_rag_config():
         "use_reranker": config.USE_RERANKER,
         "query_expansion": config.RAG_QUERY_EXPANSION,
         "rerank_score_threshold": config.RERANK_SCORE_THRESHOLD,
+        "surya_mode": config.SURYA_MODE,
     }
 
 
@@ -84,6 +85,7 @@ class UpdateRagConfigRequest(BaseModel):
     use_reranker: bool
     query_expansion: bool = True
     rerank_score_threshold: float = Field(..., ge=0.0, le=1.0)
+    surya_mode: str = Field(default="layout_only")
 
     @field_validator("embedding_model", "reranker_model")
     @classmethod
@@ -93,6 +95,13 @@ class UpdateRagConfigRequest(BaseModel):
             raise ValueError("путь не должен содержать '..'")
         if not v:
             raise ValueError("имя модели не может быть пустым")
+        return v
+
+    @field_validator("surya_mode")
+    @classmethod
+    def validate_surya_mode(cls, v: str) -> str:
+        if v not in ("disabled", "layout_only", "full"):
+            raise ValueError("surya_mode должен быть disabled, layout_only или full")
         return v
 
 
@@ -113,6 +122,7 @@ async def update_rag_config(req: UpdateRagConfigRequest):
         config.USE_RERANKER = req.use_reranker
         config.RAG_QUERY_EXPANSION = req.query_expansion
         config.RERANK_SCORE_THRESHOLD = req.rerank_score_threshold
+        config.SURYA_MODE = req.surya_mode
         data = config._collect_rag_config()
     await save_rag_config(config.RAG_CONFIG_FILE, data)
 
