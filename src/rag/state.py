@@ -7,14 +7,11 @@ from concurrent.futures import ThreadPoolExecutor
 
 logger = logging.getLogger(__name__)
 
-_init_lock = asyncio.Lock()
-
 # Кэши моделей и ChromaDB-клиентов с LRU-эвикцией
 _model_cache: dict = {}
 _model_cache_lock = asyncio.Lock()
 _CLIENT_CACHE_MAXSIZE = 20
 _client_cache: OrderedDict = OrderedDict()
-_client_cache_lock = asyncio.Lock()
 
 _INDEX_CACHE_MAXSIZE = 50
 _index_cache: OrderedDict = OrderedDict()
@@ -27,9 +24,6 @@ RAG_POOL = ThreadPoolExecutor(max_workers=4, thread_name_prefix="rag")
 _BM25_DEBOUNCE_SEC = 10.0
 _bm25_pending_timers: dict = {}
 _bm25_pending_dbpath: dict = {}
-_bm25_pending_lock = asyncio.Lock()
 _bm25_rebuilding: set = set()
-_bm25_rebuilding_lock = asyncio.Lock()
 _bm25_node_cache: dict[str, list] = {}
-_bm25_node_cache_lock = asyncio.Lock()
 _bm25_pending_nodes: dict[str, list] = {}

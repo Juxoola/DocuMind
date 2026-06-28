@@ -1,6 +1,6 @@
 // Основная область чата: ввод, стриминг, рендер сообщений, закладки.
 import React, { useState, useRef, useEffect, lazy, Suspense } from 'react';
-import { Trash2, Sparkles, Settings as SettingsIcon, SlidersHorizontal, Cpu } from 'lucide-react';
+import { Trash2, Sparkles, Settings as SettingsIcon, SlidersHorizontal } from 'lucide-react';
 import { cn } from '../lib/utils';
 const SettingsModal = lazy(() => import('./SettingsModal'));
 import { useVirtualizer } from '@tanstack/react-virtual';

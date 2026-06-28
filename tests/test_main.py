@@ -50,7 +50,6 @@ def client():
 
         src.rag.retrieval.retrieve_nodes = MagicMock(return_value=[])
         src.rag.prompt.build_file_context = MagicMock(return_value=([], ""))
-        src.rag.prompt.make_prompt = MagicMock(return_value="prompt")
         src.rag.indexing.build_index = AsyncMock()
         src.rag.indexing.close_all_clients = AsyncMock()
         src.rag.models.preload_all_models = MagicMock()

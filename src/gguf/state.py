@@ -73,4 +73,3 @@ CACHE_TYPE_MAP = {
 
 _GGUF_CACHE_FILE = os.path.join(config.BASE_DIR, "_gguf_scan_cache.json")
 _GGUF_CACHE_TTL_SEC = 300.0
-_gguf_cache_lock = asyncio.Lock()

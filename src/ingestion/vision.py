@@ -99,10 +99,6 @@ def set_vision_url(url: str | None):
     _vision_url = url
 
 
-def get_current_vision_url() -> str | None:
-    return _vision_url
-
-
 def _clean_think_tags(text):
     text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL)
     text = re.sub(r"<\|.*?\|>", "", text)

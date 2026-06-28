@@ -303,7 +303,6 @@ export default function MainApp({ notebook, onExit }) {
               onRefresh={fetchSources}
               onExit={handleExit}
               onOpenFile={openViewer}
-              llmSettings={llmSettings}
               width={sidebarWidth}
               onToggle={() => setIsSidebarOpen(false)}
               uploadState={uploadState}

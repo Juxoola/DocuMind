@@ -103,37 +103,34 @@ class TestScanGgufDirs:
 # ── Поиск моделей по имени файла ──
 class TestFindGgufByName:
     def test_find_existing(self, tmp_path):
-        from src.gguf.scanner import find_gguf_by_name, invalidate_scan_cache
+        from src.gguf.scanner import find_gguf_by_name_sync
 
         (tmp_path / "target.gguf").write_text("data")
 
         with patch.object(config, "GGUF_SEARCH_DIRS", str(tmp_path)):
-            asyncio.run(invalidate_scan_cache())
-            result = asyncio.run(find_gguf_by_name("target.gguf"))
+            result = find_gguf_by_name_sync("target.gguf")
             assert result is not None
             assert result.endswith("target.gguf")
 
     def test_find_nonexistent(self, tmp_path):
-        from src.gguf.scanner import find_gguf_by_name, invalidate_scan_cache
+        from src.gguf.scanner import find_gguf_by_name_sync
 
         with patch.object(config, "GGUF_SEARCH_DIRS", str(tmp_path)):
-            asyncio.run(invalidate_scan_cache())
-            assert asyncio.run(find_gguf_by_name("no_such_file.gguf")) is None
+            assert find_gguf_by_name_sync("no_such_file.gguf") is None
 
     def test_find_empty_name(self, tmp_path):
-        from src.gguf.scanner import find_gguf_by_name
+        from src.gguf.scanner import find_gguf_by_name_sync
 
-        assert asyncio.run(find_gguf_by_name("")) is None
-        assert asyncio.run(find_gguf_by_name(None)) is None
+        assert find_gguf_by_name_sync("") is None
+        assert find_gguf_by_name_sync(None) is None
 
     def test_find_mmproj(self, tmp_path):
-        from src.gguf.scanner import find_gguf_by_name, invalidate_scan_cache
+        from src.gguf.scanner import find_gguf_by_name_sync
 
         (tmp_path / "mmproj-model.Q4_K_M.gguf").write_text("data")
 
         with patch.object(config, "GGUF_SEARCH_DIRS", str(tmp_path)):
-            asyncio.run(invalidate_scan_cache())
-            result = asyncio.run(find_gguf_by_name("mmproj-model.Q4_K_M.gguf"))
+            result = find_gguf_by_name_sync("mmproj-model.Q4_K_M.gguf")
             assert result is not None
             assert "mmproj" in result
 

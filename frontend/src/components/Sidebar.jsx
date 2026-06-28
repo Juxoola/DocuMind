@@ -88,7 +88,6 @@ export default function Sidebar({
   onRefresh, 
   onExit,
   onOpenFile,
-  llmSettings,
   width,
   onToggle,
   uploadState,

@@ -5,7 +5,6 @@ import logging
 import os
 
 import config
-from src.rag.prompts import get_system_prompt
 from src.rag.state import _model_cache
 
 logger = logging.getLogger(__name__)
@@ -58,23 +57,6 @@ async def build_file_context(nodes, notebook_id: str):
 
     context_str = "\n\n" + ("=" * 40 + "\n\n").join(context_parts)
     return sources, context_str
-
-
-# Сборка итогового промпта из системного промпта, контекста и вопроса
-def make_prompt(
-    query: str,
-    context_str: str,
-    thinking_mode: bool = False,
-    max_tokens: int = 1024,
-    answer_mode: str = None,
-) -> str:
-    return (
-        get_system_prompt(answer_mode)
-        + "\n"
-        + f"Доступные источники:\n{context_str}\n\n"
-        + f"Вопрос пользователя: {query}\n\n"
-        + "Ответ:"
-    )
 
 
 # Получение URL работающего эмбеддинг-сервера из кэша моделей

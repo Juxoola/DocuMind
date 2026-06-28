@@ -121,18 +121,6 @@ async def invalidate_scan_cache():
 
 
 # ── Поиск GGUF-файла по имени в индексе ──
-async def find_gguf_by_name(filename: str) -> str | None:
-
-    if not filename:
-        return None
-    name = os.path.basename(filename)
-    for entry in await scan_gguf_dirs():
-        for f in (entry.get("gguf_files") or []) + (entry.get("mmproj_files") or []):
-            if f == name:
-                return os.path.join(entry["dir"], name)
-    return None
-
-
 def find_gguf_by_name_sync(filename: str) -> str | None:
 
     if not filename:
