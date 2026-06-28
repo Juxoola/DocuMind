@@ -282,7 +282,7 @@ export default function DocumentViewer({ file, notebook, onClose }) {
                   </div>
                   <div className="w-full md:w-1/2 space-y-3">
                     <h4 className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Описание</h4>
-                    <div className="text-xs leading-relaxed text-foreground/80 font-medium prose prose-invert prose-xs max-w-none">
+                    <div className="text-xs leading-relaxed text-foreground/80 font-medium md-content max-w-none">
                       <ReactMarkdown remarkPlugins={[remarkGfm]}>
                         {f.description || ''}
                       </ReactMarkdown>
@@ -293,10 +293,12 @@ export default function DocumentViewer({ file, notebook, onClose }) {
             ))}
           </div>
         ) : showRawText ? (
-          <div className="flex-1 p-8 overflow-y-auto custom-scrollbar prose prose-invert prose-sm max-w-none min-h-0">
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>
-              {content || 'Текст пуст или извлекается...'}
-            </ReactMarkdown>
+          <div className="flex-1 p-8 overflow-y-auto custom-scrollbar min-h-0">
+            <div className="md-content max-w-none">
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                {content || 'Текст пуст или извлекается...'}
+              </ReactMarkdown>
+            </div>
           </div>
         ) : isPdf ? (
           <iframe 
@@ -421,7 +423,7 @@ export default function DocumentViewer({ file, notebook, onClose }) {
                         )}
                         
                         <div className={cn(
-                          "text-xs leading-relaxed transition-colors prose prose-invert prose-xs max-w-none",
+                          "text-xs leading-relaxed transition-colors md-content max-w-none",
                           isActive ? "text-foreground font-medium" : "text-foreground/70"
                         )}>
                           <ReactMarkdown remarkPlugins={[remarkGfm]}>
