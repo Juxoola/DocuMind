@@ -1,13 +1,6 @@
-"""
-Тесты main.py (FastAPI).
+"""Тесты main.py: FastAPI TestClient с моками зависимостей."""
 
-Используем TestClient + комбинацию подходов:
-- Внешние пакеты (torch, chromadb, llama_index) — patch.dict(sys.modules, ...),
-  т.к. они импортируются на уровне модулей src.* до того, как @patch может вмешаться.
-- Проектные модули (src.rag.*, src.gguf.*, etc.) — импортируем и
-  назначаем атрибуты напрямую, без sys.modules.
-"""
-
+# ── Мокирование тяжёлых зависимостей ──
 import os
 import sys
 from unittest.mock import MagicMock, patch
@@ -17,8 +10,6 @@ from fastapi.testclient import TestClient
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-# Внешние пакеты, которые импортируются на top-level уровне в src.*.
-# Их нельзя перехватить через @patch — только через sys.modules.
 _HEAVY_PACKAGES = {
     "llama_index": MagicMock(),
     "llama_index.core": MagicMock(),
@@ -44,23 +35,11 @@ _HEAVY_PACKAGES = {
 
 @pytest.fixture(scope="module")
 def client():
-    """
-    TestClient с моками зависимостей.
-
-    Стратегия:
-    1. Удаляем из sys.modules кеш проекта (чтобы не было stale-ссылок).
-    2. Мокаем внешние тяжёлые пакеты через patch.dict(sys.modules, ...).
-    3. Импортируем проектные модули и назначаем их атрибуты напрямую.
-    4. Импортируем main.
-    """
-    # ── 1. Чистим кеш модулей проекта ──
     for mod_name in list(sys.modules.keys()):
         if mod_name.startswith("main") or mod_name.startswith("src."):
             sys.modules.pop(mod_name, None)
 
-    # ── 2. Внешние пакеты — только sys.modules ──
     with patch.dict(sys.modules, _HEAVY_PACKAGES, clear=False):
-        # ── 3. Проектные модули — импортируем и назначаем атрибуты ──
         from unittest.mock import AsyncMock
 
         import src.rag.bm25
@@ -121,18 +100,13 @@ def client():
         src.bookmarks.delete_bookmark = AsyncMock(return_value=True)
         src.bookmarks.mark_stale_for_file = AsyncMock(return_value=0)
 
-        # ── 4. Импортируем main ──
         import main as app_module
 
         yield TestClient(app_module.app)
 
 
-# ── Тесты ────────────────────────────────────────────────────────────
-
-
+# ── Тесты эндпоинтов блокнотов ──
 class TestNotebookEndpoints:
-    """CRUD для ноутбуков."""
-
     def test_get_notebooks_empty(self, client):
         resp = client.get("/api/notebooks")
         assert resp.status_code == 200
@@ -155,9 +129,8 @@ class TestNotebookEndpoints:
         assert nb_id in ids
 
 
+# ── Тесты конфигурации ──
 class TestConfigEndpoints:
-    """Эндпоинты конфигурации."""
-
     def test_get_gguf_config(self, client):
         resp = client.get("/api/gguf-config")
         assert resp.status_code == 200
@@ -194,9 +167,8 @@ class TestConfigEndpoints:
         assert resp.status_code == 200
 
 
+# ── Тесты GGUF-сервера ──
 class TestGGUFEndpoints:
-    """Эндпоинты управления GGUF."""
-
     def test_gguf_models(self, client):
         resp = client.get("/api/gguf-models")
         assert resp.status_code == 200
@@ -222,9 +194,8 @@ class TestGGUFEndpoints:
         assert resp.json()["state"] == "idle"
 
 
+# ── Тесты загрузки файлов ──
 class TestUploadValidation:
-    """Валидация загрузки файлов."""
-
     def test_upload_invalid_extension(self, client):
         resp = client.post(
             "/api/upload?notebook_id=test",
@@ -241,8 +212,6 @@ class TestUploadValidation:
 
 
 class TestBookmarkEndpoints:
-    """Закладки."""
-
     def test_list_bookmarks(self, client):
         resp = client.get("/api/bookmarks?notebook_id=deadbeef")
         assert resp.status_code == 200
@@ -262,8 +231,6 @@ class TestBookmarkEndpoints:
 
 
 class TestChatEndpoint:
-    """Чат — базовая валидация."""
-
     def test_chat_no_files(self, client):
         resp = client.post(
             "/api/chat",

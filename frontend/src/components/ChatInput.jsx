@@ -22,6 +22,7 @@ export default function ChatInput({
     llmStatus,
     textareaRef,
 }) {
+    // ── Ссылки на DOM-элементы ──
     const fileInputRef = useRef(null);
 
     return (
@@ -44,6 +45,7 @@ export default function ChatInput({
             </AnimatePresence>
 
             <div className="px-6 pb-6">
+                {/* ── Превью прикреплённого изображения ── */}
                 {imagePreview && (
                     <motion.div
                         initial={{ opacity: 0, y: 10 }}
@@ -60,6 +62,7 @@ export default function ChatInput({
                     </motion.div>
                 )}
                 <div className="relative">
+                    {/* ── Поле ввода и прикрепление файлов ── */}
                     <div className="flex items-end gap-2 bg-muted/20 border border-border/50 rounded-xl p-2 pl-4">
                         <input
                             type="file"
@@ -81,6 +84,7 @@ export default function ChatInput({
                             onChange={(e) => setInput(e.target.value)}
                             onPaste={handlePaste}
                             onKeyDown={(e) => {
+                                // ── Отправка по Enter без Shift ──
                                 if (e.key === 'Enter' && !e.shiftKey) {
                                     e.preventDefault();
                                     handleSend();
@@ -90,6 +94,7 @@ export default function ChatInput({
                             className="flex-1 bg-transparent border-none outline-none resize-none py-3 text-sm focus:ring-0 focus:outline-none overflow-y-auto"
                             rows={1}
                         />
+                        {/* ── Кнопки действий: остановка, загрузка, отправка ── */}
                         {isLoading ? (
                             <button
                                 onClick={() => { if (abortController) { abortController.abort(); abortControllerRef.current = null; } }}

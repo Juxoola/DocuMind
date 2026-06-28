@@ -28,6 +28,7 @@ export default function RAGSettings({ ragConfig, setRagConfig, ggufModels }) {
                 </button>
             </div>
 
+            {/* ── Конфигурация моделей RAG ── */}
             {/* Выбор моделей */}
             <div className="space-y-2">
                 <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest flex items-center gap-2">
@@ -75,7 +76,9 @@ export default function RAGSettings({ ragConfig, setRagConfig, ggufModels }) {
                 })()}
             </div>
 
+            {/* ── Управление параметрами поиска ── */}
             {/* Параметры пайплайна */}
+            {/* ── Параметры пайплайна поиска ── */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div className="space-y-2">
                     <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest flex items-center gap-2">
@@ -176,6 +179,7 @@ export default function RAGSettings({ ragConfig, setRagConfig, ggufModels }) {
             </div>
 
             {/* Информационные блоки */}
+            {/* ── Информационные блоки и подсказки ── */}
             <div className="p-4 rounded-2xl bg-blue-500/10 border border-blue-500/20">
                 <p className="text-[10px] text-blue-600 dark:text-blue-400 leading-relaxed">
                     <b>Воронка поиска:</b> Сначала берется по <b>{ragConfig.top_k_per_file}</b> фрагментов из каждого файла. Затем из них выбираются лучшие <b>{ragConfig.rerank_pool}</b> и отправляются реранкеру. В итоге модель получает <b>{ragConfig.final_top_n}</b> самых точных совпадений.

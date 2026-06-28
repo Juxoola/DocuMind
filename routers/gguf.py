@@ -25,6 +25,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["gguf"])
 
 
+# ── Сканирование и статус GGUF-моделей ──
 @router.get("/api/gguf-models")
 async def api_scan_gguf_models():
     try:
@@ -101,6 +102,7 @@ async def _run_nvidia_smi(query_args: list[str], timeout: float = 3) -> str | No
     return None
 
 
+# ── Мониторинг VRAM и процессов GPU ──
 @router.get("/api/vram")
 async def api_vram():
     if not shutil.which("nvidia-smi"):
@@ -174,6 +176,7 @@ class PreloadLlmRequest(BaseModel):
     mtp_enabled: bool | None = False
 
 
+# ── Предзагрузка и управление LLM ──
 @router.post("/api/preload-llm")
 async def api_preload_llm(request: PreloadLlmRequest):
     if not config.validate_gguf_path(request.gguf_model_path):

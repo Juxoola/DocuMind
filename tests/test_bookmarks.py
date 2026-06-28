@@ -1,9 +1,4 @@
-"""
-Тесты src/bookmarks.py.
-
-bookmarks.py — чистый CRUD над JSON-файлом, без внешних зависимостей.
-Тесты используют временную директорию через conftest.py.
-"""
+"""Тесты модуля bookmarks: CRUD-операции над JSON-файлом закладок."""
 
 import os
 import sys
@@ -14,10 +9,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 
 class TestBookmarks:
-    """Полный цикл: create → list → get → update → delete → mark_stale."""
-
     def _make_payload(self, **overrides):
-        """Базовый payload для создания закладки."""
         return {
             "notebook_id": "test_nb",
             "question": "What is RAG?",
@@ -31,9 +23,9 @@ class TestBookmarks:
             **overrides,
         }
 
+    # ── Создание закладок ──
     @pytest.mark.asyncio
     async def test_create_bookmark(self, temp_notebooks_dir):
-        """Создание закладки возвращает объект с id."""
         from src.bookmarks import create_bookmark
 
         bm = await create_bookmark("test_nb", self._make_payload())
@@ -44,34 +36,30 @@ class TestBookmarks:
 
     @pytest.mark.asyncio
     async def test_create_raises_on_missing_fields(self, temp_notebooks_dir):
-        """Без question или answer — ValueError."""
         from src.bookmarks import create_bookmark
 
         with pytest.raises(ValueError, match="question и answer обязательны"):
             await create_bookmark("test_nb", {"question": "", "answer": ""})
 
+    # ── Чтение и список закладок ──
     @pytest.mark.asyncio
     async def test_list_bookmarks(self, temp_notebooks_dir):
-        """После создания закладка появляется в списке."""
         from src.bookmarks import create_bookmark, list_bookmarks
 
         await create_bookmark("test_nb", self._make_payload(question="Q1"))
         await create_bookmark("test_nb", self._make_payload(question="Q2"))
         items = await list_bookmarks("test_nb")
         assert len(items) == 2
-        # Новые сверху (sorted by created_at desc)
         assert items[0]["created_at"] >= items[1]["created_at"]
 
     @pytest.mark.asyncio
     async def test_list_empty(self, temp_notebooks_dir):
-        """Для неизвестного ноутбука — пустой список."""
         from src.bookmarks import list_bookmarks
 
         assert await list_bookmarks("nonexistent") == []
 
     @pytest.mark.asyncio
     async def test_get_bookmark(self, temp_notebooks_dir):
-        """get_bookmark по id возвращает закладку."""
         from src.bookmarks import create_bookmark, get_bookmark
 
         bm = await create_bookmark("test_nb", self._make_payload())
@@ -81,14 +69,13 @@ class TestBookmarks:
 
     @pytest.mark.asyncio
     async def test_get_nonexistent(self, temp_notebooks_dir):
-        """Несуществующий id → None."""
         from src.bookmarks import get_bookmark
 
         assert await get_bookmark("test_nb", "fake_id_12345") is None
 
+    # ── Обновление закладок ──
     @pytest.mark.asyncio
     async def test_update_bookmark(self, temp_notebooks_dir):
-        """update_bookmark обновляет title и tags."""
         from src.bookmarks import create_bookmark, update_bookmark
 
         bm = await create_bookmark("test_nb", self._make_payload())
@@ -98,19 +85,17 @@ class TestBookmarks:
         assert updated is not None
         assert updated["title"] == "New Title"
         assert updated["tags"] == ["updated"]
-        # question/answer не должны меняться
         assert updated["question"] == "What is RAG?"
 
     @pytest.mark.asyncio
     async def test_update_nonexistent(self, temp_notebooks_dir):
-        """Обновление несуществующей → None."""
         from src.bookmarks import update_bookmark
 
         assert await update_bookmark("test_nb", "no_such_id", {"title": "X"}) is None
 
+    # ── Удаление закладок ──
     @pytest.mark.asyncio
     async def test_delete_bookmark(self, temp_notebooks_dir):
-        """Удаление возвращает True, закладка исчезает."""
         from src.bookmarks import create_bookmark, delete_bookmark, get_bookmark
 
         bm = await create_bookmark("test_nb", self._make_payload())
@@ -119,14 +104,12 @@ class TestBookmarks:
 
     @pytest.mark.asyncio
     async def test_delete_nonexistent(self, temp_notebooks_dir):
-        """Удаление несуществующей → False."""
         from src.bookmarks import delete_bookmark
 
         assert await delete_bookmark("test_nb", "no_such") is False
 
     @pytest.mark.asyncio
     async def test_mark_stale(self, temp_notebooks_dir):
-        """mark_stale_for_file помечает закладки для указанного файла."""
         from src.bookmarks import create_bookmark, list_bookmarks, mark_stale_for_file
 
         await create_bookmark("test_nb", self._make_payload(question="About doc"))
@@ -145,16 +128,15 @@ class TestBookmarks:
 
     @pytest.mark.asyncio
     async def test_mark_stale_idempotent(self, temp_notebooks_dir):
-        """Повторный mark_stale не увеличивает счётчик."""
         from src.bookmarks import create_bookmark, mark_stale_for_file
 
         await create_bookmark("test_nb", self._make_payload(sources=[{"file_name": "doc.pdf"}]))
         assert await mark_stale_for_file("test_nb", "doc.pdf") == 1
         assert await mark_stale_for_file("test_nb", "doc.pdf") == 0
 
+    # ── Edge cases: повреждённый JSON, фильтрация тегов ──
     @pytest.mark.asyncio
     async def test_corrupted_json(self, temp_notebooks_dir):
-        """Битый JSON → пустой список (не падает)."""
         from src.bookmarks import list_bookmarks
 
         nb_path = os.path.join(temp_notebooks_dir, "test_corrupt")
@@ -165,7 +147,6 @@ class TestBookmarks:
 
     @pytest.mark.asyncio
     async def test_tags_filtered(self, temp_notebooks_dir):
-        """Пустые и не-строковые теги отбрасываются."""
         from src.bookmarks import create_bookmark
 
         bm = await create_bookmark(

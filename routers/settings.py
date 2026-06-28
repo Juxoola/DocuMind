@@ -1,7 +1,6 @@
 """Роутер: настройки RAG и GGUF."""
 
 import logging
-import os
 
 from fastapi import APIRouter
 from pydantic import BaseModel, Field, field_validator
@@ -13,6 +12,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["settings"])
 
 
+# ── Конфигурация GGUF: пути поиска и параметры по умолчанию ──
 @router.get("/api/gguf-config")
 async def api_get_gguf_config():
     return {
@@ -56,6 +56,7 @@ async def update_model_dirs(req: UpdateModelDirsRequest):
     return {"status": "ok", "new_dirs": config.GGUF_SEARCH_DIRS}
 
 
+# ── Конфигурация RAG: модели, параметры поиска ──
 @router.get("/api/rag-config")
 async def get_rag_config():
     return {
@@ -103,6 +104,7 @@ class UpdateRagConfigRequest(BaseModel):
         return v
 
 
+# ── Применение новой конфигурации RAG с перезагрузкой моделей ──
 @router.post("/api/update-rag-config")
 async def update_rag_config(req: UpdateRagConfigRequest):
     from src.rag.models import preload_all_models, unload_rag_models

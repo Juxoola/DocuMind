@@ -7,6 +7,7 @@ import { CitationTooltipPortal } from '../lib/CitationTooltip';
 export default function SourcePanel({ stats, contextUsage, hoveredSource, tooltipCoords, tooltipTimeoutRef, setHoveredSource }) {
     return (
         <>
+            {/* ── Отображение статистики генерации ── */}
             {/* Строка статистики */}
             <div className="px-6">
                 <div className="flex items-center justify-between gap-4 flex-wrap mb-3">

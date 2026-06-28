@@ -7,6 +7,7 @@ import LLMSettings from './LLMSettings';
 import RAGSettings from './RAGSettings';
 
 export default function SettingsModal({ isOpen, onClose, settings, onSave }) {
+    // ── Состояние компонента ──
     const [localSettings, setLocalSettings] = useState(settings);
     const [activeTab, setActiveTab] = useState('llm');
     const isApiMode = localSettings.use_gguf !== 'true';
@@ -29,6 +30,7 @@ export default function SettingsModal({ isOpen, onClose, settings, onSave }) {
         }
     }, [isOpen, settings]);
 
+    // ── SSE-подключение для отслеживания загрузки модели ──
     useEffect(() => {
         if (!isOpen) return;
         let es;
@@ -52,6 +54,7 @@ export default function SettingsModal({ isOpen, onClose, settings, onSave }) {
         };
     }, [isOpen]);
 
+    // ── API-запросы для управления конфигурацией ──
     const fetchRagConfig = async () => {
         try {
             const res = await fetch('/api/rag-config');
@@ -111,6 +114,7 @@ export default function SettingsModal({ isOpen, onClose, settings, onSave }) {
         }
     };
 
+    // ── Выбор и предзагрузка GGUF-модели ──
     const selectModel = async (modelPath, mmprojPath) => {
         const newSettings = {
             ...localSettings,
@@ -180,6 +184,7 @@ export default function SettingsModal({ isOpen, onClose, settings, onSave }) {
         setExpandedDirs(prev => ({ ...prev, [dirPath]: !prev[dirPath] }));
     };
 
+    // ── Рендер модального окна настроек ──
     if (!isOpen) return null;
 
     return (

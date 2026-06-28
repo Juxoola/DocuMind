@@ -1,13 +1,4 @@
-"""
-Общие фикстуры pytest для проекта DocuMind.
-
-Стратегия:
-- Тесты модульные: не трогаем GGUF-сервера, ChromaDB, внешние API.
-- test_config.py — изолированные тесты конфига (чистые функции + парсинг).
-- test_rag_pipeline.py — _rrf_fuse (чистые функции).
-- test_gguf_direct.py — detect_model_family, CACHE_TYPE_MAP, server state (чистые функции).
-- test_main.py — FastAPI TestClient (монтируем только нужные эндпоинты).
-"""
+"""Общие фикстуры pytest для проекта DocuMind."""
 
 import os
 import shutil
@@ -22,11 +13,9 @@ if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
 
+# ── Фикстура временной директории блокнотов ──
 @pytest.fixture(autouse=True)
 def temp_notebooks_dir(monkeypatch):
-    """Временно перенаправляем NOTEBOOKS_DIR в temp-директорию.
-    Автоиспользование: каждый тест получает изолированную ФС.
-    """
     tmp = tempfile.mkdtemp(prefix="nb_test_")
     import config as cfg
 
@@ -39,9 +28,9 @@ def temp_notebooks_dir(monkeypatch):
     shutil.rmtree(tmp, ignore_errors=True)
 
 
+# ── Очистка окружения переменных для тестов ──
 @pytest.fixture(autouse=True)
 def sanitize_env(monkeypatch):
-    """Фиксим env-переменные, чтобы тесты не зависели от реальных путей."""
     monkeypatch.setenv("HF_HUB_OFFLINE", "1")
     monkeypatch.setenv("GGUF_SEARCH_DIRS", "/dev/null")
     monkeypatch.setenv("LM_STUDIO_URL", "http://localhost:9999/v1")

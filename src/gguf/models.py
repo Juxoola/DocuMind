@@ -1,6 +1,10 @@
 """Определение семейства модели по имени файла."""
 
+# Маппинг семейств моделей по ключевым словам в имени GGUF-файла
+# Приоритет проверки: qwen → gemma → deepseek → llama → generic
 
+
+# ── Определение семейства модели по имени файла ──
 def detect_model_family(gguf_path: str) -> str:
 
     name = gguf_path.lower()

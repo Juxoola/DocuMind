@@ -12,6 +12,8 @@ import orjson
 import config
 from src.gguf.state import _GGUF_CACHE_FILE, _GGUF_CACHE_TTL_SEC
 
+# ── Сканирование директорий и кэширование GGUF-файлов ──
+
 _gguf_cache_lock = asyncio.Lock()
 
 logger = logging.getLogger(__name__)
@@ -65,6 +67,7 @@ async def _scan_gguf_dirs_uncached() -> list[dict]:
     return results
 
 
+# ── Кэшированный обход с проверкой TTL и mtime ──
 async def scan_gguf_dirs() -> list[dict]:
 
     async with _gguf_cache_lock:
@@ -117,6 +120,7 @@ async def invalidate_scan_cache():
             pass
 
 
+# ── Поиск GGUF-файла по имени в индексе ──
 async def find_gguf_by_name(filename: str) -> str | None:
 
     if not filename:

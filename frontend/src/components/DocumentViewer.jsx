@@ -20,7 +20,6 @@ export default function DocumentViewer({ file, notebook, onClose }) {
   const itemRefs = useRef({});
   const lastSoughtTime = useRef(null);
 
-  // file — строка (имя) или объект {file_name, page, time} из чата
   const filename = typeof file === 'string' ? file : file?.file_name;
   const page = typeof file === 'object' ? file?.page : null;
   const startTime = typeof file === 'object' ? file?.time : null;
@@ -42,7 +41,6 @@ export default function DocumentViewer({ file, notebook, onClose }) {
   useEffect(() => {
     if (!filename) return;
 
-    // Для медиа и PDF — плеер/iframe рендерится мгновенно, метаданные грузятся в фоне
     if (isSpecial) {
       setLoading(false);
     } else {

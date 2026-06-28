@@ -16,6 +16,7 @@ from fastapi.staticfiles import StaticFiles
 import config
 from routers.notebooks import _NB_ID_PATTERN
 
+# ── Настройка логирования ──
 _LOG_DIR = os.path.join(config.BASE_DIR, "logs")
 os.makedirs(_LOG_DIR, exist_ok=True)
 
@@ -49,6 +50,7 @@ warnings.filterwarnings("ignore", category=DeprecationWarning, module="speechbra
 logger = logging.getLogger(__name__)
 
 
+# ── Lifespan: инициализация и завершение приложения ──
 @asynccontextmanager
 async def lifespan(app: FastAPI):
 
@@ -93,6 +95,7 @@ async def lifespan(app: FastAPI):
         await kill_stray_servers()
 
 
+# ── Выгрузка моделей при завершении ──
 def _shutdown_models():
     try:
         from src.gguf.server import kill_stray_servers, unload_all_models
@@ -229,6 +232,7 @@ async def serve_notebook_file(notebook_id: str, subpath: str):
     return FileResponse(file_path)
 
 
+# ── Подключение роутеров ──
 from routers.bookmarks import router as bookmarks_router
 from routers.chat import router as chat_router
 from routers.files import router as files_router

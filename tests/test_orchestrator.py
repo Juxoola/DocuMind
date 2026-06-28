@@ -1,4 +1,4 @@
-"""Тесты src/ingestion/orchestrator.py: маршрутизация файлов, отмена, неподдерживаемые типы."""
+"""Тесты модуля orchestrator: маршрутизация файлов, отмена, конвертация медиа."""
 
 import asyncio
 import os
@@ -78,6 +78,7 @@ def fake_paths(monkeypatch):
     return tmp, nb_id
 
 
+# ── Маршрутизация файлов по типу расширения ──
 class TestFileRouting:
     def test_pdf_routes_to_process_pdf(self, fake_paths):
         from src.ingestion.orchestrator import ingest_file
@@ -153,6 +154,7 @@ class TestFileRouting:
         assert len(result) >= 1
 
 
+# ── Отмена процесса ingestion ──
 class TestCancellation:
     def test_cancel_before_media_conversion(self, fake_paths):
         from src.ingestion.orchestrator import ingest_file
@@ -193,6 +195,7 @@ class TestCancellation:
         process_pdf.assert_called_once()
 
 
+# ── Конвертация медиафайлов (видео → 720p, аудио → MP3) ──
 class TestMediaConversion:
     def test_video_converts_via_720p(self, fake_paths):
         from src.ingestion.audio_video import process_audio_video
@@ -217,6 +220,7 @@ class TestMediaConversion:
         process_audio_video.assert_called_once()
 
 
+# ── Передача параметров в обработчики ──
 class TestParameterPassing:
     def test_progress_cb_passed_to_pdf(self, fake_paths):
         from src.ingestion.orchestrator import ingest_file
@@ -225,7 +229,6 @@ class TestParameterPassing:
         process_pdf.return_value = AsyncMock(return_value=[MagicMock()])()
         cb = MagicMock()
         asyncio.run(ingest_file("/tmp/test.pdf", "test_nb", llm_settings={}, progress_cb=cb))
-        # llm_settings и shared_llm_url — позиционные, progress_cb — keyword
         _, kwargs = process_pdf.call_args
         assert kwargs.get("progress_cb") == cb
 
@@ -251,6 +254,5 @@ class TestParameterPassing:
         process_pdf.return_value = AsyncMock(return_value=[MagicMock()])()
         settings = {"temperature": 0.7}
         asyncio.run(ingest_file("/tmp/test.pdf", "test_nb", llm_settings=settings))
-        # llm_settings — 3-й позиционный аргумент
         args, _ = process_pdf.call_args
-        assert args[2] == settings  # args = (file_path, images_dir, llm_settings, ...)
+        assert args[2] == settings

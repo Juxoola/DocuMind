@@ -23,9 +23,11 @@ logger = logging.getLogger(__name__)
 # Извлечение встроенных изображений со страницы PDF
 # (только когда surya_mode=disabled — иначе surya layout делает это лучше)
 
-async def _analyze_and_build_page(page_num, doc, images_dir, file_name, splitter, surya_mode="disabled"):
 
-    # При surya layout/OCR — surya сам извлекает regions, старое извлечение не нужно
+async def _analyze_and_build_page(
+    page_num, doc, images_dir, file_name, splitter, surya_mode="disabled"
+):
+
     if surya_mode in ("layout_only", "full"):
         return page_num, []
 
@@ -95,33 +97,24 @@ async def process_pdf(
     splitter = _get_splitter()
     total_pages = len(doc)
 
-    # Извлечение markdown текста через pymupdf4llm
     try:
         import pymupdf4llm
 
         def _extract_markdown():
-            return pymupdf4llm.to_markdown(
-                file_path, page_chunks=True, write_images=False
-            )
+            return pymupdf4llm.to_markdown(file_path, page_chunks=True, write_images=False)
 
         if progress_cb:
             progress_cb(10, "Извлечение текста (pymupdf4llm)...")
         md_chunks = await asyncio.to_thread(_extract_markdown)
 
         def _clean_markdown(text: str) -> str:
-            """Очистка markdown от артефактов pymupdf4llm."""
             import re
-            # Убираем ** из заголовков: ## **Заголовок** → ## Заголовок
+
             text = re.sub(r"^(#{1,6})\s*\*\*(.+?)\*\*\s*$", r"\1 \2", text, flags=re.MULTILINE)
-            # Убираем плейсхолдеры картинок: **==> picture ... <==** → пустая строка
             text = re.sub(r"\*\*==>.+?intentionally omitted.+?<==\*\*", "", text)
-            # Убираем ** из оглавления: **Введение....2** → Введение....2
             text = re.sub(r"\*\*(.+?\.{3,}\d+)\*\*", r"\1", text)
-            # Убираем одинокие номера страниц: "  \n1\n " или "\n2\n " (цифра на отдельной строке)
             text = re.sub(r"\n\s*\d{1,3}\s*\n", "\n", text)
-            # Заменяем литералы \n на настоящие переносы
             text = text.replace("\\n", "\n")
-            # Убираем лишние пустые строки (3+ подряд → 2)
             text = re.sub(r"\n{3,}", "\n\n", text)
             return text
 
@@ -143,13 +136,9 @@ async def process_pdf(
                         ]
                     )
                 )
-        logger.info(
-            f"[Ingestion] pymupdf4llm: {len(md_chunks)} чанков, {len(nodes)} узлов"
-        )
+        logger.info(f"[Ingestion] pymupdf4llm: {len(md_chunks)} чанков, {len(nodes)} узлов")
     except ImportError:
-        logger.warning(
-            "[Ingestion] pymupdf4llm не установлен — fallback на page.get_text()"
-        )
+        logger.warning("[Ingestion] pymupdf4llm не установлен — fallback на page.get_text()")
         for page_num in range(total_pages):
             page = doc.load_page(page_num)
             text = page.get_text()
@@ -168,8 +157,6 @@ async def process_pdf(
                     )
                 )
 
-    # Извлечение встроенных изображений (параллельно)
-    # surya_mode: при layout_only/full — surya сам извлекает, старое извлечение не нужно
     surya_mode = getattr(config, "SURYA_MODE", "disabled")
     n_workers = min(8, (os.cpu_count() or 4), total_pages)
 
@@ -194,7 +181,9 @@ async def process_pdf(
                     tasks = []
                     for page_num in range(batch_start, batch_end):
                         tasks.append(
-                            _analyze_and_build_page(page_num, doc, images_dir, file_name, splitter, surya_mode)
+                            _analyze_and_build_page(
+                                page_num, doc, images_dir, file_name, splitter, surya_mode
+                            )
                         )
                     return await asyncio.gather(*tasks)
 
@@ -203,17 +192,24 @@ async def process_pdf(
                     for img_p in image_paths or []:
                         frame_list.append({"page": page_num_result + 1, "path": img_p})
 
-        # Surya layout: определение Diagram/Equation/Table regions
         surya_mode = getattr(config, "SURYA_MODE", "disabled")
         if surya_mode in ("layout_only", "full") and not _is_cancelled():
             surya_frame_list = await _surya_layout_pass(
-                doc, file_name, images_dir, splitter, nodes,
-                llm_settings, shared_llm_url, progress_cb, cancel_check,
-                surya_mode, frame_data, keep_vision_alive,
+                doc,
+                file_name,
+                images_dir,
+                splitter,
+                nodes,
+                llm_settings,
+                shared_llm_url,
+                progress_cb,
+                cancel_check,
+                surya_mode,
+                frame_data,
+                keep_vision_alive,
             )
             frame_list.extend(surya_frame_list)
 
-        # Vision LLM: описываем ВСЕ картинки (embedded + surya regions) за раз
         if frame_list:
             if shared_llm_url is None:
                 shared_llm_url = await get_vision_url(llm_settings)
@@ -257,7 +253,6 @@ async def process_pdf(
                     await asyncio.gather(*[_describe_frame(f) for f in batch])
 
                     if batch_end < n:
-                        # Watchdog контролирует RAM — restart только при unhealthy
                         try:
                             http = await get_async_http()
                             resp = await http.get(f"{shared_llm_url}/health", timeout=2)
@@ -339,15 +334,26 @@ async def process_pdf(
 
 # Surya layout pass: определение Diagram/Equation/Table regions + OCR
 async def _surya_layout_pass(
-    doc, file_name, images_dir, splitter, nodes,
-    llm_settings, shared_llm_url, progress_cb, cancel_check,
-    surya_mode, frame_data, keep_vision_alive,
+    doc,
+    file_name,
+    images_dir,
+    splitter,
+    nodes,
+    llm_settings,
+    shared_llm_url,
+    progress_cb,
+    cancel_check,
+    surya_mode,
+    frame_data,
+    keep_vision_alive,
 ):
     """Surya layout detection + OCR + Vision LLM для Diagram/Equation regions."""
     from src.ingestion.surya_layout import (
         detect_layout,
-        ocr_text,
         extract_regions,
+        ocr_text,
+    )
+    from src.ingestion.surya_layout import (
         shutdown as surya_shutdown,
     )
 
@@ -384,16 +390,12 @@ async def _surya_layout_pass(
     if not layout_results:
         return frame_list
 
-    # Full mode: заменяем pymupdf4llm текст на surya OCR
     if surya_mode == "full":
         try:
             if progress_cb:
                 progress_cb(65, "Surya: OCR текста...")
-            ocr_results = await asyncio.to_thread(
-                ocr_text, pil_images, layout_results
-            )
+            ocr_results = await asyncio.to_thread(ocr_text, pil_images, layout_results)
             if ocr_results:
-                # Удаляем старые узлы (pymupdf4llm) и заменяем surya OCR
                 old_nodes = nodes.copy()
                 nodes.clear()
                 for page_data in ocr_results:
@@ -412,13 +414,10 @@ async def _surya_layout_pass(
                                 ]
                             )
                         )
-                logger.info(
-                    f"[Surya] OCR: заменено {len(old_nodes)} -> {len(nodes)} узлов"
-                )
+                logger.info(f"[Surya] OCR: заменено {len(old_nodes)} -> {len(nodes)} узлов")
         except Exception as e:
             logger.warning(f"[Surya] Ошибка OCR: {e}")
 
-    # Извлекаем regions для Vision LLM
     regions = {"Diagram", "Equation", "Table"}
     extracted = extract_regions(pil_images, layout_results, regions)
 
@@ -430,7 +429,6 @@ async def _surya_layout_pass(
 
     logger.info(f"[Surya] Найдено {n_regions} regions для описания")
 
-    # Сохраняем изображения regions и добавляем в frame_list для Vision
     for page_idx, page_regions in extracted.items():
         for region in page_regions:
             if _is_cancelled():

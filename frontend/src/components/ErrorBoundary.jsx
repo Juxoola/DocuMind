@@ -1,6 +1,7 @@
 // Граница ошибок: перехват uncaught exceptions, UI с кнопкой сброса.
 import React from 'react';
 
+// ── Lifecycle: перехват ошибок React ──
 class ErrorBoundary extends React.Component {
   constructor(props) {
     super(props);
@@ -24,6 +25,7 @@ class ErrorBoundary extends React.Component {
     this.setState({ hasError: false, error: null, errorInfo: null });
   };
 
+  // ── Render: UI ошибки или дочерние элементы ──
   render() {
     if (this.state.hasError) {
       const { error, errorInfo } = this.state;

@@ -1,11 +1,4 @@
-"""
-Тесты src/rag_pipeline.py (чистые функции RAG).
-
-Тестируем _rrf_fuse и API отложенной пересборки BM25.
-Внешние пакеты (llama_index, torch, chromadb) мокаются через patch.dict(sys.modules, ...)
-— это единственный способ перехватить top-level импорты в src.rag.retrieval
-до загрузки тестируемого модуля.
-"""
+"""Тесты модуля rag_pipeline: Reciprocal Rank Fusion и API пересборки BM25."""
 
 import asyncio
 import os
@@ -17,9 +10,8 @@ import pytest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 
+# ── Вспомогательные классы для тестов ──
 class FakeTextNode:
-    """Замена TextNode для тестов — без зависимостей от llama_index."""
-
     def __init__(self, text="", id_=None, metadata=None):
         self.text = text
         self.node_id = id_ or hash(text)
@@ -27,21 +19,14 @@ class FakeTextNode:
 
 
 class FakeNodeWithScore:
-    """Замена NodeWithScore для тестов."""
-
     def __init__(self, node=None, score=0.0):
         self.node = node if node else FakeTextNode()
         self.score = score
 
 
+# ── Фикстура мокирования зависимостей ──
 @pytest.fixture(autouse=True)
 def mock_llama_index():
-    """
-    Мокаем llama_index + torch + chromadb через sys.modules.
-
-    Создаём иерархию моков так, чтобы `from llama_index.core.schema import NodeWithScore`
-    возвращал FakeNodeWithScore, а не MagicMock — тесты создают инстансы через конструктор.
-    """
     mock_schema = MagicMock()
     mock_schema.TextNode = FakeTextNode
     mock_schema.NodeWithScore = FakeNodeWithScore
@@ -72,11 +57,9 @@ def mock_llama_index():
         yield
 
 
+# ── Reciprocal Rank Fusion (два списка) ──
 class TestRrfFuse:
-    """Reciprocal Rank Fusion — основная функция гибридного поиска."""
-
     def _get_funcs(self):
-        """Импортируем после установки моков."""
         from src.rag.retrieval import _rrf_fuse
 
         return _rrf_fuse
@@ -123,9 +106,8 @@ class TestRrfFuse:
         assert abs(result[0].score - expected) < 1e-6
 
 
+# ── RRF: слияние результатов из разных файлов ──
 class TestRrfFuseAcrossFiles:
-    """RRF между файлами — каждый файл имеет равный голос."""
-
     def test_empty_input(self, mock_llama_index):
         from src.rag.retrieval import _rrf_fuse
 
@@ -167,9 +149,8 @@ class TestRrfFuseAcrossFiles:
         assert "golden" in ids[:3], f"golden должен быть в топ-3, got: {ids[:5]}"
 
 
+# ── API пересборки BM25-индекса ──
 class TestBm25RebuildApi:
-    """API отложенной пересборки BM25 (таймеры, отмена, флаш)."""
-
     def test_schedule_cancel(self, mock_llama_index):
         from src.rag.bm25 import _schedule_bm25_rebuild, cancel_bm25_rebuild
 

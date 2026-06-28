@@ -4,6 +4,7 @@ import { useRef, useCallback } from 'react';
 export default function useStreamingHandler({ messages, setMessages, llmSettings, setIsLoading, setStats, setAbortController, selectedSources, notebook, answerMode, thinkingMode, thinkingBudget, contextStrategy, maxTokens, input, setInput }) {
     const abortControllerRef = useRef(null);
 
+    // ── Вспомогательная функция обновления AI-сообщения ──
     const updateAiMessage = useCallback((index, content, sources) => {
         setMessages(prev => {
             if (index >= prev.length + 2) return prev;
@@ -14,6 +15,7 @@ export default function useStreamingHandler({ messages, setMessages, llmSettings
         });
     }, [setMessages]);
 
+    // ── Формирование и отправка запроса на сервер ──
     const handleSend = useCallback(async () => {
         if (!input.trim() || input.trim() === '') return;
         if (selectedSources.length === 0) {
@@ -108,6 +110,7 @@ export default function useStreamingHandler({ messages, setMessages, llmSettings
 
                 buffer = lines.pop() || '';
 
+                // ── Обработка SSE-чанков: sources, thinking, content, ошибки ──
                 for (const line of lines) {
                     const trimmedLine = line.trim();
                     if (!trimmedLine || !trimmedLine.startsWith('data: ')) continue;

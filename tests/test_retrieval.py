@@ -1,4 +1,4 @@
-"""Тесты src/rag/retrieval.py: _rrf_fuse, _file_filter, _filter_chunks, invalidate_index_cache, _FilteredBM25."""
+"""Тесты модуля retrieval: RRF-слияние, фильтры по файлам, кеш индекса, BM25-фильтрация."""
 
 import asyncio
 import os
@@ -28,13 +28,12 @@ class FakeNodeWithScore:
 
 
 def _nws(text, score=0.0, id_=None):
-    """Хелпер:快速创建 FakeNodeWithScore."""
+    # ── Вспомогательная функция создания тестовых узлов ──
     return FakeNodeWithScore(node=FakeTextNode(text=text, id_=id_), score=score)
 
 
 @pytest.fixture(autouse=True)
 def mock_heavy_deps():
-    """Мокаем все тяжёлые зависимости llama_index, chromadb, torch, httpx."""
     mock_schema = MagicMock()
     mock_schema.TextNode = FakeTextNode
     mock_schema.NodeWithScore = FakeNodeWithScore
@@ -70,8 +69,6 @@ def mock_heavy_deps():
 
 
 class TestRrfFuse:
-    """RRF — различные комбинации входных данных."""
-
     def test_empty_lists(self):
         from src.rag.retrieval import _rrf_fuse
 
@@ -142,12 +139,6 @@ class TestRrfFuse:
 
 
 class TestFileFilter:
-    """Генерация MetadataFilters по имени файла.
-
-    _file_filter использует MetadataFilters/MetadataFilter/FilterOperator из llama_index,
-    которые в тестах замокированы. Проверяем что конструкторы вызваны с правильными аргументами.
-    """
-
     def test_single_string_uses_eq_operator(self):
         from llama_index.core.vector_stores.types import (
             FilterOperator,
@@ -198,10 +189,7 @@ class TestFileFilter:
 
 
 class TestFilterChunks:
-    """Адаптивный порог фильтрации чанков."""
-
     def test_few_nodes_uses_config_threshold(self):
-        """<4 нод: порог = RERANK_SCORE_THRESHOLD, но min_chunks не даёт опуститься ниже."""
         from src.rag.retrieval import _filter_chunks
 
         with patch("src.rag.retrieval.config") as mock_cfg:
@@ -210,10 +198,9 @@ class TestFilterChunks:
             mock_cfg.RAG_TOP_K_RATIO = 0.0
             nodes = [_nws("a", 0.5), _nws("b", 0.05), _nws("c", 0.3)]
             result = _filter_chunks(nodes)
-            assert len(result) == 3  # min_chunks предотвращает потерю
+            assert len(result) == 3
 
     def test_many_nodes_filters_by_adaptive_threshold(self):
-        """>=4 нод: адаптивный порог отсекает выбросы."""
         from src.rag.retrieval import _filter_chunks
 
         with patch("src.rag.retrieval.config") as mock_cfg:
@@ -234,7 +221,6 @@ class TestFilterChunks:
             assert all(s > 0.5 for s in result_scores)
 
     def test_all_above_keeps_all(self):
-        """Если adaptive порог ниже всех score — все остаются."""
         from src.rag.retrieval import _filter_chunks
 
         with patch("src.rag.retrieval.config") as mock_cfg:
@@ -246,7 +232,6 @@ class TestFilterChunks:
             assert len(result) == 4
 
     def test_top_k_ratio_filters(self):
-        """RAG_TOP_K_RATIO: отсекает ноды с score < top_score * ratio."""
         from src.rag.retrieval import _filter_chunks
 
         with patch("src.rag.retrieval.config") as mock_cfg:
@@ -290,8 +275,6 @@ class TestFilterChunks:
 
 
 class TestInvalidateIndexCache:
-    """Очистка кеша VectorStoreIndex."""
-
     @pytest.mark.asyncio
     async def test_invalidate_specific_notebook(self):
         from src.rag.retrieval import _index_cache
@@ -342,8 +325,6 @@ class TestInvalidateIndexCache:
 
 
 class TestFilteredBM25:
-    """Обёртка над BM25Retriever: фильтрация по allowed_files."""
-
     def test_filters_by_file_name(self):
         from src.rag.retrieval import _FilteredBM25
 
@@ -387,8 +368,6 @@ class TestFilteredBM25:
 
 
 class TestIsLlmHealthy:
-    """Проверка работоспособности LLM-сервера с кешем."""
-
     def test_cached_result_returns_without_network(self):
         from src.rag.retrieval import _qe_health_cache
 

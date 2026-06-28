@@ -1,4 +1,6 @@
 // Копирование в буфер: plain text, rich text (HTML), fallback через textarea.
+
+// ── Генерация HTML-документа для Word-совместимого копирования ──
 export function buildWordHtml(bodyHtml) {
   return `<!DOCTYPE html><html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word"><head><meta charset="utf-8"><title>Exported</title><style>
 body{font-family:Calibri,Arial,sans-serif;font-size:11pt;color:#000;line-height:1.5;margin:24pt;}
@@ -48,6 +50,7 @@ export async function copyAsRichText({ html, text }) {
   return false;
 }
 
+// ── Извлечение чистого контента из DOM-элемента ──
 export function extractCleanContent(rootEl) {
   if (!rootEl) return null;
   const prose = rootEl.querySelector?.('.prose') || rootEl;

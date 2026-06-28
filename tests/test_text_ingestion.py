@@ -1,4 +1,4 @@
-"""Тесты src/ingestion/text.py: process_pdf, отмена через cancel_check."""
+"""Тесты модуля ingestion.text: обработка PDF, отмена через cancel_check."""
 
 import asyncio
 import os
@@ -10,10 +10,12 @@ import pytest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 
+# ── Исключение отмены ingestion ──
 class IngestionCancelled(Exception):
     pass
 
 
+# ── Фикстура мокирования зависимостей ──
 @pytest.fixture(autouse=True)
 def mock_text_deps():
     mocks = {
@@ -53,6 +55,7 @@ def mock_text_deps():
             sys.modules.pop(key, None)
 
 
+# ── Обработка PDF-файлов ──
 class TestProcessPdf:
     def test_basic_pdf_processing(self):
         from src.ingestion.text import process_pdf
@@ -65,25 +68,27 @@ class TestProcessPdf:
         mock_splitter = MagicMock()
         mock_splitter.get_nodes_from_documents.return_value = [MagicMock(text="node1")]
 
-        with patch("src.ingestion.text.fitz") as mock_fitz, \
-             patch("config.SURYA_MODE", "disabled"), \
-             patch("pymupdf4llm.to_markdown", return_value=[
-                 {"metadata": {"page_number": 1}, "text": "markdown text"},
-                 {"metadata": {"page_number": 2}, "text": "more text"},
-             ]), \
-             patch("src.ingestion.text._get_splitter", return_value=mock_splitter):
+        with (
+            patch("src.ingestion.text.fitz") as mock_fitz,
+            patch("config.SURYA_MODE", "disabled"),
+            patch(
+                "pymupdf4llm.to_markdown",
+                return_value=[
+                    {"metadata": {"page_number": 1}, "text": "markdown text"},
+                    {"metadata": {"page_number": 2}, "text": "more text"},
+                ],
+            ),
+            patch("src.ingestion.text._get_splitter", return_value=mock_splitter),
+        ):
             mock_fitz.open.return_value = mock_doc
             with patch(
                 "src.ingestion.text._analyze_and_build_page", new_callable=AsyncMock
             ) as mock_abp:
                 mock_abp.return_value = (0, None)
-                result = asyncio.run(
-                    process_pdf("/tmp/test.pdf", "/tmp/images", llm_settings={})
-                )
+                result = asyncio.run(process_pdf("/tmp/test.pdf", "/tmp/images", llm_settings={}))
         assert len(result) == 2
 
     def test_cancel_before_first_page(self):
-        """Отмена сразу — cancel_check возвращает True с первого вызова."""
         from src.ingestion.text import process_pdf
 
         mock_doc = MagicMock()
@@ -94,10 +99,12 @@ class TestProcessPdf:
         mock_splitter = MagicMock()
         mock_splitter.get_nodes_from_documents.return_value = []
 
-        with patch("src.ingestion.text.fitz") as mock_fitz, \
-             patch("config.SURYA_MODE", "disabled"), \
-             patch("pymupdf4llm.to_markdown", return_value=[]), \
-             patch("src.ingestion.text._get_splitter", return_value=mock_splitter):
+        with (
+            patch("src.ingestion.text.fitz") as mock_fitz,
+            patch("config.SURYA_MODE", "disabled"),
+            patch("pymupdf4llm.to_markdown", return_value=[]),
+            patch("src.ingestion.text._get_splitter", return_value=mock_splitter),
+        ):
             mock_fitz.open.return_value = mock_doc
             with patch("src.ingestion.text._analyze_and_build_page", new_callable=AsyncMock):
                 with pytest.raises(IngestionCancelled):
@@ -120,19 +127,22 @@ class TestProcessPdf:
         mock_splitter = MagicMock()
         mock_splitter.get_nodes_from_documents.return_value = [MagicMock(text="text_only")]
 
-        with patch("src.ingestion.text.fitz") as mock_fitz, \
-             patch("config.SURYA_MODE", "disabled"), \
-             patch("pymupdf4llm.to_markdown", return_value=[
-                 {"metadata": {"page_number": 1}, "text": "text_only"},
-             ]), \
-             patch("src.ingestion.text._get_splitter", return_value=mock_splitter):
+        with (
+            patch("src.ingestion.text.fitz") as mock_fitz,
+            patch("config.SURYA_MODE", "disabled"),
+            patch(
+                "pymupdf4llm.to_markdown",
+                return_value=[
+                    {"metadata": {"page_number": 1}, "text": "text_only"},
+                ],
+            ),
+            patch("src.ingestion.text._get_splitter", return_value=mock_splitter),
+        ):
             mock_fitz.open.return_value = mock_doc
             with patch(
                 "src.ingestion.text._analyze_and_build_page", new_callable=AsyncMock
             ) as mock_abp:
                 mock_abp.return_value = (0, None)
-                with patch(
-                    "src.ingestion.text.get_vision_url", new_callable=AsyncMock
-                ) as mock_vu:
+                with patch("src.ingestion.text.get_vision_url", new_callable=AsyncMock) as mock_vu:
                     asyncio.run(process_pdf("/tmp/test.pdf", "/tmp/images", llm_settings={}))
                     mock_vu.assert_not_called()

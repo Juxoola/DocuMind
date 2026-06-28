@@ -18,6 +18,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["bookmarks"])
 
 
+# ── Получение закладок ──
 @router.get("/api/bookmarks")
 async def api_list_bookmarks(notebook_id: str = Query(...)):
 
@@ -47,6 +48,7 @@ class CreateBookmarkRequest(BaseModel):
     tags: list[str] = []
 
 
+# ── Создание и обновление закладок ──
 @router.post("/api/bookmarks")
 async def api_create_bookmark(req: CreateBookmarkRequest):
 
@@ -74,6 +76,7 @@ async def api_update_bookmark(bookmark_id: str, req: UpdateBookmarkRequest):
     return bm
 
 
+# ── Удаление закладки ──
 @router.delete("/api/bookmarks/{bookmark_id}")
 async def api_delete_bookmark(bookmark_id: str, notebook_id: str = Query(...)):
 

@@ -71,6 +71,7 @@ async def _cleanup_ingestion_status():
             ingestion_status.pop(k, None)
 
 
+# ── Безопасная обработка имён файлов ──
 def safe_filename(filename: str) -> str:
     if not filename or not isinstance(filename, str):
         raise HTTPException(status_code=400, detail="Пустое имя файла")
@@ -105,6 +106,7 @@ def _schedule_delete_on_reboot(path: str) -> None:
         raise OSError(f"MoveFileExW failed, WinError={err}: {ctypes.FormatError(err)}")
 
 
+# ── Надёжное удаление каталогов (с retry, rename, MoveFileExW) ──
 async def robust_rmtree(path: str, max_retries: int = 3, delay: float = 0.5) -> tuple:
     path = os.path.normpath(path)
     allowed_roots = [
@@ -211,6 +213,7 @@ def safe_extract_llm_response(data: dict) -> str | None:
         return None
 
 
+# ── Утилиты SSE и валидация URL ──
 def sse_event(data: dict) -> str:
     return f"data: {orjson.dumps(data).decode()}\n\n"
 

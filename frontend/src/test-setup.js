@@ -1,3 +1,4 @@
+// Настройка окружения тестов: моки framer-motion, lucide-react, react-markdown и др.
 import '@testing-library/jest-dom/vitest'
 import React from 'react'
 

@@ -1,5 +1,6 @@
 """Менеджер конфигурации RAG: async чтение/запись rag_config.json."""
 
+# ── Импорты ──
 import logging
 import os
 
@@ -11,6 +12,7 @@ from config import _config_lock
 logger = logging.getLogger(__name__)
 
 
+# ── Сохранение конфигурации RAG в JSON-файл ──
 async def save_rag_config(rag_config_file: str, config_data: dict) -> None:
     with _config_lock:
         try:
@@ -20,6 +22,7 @@ async def save_rag_config(rag_config_file: str, config_data: dict) -> None:
             logger.warning(f"Не удалось сохранить RAG config: {e}")
 
 
+# ── Загрузка конфигурации RAG с мержем значений по умолчанию ──
 async def load_rag_config(rag_config_file: str, defaults: dict) -> dict:
     with _config_lock:
         try:
@@ -35,4 +38,5 @@ async def load_rag_config(rag_config_file: str, defaults: dict) -> dict:
                     return result
         except Exception as e:
             logger.warning(f"Не удалось загрузить RAG config: {e}")
-        return dict(defaults)
+    # Возврат значений по умолчанию при ошибке чтения
+    return dict(defaults)

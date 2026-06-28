@@ -52,6 +52,7 @@ async def get_files(notebook_id: str):
     return {"files": files_list}
 
 
+# ── Загрузка файлов в блокнот ──
 @router.post("/api/upload")
 async def upload_file(
     file: UploadFile = File(...),
@@ -441,8 +442,8 @@ async def get_source_content(filename: str, notebook_id: str):
     return {"text": "Содержимое документа не найдено."}
 
 
+# ── Извлечение текста из PDF (pymupdf4llm или fitz) ──
 def _extract_pdf_text(file_path: str) -> list[str]:
-    """Извлечение текста из PDF через pymupdf4llm (markdown) или fallback на fitz."""
     try:
         import pymupdf4llm
 
@@ -450,8 +451,8 @@ def _extract_pdf_text(file_path: str) -> list[str]:
         pages = []
         for chunk in chunks:
             text = chunk.get("text", "")
-            # Очистка markdown от артефактов pymupdf4llm
             import re
+
             text = re.sub(r"^(#{1,6})\s*\*\*(.+?)\*\*\s*$", r"\1 \2", text, flags=re.MULTILINE)
             text = re.sub(r"\*\*==>.+?intentionally omitted.+?<==\*\*", "", text)
             text = re.sub(r"\*\*(.+?\.{3,}\d+)\*\*", r"\1", text)
@@ -462,12 +463,14 @@ def _extract_pdf_text(file_path: str) -> list[str]:
         return pages
     except ImportError:
         import fitz
+
         doc = fitz.open(file_path)
         pages = [page.get_text() for page in doc]
         doc.close()
         return pages
 
 
+# ── Сборка текста PDF с описаниями изображений ──
 def _build_interleaved_text(file_path: str, data_dir: str, filename: str) -> str:
 
     pages = _extract_pdf_text(file_path)
@@ -496,6 +499,7 @@ def _build_interleaved_text(file_path: str, data_dir: str, filename: str) -> str
     return "\n".join(parts)
 
 
+# ── Извлечение текста из файлов разных форматов ──
 def _extract_text_from_file(file_path: str, ext: str) -> str:
 
     if not os.path.exists(file_path):

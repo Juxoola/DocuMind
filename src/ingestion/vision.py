@@ -95,13 +95,11 @@ async def get_vision_url(llm_settings, progress_cb=None):
 
 
 def set_vision_url(url: str | None):
-    """Обновить глобальный vision URL (вызывается watchdog при restart)."""
     global _vision_url
     _vision_url = url
 
 
 def get_current_vision_url() -> str | None:
-    """Получить текущий vision URL (без запуска нового сервера)."""
     return _vision_url
 
 
@@ -135,8 +133,6 @@ async def describe_image_with_lmstudio(
 
 Пиши технически точно, лаконично, без лишних вводных фраз и пояснений процесса."""
 
-    # Основной путь: GGUF Vision через llama-server
-    # Если existing_llm_url недоступен — fallback на глобальный _vision_url (обновляется watchdog)
     vision_url = existing_llm_url or _vision_url
     if vision_url:
         for attempt in range(2):
@@ -154,7 +150,6 @@ async def describe_image_with_lmstudio(
                 v_pres = float(llm_settings.get("vision_presence_penalty") or 0.0)
                 v_freq = float(llm_settings.get("vision_frequency_penalty") or 0.0)
 
-                # Если текущий URL недоступен — попробовать глобальный
                 if _vision_url and _vision_url != vision_url:
                     vision_url = _vision_url
 
@@ -206,7 +201,6 @@ async def describe_image_with_lmstudio(
                 await asyncio.sleep(1)
         return "Ошибка анализа после всех попыток"
 
-    # Резервный путь: LM Studio API
     api_url = (llm_settings.get("llm_url") if llm_settings else None) or config.LM_STUDIO_URL
     if cancel_check and cancel_check():
         return "Изображение без описания."

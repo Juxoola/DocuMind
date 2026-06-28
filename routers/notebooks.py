@@ -24,6 +24,7 @@ router = APIRouter(tags=["notebooks"])
 _NB_ID_PATTERN = re.compile(r"^[a-f0-9]{8}$")
 
 
+# ── Валидация и миграция данных ──
 def validate_nb_id(nb_id: str) -> str:
     nb_id = nb_id.strip()
     if not _NB_ID_PATTERN.match(nb_id):
@@ -62,6 +63,7 @@ async def migrate_old_data():
         logger.warning(f"Ошибка миграции (продолжаем без неё): {e}")
 
 
+# ── CRUD-эндпоинты блокнотов ──
 @router.get("/api/notebooks")
 async def get_notebooks():
     nbs = []
@@ -96,6 +98,7 @@ async def create_notebook(req: CreateNotebookRequest):
     return meta
 
 
+# ── Удаление блокнота с очисткой ресурсов ──
 @router.delete("/api/notebooks/{nb_id}")
 async def delete_notebook(nb_id: str):
     nb_id = validate_nb_id(nb_id)

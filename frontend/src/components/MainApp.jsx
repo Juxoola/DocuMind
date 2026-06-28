@@ -19,7 +19,6 @@ export default function MainApp({ notebook, onExit }) {
     const saved = localStorage.getItem('chat_max_width');
     return saved ? parseInt(saved) : 1400;
   });
-  // Ручной cleanup ref для drag-ресайзеров — при unmount во время drag снимает listeners с document
   const viewerDragCleanupRef = useRef(null);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [uploadState, setUploadState] = useState({
@@ -32,7 +31,6 @@ export default function MainApp({ notebook, onExit }) {
   });
   const [llmSettings, setLlmSettings] = useState(() => {
 		const saved = localStorage.getItem('llm_settings');
-		// API-ключ из sessionStorage: живёт только в текущей вкладке
 		let apiKey = 'lm-studio';
 		try { apiKey = sessionStorage.getItem('llm_api_key') || apiKey; } catch {}
 		return saved ? { ...JSON.parse(saved), llm_api_key: apiKey } : {

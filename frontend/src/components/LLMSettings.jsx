@@ -24,6 +24,7 @@ export default function LLMSettings({
 }) {
     return (
         <div className="p-6 space-y-6">
+            {/* ── Режим работы: API или GGUF ── */}
             {/* Переключатель API / GGUF */}
             <div className="flex items-center justify-between p-4 rounded-2xl bg-muted/30 border border-border/50">
                 <div className="space-y-1">
@@ -54,6 +55,7 @@ export default function LLMSettings({
                 </button>
             </div>
 
+            {/* ── Настройки API-режима: URL, ключ, модель ── */}
             {/* Настройки API режима */}
             {isApiMode && (
                 <div className="space-y-4">
@@ -119,9 +121,11 @@ export default function LLMSettings({
                 </div>
             )}
 
+            {/* ── Настройки GGUF-режима: параметры генерации ── */}
             {/* Настройки GGUF режима */}
             {!isApiMode && (
                 <div className="space-y-4">
+                    {/* ── Модели, загруженные в память ── */}
                     {ggufLoadedModels.length > 0 && (
                         <div className="rounded-2xl border border-primary/20 bg-primary/5 p-4">
                             <div className="flex items-center justify-between mb-2">
@@ -146,6 +150,7 @@ export default function LLMSettings({
                         </div>
                     )}
 
+                    {/* ── Информация о выбранной модели и прогресс загрузки ── */}
                     {localSettings.gguf_model_path && (
                     <div className="rounded-2xl border border-green-500/20 bg-green-500/5 p-4">
                         <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest mb-2" title="Основная модель используется для ответов на вопросы и работы с текстом">

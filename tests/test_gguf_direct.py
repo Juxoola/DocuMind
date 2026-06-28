@@ -1,13 +1,4 @@
-"""Тесты src/gguf/ — модели, состояние, сервер.
-
-Тестируем чистые функции без запуска серверов:
-- detect_model_family: определение семейства по имени файла
-- CACHE_TYPE_MAP: корректность KV-cache типов
-- _llm_load_state: структура состояния
-- is_server_ready: (мокаем requests)
-
-Тяжёлые зависимости (subprocess, requests) замоканы.
-"""
+"""Тесты модуля gguf: модели, KV-кэш, состояние сервера."""
 
 import asyncio
 import os
@@ -19,11 +10,9 @@ import pytest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 
+# ── Определение семейства модели по имени файла ──
 class TestDetectModelFamily:
-    """Определение семейства модели по имени файла."""
-
     def _detect(self, name):
-        """Helper — вызываем detect_model_family после импорта."""
         from src.gguf.models import detect_model_family
 
         return detect_model_family(name)
@@ -38,7 +27,6 @@ class TestDetectModelFamily:
         ],
     )
     def test_qwen_family(self, name, expected):
-        """Модели Qwen/QwQ → 'qwen'."""
         assert self._detect(name) == expected
 
     @pytest.mark.parametrize(
@@ -53,7 +41,6 @@ class TestDetectModelFamily:
         ],
     )
     def test_gemma_family(self, name, expected):
-        """Определение семейства Gemma: Gemma 3 → 'gemma3', Gemma 4 → 'gemma4'."""
         assert self._detect(name) == expected
 
     @pytest.mark.parametrize(
@@ -65,7 +52,6 @@ class TestDetectModelFamily:
         ],
     )
     def test_deepseek_family(self, name, expected):
-        """Определение семейства DeepSeek → 'deepseek'."""
         assert self._detect(name) == expected
 
     @pytest.mark.parametrize(
@@ -76,7 +62,6 @@ class TestDetectModelFamily:
         ],
     )
     def test_llama_family(self, name, expected):
-        """Определение семейства LLaMA → 'llama'."""
         assert self._detect(name) == expected
 
     @pytest.mark.parametrize(
@@ -88,11 +73,9 @@ class TestDetectModelFamily:
         ],
     )
     def test_generic_family(self, name, expected):
-        """Всё остальное → 'generic'."""
         assert self._detect(name) == expected
 
     def test_case_insensitive(self):
-        """Имена проверяются без учёта регистра."""
         from src.gguf.models import detect_model_family
 
         assert detect_model_family("QWEN2-7B.Q4_K_M.gguf") == "qwen"
@@ -100,7 +83,6 @@ class TestDetectModelFamily:
         assert detect_model_family("GEMMA-3-12B.Q4_K_M.gguf") == "gemma3"
 
     def test_gemma4_variants(self):
-        """Проверка всех вариантов детекции Gemma-4."""
         from src.gguf.models import detect_model_family
 
         for name in [
@@ -114,11 +96,9 @@ class TestDetectModelFamily:
             assert detect_model_family(name) == "gemma4", f"Failed for {name}"
 
 
+# ── Типы кэша KV-памяти ──
 class TestCacheTypeMap:
-    """Карта типов KV-кэша — валидность значений для llama-server."""
-
     def test_all_values_are_valid(self):
-        """Все значения в CACHE_TYPE_MAP допустимы для llama-server --cache-type-k/v."""
         from src.gguf.state import CACHE_TYPE_MAP
 
         valid = {"f32", "f16", "bf16", "q8_0", "q4_0", "q4_1", "iq4_nl", "q5_0", "q5_1"}
@@ -128,14 +108,12 @@ class TestCacheTypeMap:
             )
 
     def test_has_all_expected_keys(self):
-        """Ожидаемые ключи 0-8 присутствуют."""
         from src.gguf.state import CACHE_TYPE_MAP
 
         for k in (0, 1, 2, 3, 4, 6, 8):
             assert k in CACHE_TYPE_MAP, f"Ключ {k} отсутствует в CACHE_TYPE_MAP"
 
     def test_no_q4k_or_q5k(self):
-        """q4_k и q5_k НЕ ДОЛЖНЫ быть в map (llama-server падает)."""
         from src.gguf.state import CACHE_TYPE_MAP
 
         for val in CACHE_TYPE_MAP.values():
@@ -143,30 +121,25 @@ class TestCacheTypeMap:
             assert "q5_k" not in val.lower(), f"q5_k найден: {val}"
 
     def test_default_is_q4_0(self):
-        """Ключ 2 (дефолт) → 'q4_0' или 'q8_0' (зависит от версии)."""
         from src.gguf.state import CACHE_TYPE_MAP
 
         assert CACHE_TYPE_MAP[2] in ("q4_0", "q8_0")
 
 
+# ── Состояние загрузки модели ──
 class TestLlmLoadState:
-    """Структура состояния загрузки LLM."""
-
     def test_initial_state_structure(self):
-        """_llm_load_state содержит все ожидаемые ключи."""
         from src.gguf.state import _llm_load_state
 
         for key in ("state", "model", "port", "task_id", "started_at", "error", "phase"):
             assert key in _llm_load_state, f"Ключ '{key}' отсутствует в _llm_load_state"
 
     def test_initial_state_idle(self):
-        """Начальное состояние — idle."""
         from src.gguf.state import _llm_load_state
 
         assert _llm_load_state["state"] == "idle"
 
     def test_get_llm_status_returns_state_keys(self):
-        """get_llm_status возвращает все ключи."""
         from src.gguf.server import get_llm_status
 
         status = asyncio.run(get_llm_status())
@@ -174,9 +147,8 @@ class TestLlmLoadState:
             assert key in status, f"Ключ '{key}' отсутствует в get_llm_status()"
 
 
+# ── Готовность llama-server ──
 class TestServerReady:
-    """Проверка is_server_ready (с моком async httpx)."""
-
     def test_ready_when_200(self):
         mock_client = AsyncMock()
         mock_client.get = AsyncMock(return_value=MagicMock(status_code=200))

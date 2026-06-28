@@ -29,8 +29,6 @@ router = APIRouter(tags=["chat"])
 
 
 class RAGQuery(BaseModel):
-    """Параметры поискового запроса."""
-
     query: str
     allowed_files: list[str]
     notebook_id: str
@@ -41,8 +39,6 @@ class RAGQuery(BaseModel):
 
 
 class LLMConfig(BaseModel):
-    """Конфигурация LLM-сервера (LLM Studio / GGUF)."""
-
     llm_url: str | None = None
     llm_api_key: str | None = config.LLM_DEFAULT_API_KEY
     llm_model: str | None = config.LLM_DEFAULT_MODEL
@@ -63,8 +59,6 @@ class LLMConfig(BaseModel):
 
 
 class SamplingConfig(BaseModel):
-    """Параметры генерации (temperature, top_p, и т.д.)."""
-
     max_tokens: int = 2048
     repeat_penalty: float | None = 1.1
     top_p: float | None = 0.95
@@ -77,6 +71,7 @@ class ChatRequest(RAGQuery, LLMConfig, SamplingConfig):
     pass
 
 
+# ── Формирование сообщений для LLM ──
 def _build_chat_messages(
     answer_mode: str, context: str, history: list[dict], user_content
 ) -> list[dict]:
@@ -89,6 +84,7 @@ def _build_chat_messages(
     return messages
 
 
+# ── SSE-эндпоинт чата ──
 @router.post("/api/chat")
 async def chat(request: ChatRequest):
 
@@ -173,6 +169,7 @@ async def chat(request: ChatRequest):
     else:
         active_llm = None
 
+    # ── Генерация ответа: vision OCR, GGUF-стриминг или OpenAI-совместимый API ──
     async def generate():
         nonlocal query_for_rag, sources, context
         token_count = 0

@@ -19,6 +19,7 @@ _write_locks: OrderedDict = OrderedDict()
 _locks_guard = asyncio.Lock()
 
 
+# ── Блокировка на notebook_id: LRU-кэш для конкурентного доступа ──
 async def _lock_for(notebook_id: str) -> asyncio.Lock:
     async with _locks_guard:
         lock = _write_locks.get(notebook_id)
@@ -32,10 +33,12 @@ async def _lock_for(notebook_id: str) -> asyncio.Lock:
         return lock
 
 
+# ── Формирование пути к файлу закладок ──
 def _bookmarks_path(notebook_id: str) -> str:
     return os.path.join(config.get_notebook_paths(notebook_id)["base"], "bookmarks.json")
 
 
+# ── Чтение/запись JSON-файла закладок ──
 async def _read_bookmarks(notebook_id: str) -> list:
     path = _bookmarks_path(notebook_id)
     if not await aiofiles.os.path.exists(path):
@@ -61,6 +64,7 @@ async def _write_bookmarks(notebook_id: str, bookmarks: list) -> None:
     await aiofiles.os.replace(tmp, path)
 
 
+# ── CRUD-операции с закладками ──
 async def list_bookmarks(notebook_id: str) -> list:
     lock = await _lock_for(notebook_id)
     async with lock:
@@ -134,6 +138,7 @@ async def delete_bookmark(notebook_id: str, bookmark_id: str) -> bool:
     return True
 
 
+# ── Пометка закладок как устаревших при изменении исходного файла ──
 async def mark_stale_for_file(notebook_id: str, file_name: str) -> int:
     lock = await _lock_for(notebook_id)
     async with lock:

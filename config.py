@@ -90,8 +90,6 @@ ALLOWED_UPLOAD_EXTENSIONS = frozenset(
 
 @dataclass(frozen=True)
 class RAGConfig:
-    """Неизменяемый снимок RAG-параметров. Атомарно заменяется при обновлении."""
-
     embedding_model: str = os.getenv("EMBEDDING_MODEL_NAME", "Qwen3-Embedding-0.6B-Q8_0.gguf")
     reranker_model: str = os.getenv("RERANKER_MODEL_NAME", "qwen3-reranker-0.6b-q8_0.gguf")
     embedding_n_parallel: int = int(os.getenv("EMBEDDING_N_PARALLEL", "2"))
@@ -104,7 +102,7 @@ class RAGConfig:
     min_final_chunks: int = int(os.getenv("MIN_FINAL_CHUNKS", "5"))
     rrf_k: int = int(os.getenv("RAG_RRF_K", "60"))
     top_k_ratio: float = float(os.getenv("RAG_TOP_K_RATIO", "0.1"))
-    surya_mode: str = os.getenv("SURYA_MODE", "layout_only")  # disabled | layout_only | full
+    surya_mode: str = os.getenv("SURYA_MODE", "layout_only")
     gguf_search_dirs: str = os.getenv(
         "GGUF_SEARCH_DIRS",
         "F:/llm;" + os.path.join(os.path.dirname(os.path.abspath(__file__)), "models"),

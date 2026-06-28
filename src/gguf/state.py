@@ -11,6 +11,8 @@ from ctypes import wintypes
 
 import config
 
+# ── Глобальные словари состояния серверов ──
+
 logger = logging.getLogger(__name__)
 
 SERVER_EXE = os.path.join(config.BASE_DIR, "bin", "llama-server.exe")

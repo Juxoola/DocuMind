@@ -8,11 +8,14 @@ import logging
 import httpx
 import orjson
 
+# ── HTTP-клиент для SSE-стриминга ──
+
 logger = logging.getLogger(__name__)
 _stream_client: httpx.AsyncClient | None = None
 _stream_client_lock = asyncio.Lock()
 
 
+# ── Ленивое создание HTTP-клиента с singleton-паттерном ──
 async def get_stream_client() -> httpx.AsyncClient:
     global _stream_client
     if _stream_client is None or _stream_client.is_closed:
@@ -22,6 +25,7 @@ async def get_stream_client() -> httpx.AsyncClient:
     return _stream_client
 
 
+# ── Стриминг чат-ответов через llama-server SSE ──
 async def stream_gguf_chat(
     llm_url: str,
     messages: list,
@@ -44,6 +48,7 @@ async def stream_gguf_chat(
         "min_p": min_p,
     }
 
+    # Теги thinking-блока зависят от семейства модели
     OPEN_TAG, CLOSE_TAG = (
         ("<|channel|>", "<channel|>") if model_family == "gemma4" else ("<think>", "</think>")
     )

@@ -179,7 +179,6 @@ async def process_audio_video(
     transcript_data = []
     frame_data = []
 
-    # Транскрибация аудио через WhisperX с VAD
     prog(15, "Загрузка модели WhisperX...")
     device = "cuda" if torch.cuda.is_available() else "cpu"
     try:
@@ -356,7 +355,6 @@ async def process_audio_video(
 
         gc.collect()
 
-        # Описание извлечённых кадров через Vision с батчевой обработкой
         n = len(frame_list)
         shared_llm_url = None
         if n > 0:
@@ -392,7 +390,6 @@ async def process_audio_video(
                 await asyncio.gather(*batch_tasks)
 
                 if batch_end < n:
-                    # Watchdog контролирует RAM — restart только при unhealthy
                     try:
                         http = await get_async_http()
                         resp = await http.get(f"{shared_llm_url}/health", timeout=2)
@@ -442,7 +439,6 @@ async def process_audio_video(
         if shared_llm_url and not keep_vision_alive:
             await unload_all_models(role="vision")
 
-    # Сохранение JSON-метаданных с транскриптом и описаниями кадров
     metadata_json = {
         "file_name": file_name,
         "is_video": is_video,

@@ -6,10 +6,11 @@ import axios from 'axios';
 import { cn } from '../lib/utils';
 
 export default function NotebookSelector({ onSelect }) {
+  // ── Состояние компонента ──
   const [notebooks, setNotebooks] = useState([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
-  const [sortBy, setSortBy] = useState('date_desc'); // 'date_desc', 'date_asc', 'name_asc', 'name_desc'
+  const [sortBy, setSortBy] = useState('date_desc');
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [newNotebookName, setNewNotebookName] = useState('');
 
@@ -17,6 +18,7 @@ export default function NotebookSelector({ onSelect }) {
     fetchNotebooks();
   }, []);
 
+  // ── Загрузка блокнотов с сервера ──
   const fetchNotebooks = async () => {
     try {
       const res = await axios.get('/api/notebooks');
@@ -28,6 +30,7 @@ export default function NotebookSelector({ onSelect }) {
     }
   };
 
+  // ── CRUD-операции: создание и удаление ──
   const handleCreateSubmit = async (e) => {
     if (e) e.preventDefault();
     if (!newNotebookName.trim()) return;
@@ -52,6 +55,7 @@ export default function NotebookSelector({ onSelect }) {
     }
   };
 
+  // ── Фильтрация и сортировка блокнотов ──
   const filteredNotebooks = notebooks
     .filter(nb => nb.name.toLowerCase().includes(searchTerm.toLowerCase()))
     .sort((a, b) => {
@@ -64,6 +68,7 @@ export default function NotebookSelector({ onSelect }) {
       }
     });
 
+  // ── Рендер компонента ──
   return (
     <motion.div 
       initial={{ opacity: 0, y: 20 }}

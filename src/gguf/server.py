@@ -145,7 +145,6 @@ _WATCHDOG_LIMITS = {
 
 
 async def _watchdog_memory(server_key: str, process, role: str):
-    """Мониторинг RSS llama-server: auto-restart при превышении лимита."""
     limit_mb = _WATCHDOG_LIMITS.get(role, 8000)
     while _proc_alive(process):
         await asyncio.sleep(30)
@@ -163,7 +162,6 @@ async def _watchdog_memory(server_key: str, process, role: str):
                 except Exception:
                     pass
                 await asyncio.sleep(2)
-                # Перезапуск с теми же параметрами
                 async with _lock:
                     cfg = _server_configs.get(server_key)
                 if cfg is None:
@@ -178,7 +176,6 @@ async def _watchdog_memory(server_key: str, process, role: str):
                             n_parallel=cfg.get("n_parallel", 1),
                         )
                     elif role == "vision":
-                        # server_key = "vision:<path>", get_vision_server добавит префикс сам
                         gguf_path = server_key.split(":", 1)[1] if ":" in server_key else server_key
                         url = await get_vision_server(
                             gguf_path,

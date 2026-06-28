@@ -8,6 +8,8 @@ export default function VisionSettings({ localSettings, setLocalSettings }) {
 
     return (
         <div className="rounded-2xl border border-purple-500/20 bg-purple-500/5 p-4">
+            {/* ── Управление Vision моделью ── */}
+            {/* ── Информация о Vision модели и управление ── */}
             <div className="flex justify-between items-start">
                 <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest mb-2" title="Vision модель загружается только при анализе видео/фото для создания описаний.">
                     Vision модель (для описаний) ℹ️
@@ -22,6 +24,7 @@ export default function VisionSettings({ localSettings, setLocalSettings }) {
                     + mmproj: {localSettings.vision_mmproj_path.split('/').pop()}
                 </p>
             )}
+            {/* ── Основные параметры Vision модели ── */}
             <div className="grid grid-cols-2 gap-3 mt-3">
                 <label className="flex flex-col gap-1 text-[10px] text-muted-foreground" title="Температура для генерации описаний картинок.">
                     Температура ℹ️
@@ -66,6 +69,7 @@ export default function VisionSettings({ localSettings, setLocalSettings }) {
                     <input type="number" step="64" value={localSettings.vision_max_tokens || 512} onChange={e => setLocalSettings({...localSettings, vision_max_tokens: parseInt(e.target.value)})} className="bg-background border border-border rounded px-2 py-1 text-foreground" />
                 </label>
             </div>
+            {/* ── Тонкие настройки генерации для Vision ── */}
             {/* Тонкие настройки генерации для Vision */}
             <div className="mt-4 pt-4 border-t border-border/20 space-y-4">
                 <p className="text-[9px] font-bold text-muted-foreground uppercase tracking-widest flex items-center gap-1.5">

@@ -19,6 +19,7 @@ export default function IngestionSettings({
 }) {
     return (
         <div className="space-y-2">
+            {/* ── Заголовок и кнопка обновления ── */}
             <div className="flex items-center justify-between">
                 <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest flex items-center gap-1.5">
                     <FolderOpen size={12} /> Доступные модели
@@ -31,6 +32,7 @@ export default function IngestionSettings({
                     <RefreshCw size={12} className={ggufLoading ? "animate-spin" : ""} />
                 </button>
             </div>
+            {/* ── Управление директориями поиска ── */}
             {ggufConfig.search_dirs !== undefined && (
                 <div className="flex items-center gap-2 mt-2 mb-2">
                     <input type="text" value={ggufConfig.search_dirs} onChange={e => setGgufConfig({...ggufConfig, search_dirs: e.target.value})} className="flex-1 bg-background border border-border rounded px-2 py-1 text-[10px] text-foreground font-mono" placeholder="C:/models, D:/llms" />
@@ -44,6 +46,7 @@ export default function IngestionSettings({
                     <p className="text-[9px] mt-1">Укажите директории в переменной GGUF_SEARCH_DIRS</p>
                 </div>
             )}
+            {/* ── Список доступных GGUF моделей ── */}
             <div className="space-y-1.5 max-h-[40vh] overflow-y-auto custom-scrollbar">
                 {ggufModels.map((modelGroup) => (
                     <div key={modelGroup.dir} className="border border-border/30 rounded-xl overflow-hidden">
@@ -73,6 +76,7 @@ export default function IngestionSettings({
                                     exit={{ height: 0, opacity: 0 }}
                                     className="overflow-hidden"
                                 >
+                                    {/* ── Список моделей в директории ── */}
                                     <div className="px-3 pb-3 space-y-2">
                                         {modelGroup.gguf_files.map((ggufFile) => {
                                             const fullPath = modelGroup.dir + '/' + ggufFile;

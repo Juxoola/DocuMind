@@ -15,14 +15,12 @@ _inference_manager = None
 
 
 def _ensure_predictor():
-    """Ленивая инициализация surya inference manager + layout predictor."""
     global _layout_predictor, _inference_manager
 
     if _layout_predictor is not None:
         return _layout_predictor
 
     try:
-        # Устанавливаем env для llama.cpp
         llama_binary = os.getenv("LLAMA_CPP_BINARY")
         if not llama_binary:
             for candidate in [
@@ -52,13 +50,11 @@ def _ensure_predictor():
 
 
 def _ensure_recognition():
-    """Ленивая инициализация surya recognition predictor."""
     global _recognition_predictor, _inference_manager
 
     if _recognition_predictor is not None:
         return _recognition_predictor
 
-    # Сначала убедимся что inference manager создан
     _ensure_predictor()
     if _inference_manager is None:
         return None
@@ -79,15 +75,8 @@ def _ensure_recognition():
 IMAGE_REGIONS = {"Diagram", "Table", "Figure"}
 
 
+# ── Определение layout regions на страницах ──
 def detect_layout(images: list[Image.Image]) -> list:
-    """Определяет layout regions на страницах.
-
-    Args:
-        images: список PIL.Image для каждой страницы
-
-    Returns:
-        список layout results (по одному на страницу)
-    """
     predictor = _ensure_predictor()
     if predictor is None:
         return []
@@ -99,18 +88,8 @@ def detect_layout(images: list[Image.Image]) -> list:
     return results
 
 
-def ocr_text(
-    images: list[Image.Image], layout_results: list
-) -> list[dict]:
-    """Извлекает текст через surya OCR с layout-aware reading order.
-
-    Args:
-        images: PIL.Image для каждой страницы
-        layout_results: результаты detect_layout
-
-    Returns:
-        список dict: [{"page": int, "html": str, "text": str}, ...]
-    """
+# ── Извлечение текста через surya OCR с layout-aware reading order ──
+def ocr_text(images: list[Image.Image], layout_results: list) -> list[dict]:
     rec = _ensure_recognition()
     if rec is None:
         return []
@@ -132,28 +111,21 @@ def ocr_text(
                 html_parts.append(html)
             if text:
                 text_parts.append(text)
-        pages.append({
-            "page": i + 1,
-            "html": "\n".join(html_parts),
-            "text": "\n".join(text_parts),
-        })
+        pages.append(
+            {
+                "page": i + 1,
+                "html": "\n".join(html_parts),
+                "text": "\n".join(text_parts),
+            }
+        )
 
     return pages
 
 
+# ── Извлечение bbox для указанных типов regions ──
 def extract_regions(
     images: list[Image.Image], layout_results: list, regions: set[str] | None = None
 ) -> dict[int, list[dict]]:
-    """Извлекает bbox для указанных типов regions.
-
-    Args:
-        images: PIL.Image для каждой страницы
-        layout_results: результаты detect_layout
-        regions: типы regions (по умолчанию IMAGE_REGIONS)
-
-    Returns:
-        dict {page_index: [{"label": str, "bbox": [l,t,r,b], "image": PIL.Image}, ...]}
-    """
     if regions is None:
         regions = IMAGE_REGIONS
 
@@ -180,11 +152,10 @@ def extract_regions(
     return extracted
 
 
+# ── Выгрузка surya моделей и остановка inference manager ──
 def shutdown():
-    """Выгрузка surya моделей + остановка llama-server."""
     global _layout_predictor, _recognition_predictor, _inference_manager
 
-    # Останавливаем inference manager (убивает llama-server процесс)
     if _inference_manager is not None:
         try:
             _inference_manager.stop()

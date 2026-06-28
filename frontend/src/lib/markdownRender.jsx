@@ -6,7 +6,7 @@ import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
 import { CitationButton, CitationTooltipPortal } from './CitationTooltip';
 
-// Рендер markdown-сообщений LLM: [N] → кликабельные цитаты, LaTeX, блоки кода
+// ── Предобработка текста: конвертация LaTeX, цитат [N], блоков кода ──
 export function preProcessMessage(text) {
   if (!text) return '';
 
@@ -40,6 +40,7 @@ export function LlmMarkdown({ text, sources = [], onCite, className = '' }) {
   const [hovered, setHovered] = useState(null);
   const timeoutRef = useRef(null);
 
+  // ── Хуки для управления тултипом цитат ──
   const cancelClose = () => {
     if (timeoutRef.current) {
       clearTimeout(timeoutRef.current);

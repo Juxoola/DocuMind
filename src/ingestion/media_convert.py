@@ -16,7 +16,10 @@ from src.ingestion.utils import (
 logger = logging.getLogger(__name__)
 
 
-# Конвертация видео в 720p: GPU-режим для коротких, турбо для длинных (>120с)
+# ── Конвертация видео и аудио: подготовка к обработке ──
+
+
+# ── Конвертация видео в 720p: GPU-режим для коротких, турбо для длинных (>120с) ──
 async def ensure_720p_video(file_path, prog_cb=None, cancel_check=None, notebook_id=None):
 
     ext = os.path.splitext(file_path)[1].lower()
@@ -55,7 +58,6 @@ async def ensure_720p_video(file_path, prog_cb=None, cancel_check=None, notebook
     temp_final = file_path + ".720p.mp4"
     use_turbo = True if duration == 0 else duration >= 120
 
-    # Стандартный GPU-рендеринг: один поток, hevc_nvenc
     if not use_turbo:
         if _is_cancelled():
             raise IngestionCancelled("Cancelled before 720p encode")
@@ -110,7 +112,6 @@ async def ensure_720p_video(file_path, prog_cb=None, cancel_check=None, notebook
                 pass
             raise IngestionCancelled("Cancelled during 720p encode")
     else:
-        # Турбо-режим: параллельная кодировка сегментов + склейка
         if _is_cancelled():
             raise IngestionCancelled("Cancelled before turbo encode")
         if prog_cb:
@@ -239,7 +240,6 @@ async def ensure_720p_video(file_path, prog_cb=None, cancel_check=None, notebook
         except Exception:
             pass
 
-    # Замена оригинала конвертированным файлом
     if os.path.exists(temp_final) and os.path.getsize(temp_final) > 1000:
         if os.path.exists(file_path):
             await aiofiles.os.remove(file_path)
@@ -253,7 +253,7 @@ async def ensure_720p_video(file_path, prog_cb=None, cancel_check=None, notebook
     return file_path
 
 
-# Конвертация аудио в MP3 через libmp3lame
+# ── Конвертация аудио в MP3 через libmp3lame ──
 async def ensure_mp3_audio(file_path, prog_cb=None):
 
     temp_path = file_path.rsplit(".", 1)[0] + ".mp3"

@@ -1,12 +1,4 @@
-"""
-Тесты модуля config.py.
-
-Тестируем:
-- get_notebook_paths: структура путей
-- get_system_prompt: все 8 режимов, fallback на default
-- safe_filename (из main.py) — path traversal, null-байты, reserved names
-- resolve_model_path: пустой ввод, существующий путь
-"""
+"""Тесты модуля config: пути, системные промпты, безопасные имена, resolve_model_path."""
 
 import os
 import sys
@@ -19,6 +11,7 @@ import config
 import src.rag.prompts as prompts
 
 
+# ── Пути к блокнотам ──
 class TestGetNotebookPaths:
     def test_returns_dict_with_required_keys(self, temp_notebooks_dir):
         paths = config.get_notebook_paths("test_nb_123")
@@ -42,6 +35,7 @@ class TestGetNotebookPaths:
         assert paths["images"].startswith(paths["base"])
 
 
+# ── Системные промпты ──
 class TestGetSystemPrompt:
     @pytest.mark.parametrize("mode", list(prompts.SYSTEM_PROMPT_RULES.keys()))
     def test_all_known_modes_return_prompt(self, mode):
@@ -93,6 +87,7 @@ class TestGetSystemPrompt:
         assert "В документах этого нет" in prompts.SYSTEM_PROMPT_CITATION
 
 
+# ── Разрешённые расширения файлов ──
 class TestAllowedExtensions:
     def test_pdf_is_allowed(self):
         assert ".pdf" in config.ALLOWED_UPLOAD_EXTENSIONS
@@ -104,6 +99,7 @@ class TestAllowedExtensions:
         assert isinstance(config.ALLOWED_UPLOAD_EXTENSIONS, frozenset)
 
 
+# ── Значения конфигурации по умолчанию ──
 class TestConfigValues:
     def test_upload_max_size_positive(self):
         assert config.UPLOAD_MAX_SIZE_BYTES > 0
@@ -122,6 +118,7 @@ class TestConfigValues:
             assert mode in prompts.SYSTEM_PROMPT_RULES
 
 
+# ── Разрешение путей к моделям ──
 class TestResolveModelPath:
     def test_empty_string_returns_empty(self):
         assert config.resolve_model_path("") == ""
