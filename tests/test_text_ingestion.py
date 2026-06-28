@@ -122,7 +122,8 @@ class TestProcessPdf:
         mock_doc.__enter__ = MagicMock(return_value=mock_doc)
         mock_doc.__exit__ = MagicMock(return_value=False)
 
-        with patch("src.ingestion.text.fitz") as mock_fitz:
+        with patch("src.ingestion.text.fitz") as mock_fitz, \
+             patch("config.SURYA_MODE", "disabled"):
             mock_fitz.open.return_value = mock_doc
             with patch("src.ingestion.text._get_splitter"):
                 with patch(
@@ -143,7 +144,8 @@ class TestProcessPdf:
         mock_doc.__enter__ = MagicMock(return_value=mock_doc)
         mock_doc.__exit__ = MagicMock(return_value=False)
 
-        with patch("src.ingestion.text.fitz") as mock_fitz:
+        with patch("src.ingestion.text.fitz") as mock_fitz, \
+             patch("config.SURYA_MODE", "disabled"):
             mock_fitz.open.return_value = mock_doc
             with patch("src.ingestion.text._get_splitter"):
                 with patch("src.ingestion.text._analyze_and_build_page", new_callable=AsyncMock):
@@ -164,7 +166,8 @@ class TestProcessPdf:
         mock_doc.__enter__ = MagicMock(return_value=mock_doc)
         mock_doc.__exit__ = MagicMock(return_value=False)
 
-        with patch("src.ingestion.text.fitz") as mock_fitz:
+        with patch("src.ingestion.text.fitz") as mock_fitz, \
+             patch("config.SURYA_MODE", "disabled"):
             mock_fitz.open.return_value = mock_doc
             with patch("src.ingestion.text._get_splitter"):
                 with patch(
