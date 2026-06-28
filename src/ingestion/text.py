@@ -20,21 +20,14 @@ from src.ingestion.vision import describe_image_with_lmstudio, get_vision_url
 logger = logging.getLogger(__name__)
 
 
-# Извлечение текста и встроенных изображений со страницы PDF
+# Извлечение встроенных изображений со страницы PDF
 
 
 async def _analyze_and_build_page(page_num, doc, images_dir, file_name, splitter):
 
     def _sync_build():
         page = doc.load_page(page_num)
-        text = page.get_text()
         images = page.get_images()
-
-        local_nodes = []
-        if text and text.strip():
-            local_nodes = splitter.get_nodes_from_documents(
-                [TextNode(text=text, metadata={"file_name": file_name, "page": page_num + 1})]
-            )
 
         # Извлечение встроенных изображений (фото, скриншоты)
         image_paths = []
@@ -70,7 +63,7 @@ async def _analyze_and_build_page(page_num, doc, images_dir, file_name, splitter
             except Exception:
                 continue
 
-        return page_num, local_nodes, image_paths
+        return page_num, image_paths
 
     return await asyncio.to_thread(_sync_build)
 
@@ -98,6 +91,62 @@ async def process_pdf(
     results = []
     splitter = _get_splitter()
     total_pages = len(doc)
+
+    # Извлечение markdown текста через pymupdf4llm
+    try:
+        import pymupdf4llm
+
+        def _extract_markdown():
+            return pymupdf4llm.to_markdown(
+                file_path, page_chunks=True, write_images=False
+            )
+
+        if progress_cb:
+            progress_cb(10, "Извлечение текста (pymupdf4llm)...")
+        md_chunks = await asyncio.to_thread(_extract_markdown)
+        for chunk in md_chunks:
+            page_num = chunk.get("metadata", {}).get("page_number", 0)
+            md_text = chunk.get("text", "")
+            if md_text and md_text.strip():
+                nodes.extend(
+                    splitter.get_nodes_from_documents(
+                        [
+                            TextNode(
+                                text=md_text,
+                                metadata={
+                                    "file_name": file_name,
+                                    "page": page_num,
+                                },
+                            )
+                        ]
+                    )
+                )
+        logger.info(
+            f"[Ingestion] pymupdf4llm: {len(md_chunks)} чанков, {len(nodes)} узлов"
+        )
+    except ImportError:
+        logger.warning(
+            "[Ingestion] pymupdf4llm не установлен — fallback на page.get_text()"
+        )
+        for page_num in range(total_pages):
+            page = doc.load_page(page_num)
+            text = page.get_text()
+            if text and text.strip():
+                nodes.extend(
+                    splitter.get_nodes_from_documents(
+                        [
+                            TextNode(
+                                text=text,
+                                metadata={
+                                    "file_name": file_name,
+                                    "page": page_num + 1,
+                                },
+                            )
+                        ]
+                    )
+                )
+
+    # Извлечение встроенных изображений (параллельно)
     n_workers = min(8, (os.cpu_count() or 4), total_pages)
 
     try:
@@ -106,10 +155,9 @@ async def process_pdf(
             for page_num in range(total_pages):
                 if _is_cancelled():
                     raise IngestionCancelled(f"Cancelled at page {page_num + 1}")
-                pn, local_nodes, image_paths = await _analyze_and_build_page(
+                pn, image_paths = await _analyze_and_build_page(
                     page_num, doc, images_dir, file_name, splitter
                 )
-                nodes.extend(local_nodes)
                 for img_p in image_paths or []:
                     frame_list.append({"page": pn + 1, "path": img_p})
         else:
@@ -127,8 +175,7 @@ async def process_pdf(
                     return await asyncio.gather(*tasks)
 
                 page_results = await _process_batch_pages(batch_start, batch_end)
-                for page_num_result, local_nodes, image_paths in page_results:
-                    nodes.extend(local_nodes)
+                for page_num_result, image_paths in page_results:
                     for img_p in image_paths or []:
                         frame_list.append({"page": page_num_result + 1, "path": img_p})
 
