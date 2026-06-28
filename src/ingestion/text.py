@@ -389,6 +389,16 @@ async def process_pdf(
             if shared_llm_url and not keep_vision_alive:
                 await unload_all_models(role="vision")
 
+        # Surya layout detection: определение Diagram/Equation regions
+        surya_mode = getattr(config, "SURYA_MODE", "disabled")
+        if surya_mode in ("layout_only", "full") and not _is_cancelled():
+            surya_frame_list = await _surya_layout_pass(
+                doc, file_name, images_dir, splitter, nodes,
+                llm_settings, shared_llm_url, progress_cb, cancel_check,
+                surya_mode, frame_data, keep_vision_alive,
+            )
+            frame_list.extend(surya_frame_list)
+
         if frame_data:
             frame_data.sort(key=lambda x: x["page"])
             metadata_json = {
@@ -404,6 +414,75 @@ async def process_pdf(
     finally:
         doc.close()
     return nodes
+
+
+# Surya layout pass: определение Diagram/Equation/Table regions
+async def _surya_layout_pass(
+    doc, file_name, images_dir, splitter, nodes,
+    llm_settings, shared_llm_url, progress_cb, cancel_check,
+    surya_mode, frame_data, keep_vision_alive,
+):
+    """Surya layout detection + Vision LLM для Diagram/Equation regions."""
+    from src.ingestion.surya_layout import detect_layout, extract_regions, shutdown as surya_shutdown
+
+    def _is_cancelled():
+        return bool(cancel_check and cancel_check())
+
+    total_pages = len(doc)
+    frame_list = []
+
+    # Конвертируем страницы PDF в PIL images для surya
+    if progress_cb:
+        progress_cb(60, "Surya: определение layout...")
+
+    def _render_pages():
+        pil_images = []
+        for page_num in range(total_pages):
+            page = doc.load_page(page_num)
+            pix = page.get_pixmap(dpi=150)
+            from PIL import Image as _Image
+
+            img = _Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+            pil_images.append(img)
+        return pil_images
+
+    pil_images = await asyncio.to_thread(_render_pages)
+
+    # Запускаем layout detection
+    try:
+        layout_results = await asyncio.to_thread(detect_layout, pil_images)
+    except Exception as e:
+        logger.warning(f"[Surya] Ошибка layout detection: {e}")
+        return frame_list
+
+    if not layout_results:
+        return frame_list
+
+    # Извлекаем regions для Vision LLM
+    regions = {"Diagram", "Equation", "Table"}
+    extracted = extract_regions(pil_images, layout_results, regions)
+
+    n_regions = sum(len(r) for r in extracted.values())
+    if n_regions == 0:
+        logger.info("[Surya] Diagram/Equation/Table regions не найдены")
+        return frame_list
+
+    logger.info(f"[Surya] Найдено {n_regions} regions для описания")
+
+    # Сохраняем изображения regions и добавляем в frame_list для Vision
+    for page_idx, page_regions in extracted.items():
+        for region in page_regions:
+            if _is_cancelled():
+                break
+            label = region["label"]
+            img = region["image"]
+            img_name = f"surya_{label.lower()}_p{page_idx + 1}_{uuid.uuid4().hex[:4]}.png"
+            img_path = os.path.join(images_dir, img_name)
+            await asyncio.to_thread(img.save, img_path)
+            frame_list.append({"page": page_idx + 1, "path": img_path})
+
+    surya_shutdown()
+    return frame_list
 
 
 # Конвертация Office-файлов в PDF: LibreOffice (приоритет), COM (резерв), текстовый fallback
