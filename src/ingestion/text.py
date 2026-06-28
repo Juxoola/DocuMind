@@ -312,14 +312,19 @@ async def process_pdf(
     return nodes
 
 
-# Surya layout pass: определение Diagram/Equation/Table regions
+# Surya layout pass: определение Diagram/Equation/Table regions + OCR
 async def _surya_layout_pass(
     doc, file_name, images_dir, splitter, nodes,
     llm_settings, shared_llm_url, progress_cb, cancel_check,
     surya_mode, frame_data, keep_vision_alive,
 ):
-    """Surya layout detection + Vision LLM для Diagram/Equation regions."""
-    from src.ingestion.surya_layout import detect_layout, extract_regions, shutdown as surya_shutdown
+    """Surya layout detection + OCR + Vision LLM для Diagram/Equation regions."""
+    from src.ingestion.surya_layout import (
+        detect_layout,
+        ocr_text,
+        extract_regions,
+        shutdown as surya_shutdown,
+    )
 
     def _is_cancelled():
         return bool(cancel_check and cancel_check())
@@ -354,6 +359,40 @@ async def _surya_layout_pass(
     if not layout_results:
         return frame_list
 
+    # Full mode: заменяем pymupdf4llm текст на surya OCR
+    if surya_mode == "full":
+        try:
+            if progress_cb:
+                progress_cb(65, "Surya: OCR текста...")
+            ocr_results = await asyncio.to_thread(
+                ocr_text, pil_images, layout_results
+            )
+            if ocr_results:
+                # Удаляем старые узлы (pymupdf4llm) и заменяем surya OCR
+                old_nodes = nodes.copy()
+                nodes.clear()
+                for page_data in ocr_results:
+                    html_text = page_data.get("html", "")
+                    if html_text and html_text.strip():
+                        nodes.extend(
+                            splitter.get_nodes_from_documents(
+                                [
+                                    TextNode(
+                                        text=html_text,
+                                        metadata={
+                                            "file_name": file_name,
+                                            "page": page_data["page"],
+                                        },
+                                    )
+                                ]
+                            )
+                        )
+                logger.info(
+                    f"[Surya] OCR: заменено {len(old_nodes)} -> {len(nodes)} узлов"
+                )
+        except Exception as e:
+            logger.warning(f"[Surya] Ошибка OCR: {e}")
+
     # Извлекаем regions для Vision LLM
     regions = {"Diagram", "Equation", "Table"}
     extracted = extract_regions(pil_images, layout_results, regions)
@@ -361,6 +400,7 @@ async def _surya_layout_pass(
     n_regions = sum(len(r) for r in extracted.values())
     if n_regions == 0:
         logger.info("[Surya] Diagram/Equation/Table regions не найдены")
+        surya_shutdown()
         return frame_list
 
     logger.info(f"[Surya] Найдено {n_regions} regions для описания")
