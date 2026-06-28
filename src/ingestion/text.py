@@ -179,6 +179,17 @@ async def process_pdf(
                     for img_p in image_paths or []:
                         frame_list.append({"page": page_num_result + 1, "path": img_p})
 
+        # Surya layout: определение Diagram/Equation/Table regions
+        surya_mode = getattr(config, "SURYA_MODE", "disabled")
+        if surya_mode in ("layout_only", "full") and not _is_cancelled():
+            surya_frame_list = await _surya_layout_pass(
+                doc, file_name, images_dir, splitter, nodes,
+                llm_settings, shared_llm_url, progress_cb, cancel_check,
+                surya_mode, frame_data, keep_vision_alive,
+            )
+            frame_list.extend(surya_frame_list)
+
+        # Vision LLM: описываем ВСЕ картинки (embedded + surya regions) за раз
         if frame_list:
             if shared_llm_url is None:
                 shared_llm_url = await get_vision_url(llm_settings)
@@ -284,16 +295,6 @@ async def process_pdf(
 
             if shared_llm_url and not keep_vision_alive:
                 await unload_all_models(role="vision")
-
-        # Surya layout detection: определение Diagram/Equation regions
-        surya_mode = getattr(config, "SURYA_MODE", "disabled")
-        if surya_mode in ("layout_only", "full") and not _is_cancelled():
-            surya_frame_list = await _surya_layout_pass(
-                doc, file_name, images_dir, splitter, nodes,
-                llm_settings, shared_llm_url, progress_cb, cancel_check,
-                surya_mode, frame_data, keep_vision_alive,
-            )
-            frame_list.extend(surya_frame_list)
 
         if frame_data:
             frame_data.sort(key=lambda x: x["page"])
