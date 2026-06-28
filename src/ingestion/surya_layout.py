@@ -181,9 +181,17 @@ def extract_regions(
 
 
 def shutdown():
-    """Выгрузка surya моделей."""
+    """Выгрузка surya моделей + остановка llama-server."""
     global _layout_predictor, _recognition_predictor, _inference_manager
+
+    # Останавливаем inference manager (убивает llama-server процесс)
+    if _inference_manager is not None:
+        try:
+            _inference_manager.stop()
+        except Exception as e:
+            logger.warning(f"[Surya] Ошибка остановки server: {e}")
+
     _layout_predictor = None
     _recognition_predictor = None
     _inference_manager = None
-    logger.info("[Surya] Predictor'ы выгружены.")
+    logger.info("[Surya] Predictor'ы и server выгружены.")
