@@ -21,15 +21,18 @@ logger = logging.getLogger(__name__)
 
 
 # Извлечение встроенных изображений со страницы PDF
+# (только когда surya_mode=disabled — иначе surya layout делает это лучше)
 
+async def _analyze_and_build_page(page_num, doc, images_dir, file_name, splitter, surya_mode="disabled"):
 
-async def _analyze_and_build_page(page_num, doc, images_dir, file_name, splitter):
+    # При surya layout/OCR — surya сам извлекает regions, старое извлечение не нужно
+    if surya_mode in ("layout_only", "full"):
+        return page_num, []
 
     def _sync_build():
         page = doc.load_page(page_num)
         images = page.get_images()
 
-        # Извлечение встроенных изображений (фото, скриншоты)
         image_paths = []
         seen_xrefs = set()
         for img_info in images:
@@ -104,10 +107,23 @@ async def process_pdf(
         if progress_cb:
             progress_cb(10, "Извлечение текста (pymupdf4llm)...")
         md_chunks = await asyncio.to_thread(_extract_markdown)
+
+        def _clean_markdown(text: str) -> str:
+            """Очистка markdown от артефактов pymupdf4llm."""
+            import re
+            # Убираем ** из заголовков: ## **Заголовок** → ## Заголовок
+            text = re.sub(r"^(#{1,6})\s*\*\*(.+?)\*\*\s*$", r"\1 \2", text, flags=re.MULTILINE)
+            # Заменяем литералы \n на настоящие переносы
+            text = text.replace("\\n", "\n")
+            # Убираем лишние пустые строки (3+ подряд → 2)
+            text = re.sub(r"\n{3,}", "\n\n", text)
+            return text
+
         for chunk in md_chunks:
             page_num = chunk.get("metadata", {}).get("page_number", 0)
             md_text = chunk.get("text", "")
             if md_text and md_text.strip():
+                md_text = _clean_markdown(md_text)
                 nodes.extend(
                     splitter.get_nodes_from_documents(
                         [
@@ -147,6 +163,8 @@ async def process_pdf(
                 )
 
     # Извлечение встроенных изображений (параллельно)
+    # surya_mode: при layout_only/full — surya сам извлекает, старое извлечение не нужно
+    surya_mode = getattr(config, "SURYA_MODE", "disabled")
     n_workers = min(8, (os.cpu_count() or 4), total_pages)
 
     try:
@@ -156,7 +174,7 @@ async def process_pdf(
                 if _is_cancelled():
                     raise IngestionCancelled(f"Cancelled at page {page_num + 1}")
                 pn, image_paths = await _analyze_and_build_page(
-                    page_num, doc, images_dir, file_name, splitter
+                    page_num, doc, images_dir, file_name, splitter, surya_mode
                 )
                 for img_p in image_paths or []:
                     frame_list.append({"page": pn + 1, "path": img_p})
@@ -170,7 +188,7 @@ async def process_pdf(
                     tasks = []
                     for page_num in range(batch_start, batch_end):
                         tasks.append(
-                            _analyze_and_build_page(page_num, doc, images_dir, file_name, splitter)
+                            _analyze_and_build_page(page_num, doc, images_dir, file_name, splitter, surya_mode)
                         )
                     return await asyncio.gather(*tasks)
 
