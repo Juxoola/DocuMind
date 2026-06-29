@@ -9,8 +9,8 @@ export default function DocumentViewer({ file, notebook, onClose }) {
   const [content, setContent] = useState(null);
   const [contentLoading, setContentLoading] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [pptxData, setPptxData] = useState(null);
   const [videoMeta, setVideoMeta] = useState(null);
+  const [pptxData, setPptxData] = useState(null);
   const [currentTime, setCurrentTime] = useState(0);
   const [showRawText, setShowRawText] = useState(false);
   const [showImagesOnly, setShowImagesOnly] = useState(false);
@@ -455,67 +455,6 @@ export default function DocumentViewer({ file, notebook, onClose }) {
             src={`/static/pdfjs/web/viewer.html?file=${encodeURIComponent(`/files/${notebook.id}/data/${pptxData.pdf_name}`)}${page ? `#page=${page}` : ''}`}
             className="w-full h-full border-none"
           />
-        ) : isPpt ? (
-          <div className="h-full overflow-y-auto p-6 space-y-8 custom-scrollbar bg-muted/10">
-            {!pptxData ? (
-              <div className="space-y-6">
-                {[1,2,3].map(i => (
-                  <div key={i} className="bg-card border border-border/30 rounded-3xl overflow-hidden animate-pulse">
-                    <div className="bg-muted/40 h-12" />
-                    <div className="p-8 space-y-4">
-                      <div className="h-48 bg-muted/30 rounded-2xl" />
-                      <div className="h-3 bg-muted/30 rounded-full w-3/4" />
-                      <div className="h-3 bg-muted/30 rounded-full w-1/2" />
-                    </div>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              pptxData.slides?.map((slide, i) => (
-                <div 
-                  key={i}
-                  ref={el => itemRefs.current[slide.number] = el}
-                  className={cn(
-                    "bg-card border rounded-3xl overflow-hidden shadow-xl transition-all animate-fadeInUp",
-                    page === slide.number ? "ring-2 ring-primary border-primary/50" : "border-border/50"
-                  )}
-                >
-                  <div className="bg-muted/30 p-4 border-b flex items-center justify-between">
-                    <span className="text-[10px] font-black uppercase tracking-widest text-primary">Слайд {slide.number}</span>
-                    {slide.title && <span className="text-xs font-bold truncate max-w-[70%]">{slide.title}</span>}
-                  </div>
-                  
-                  <div className="p-8 space-y-6">
-                    {slide.images && slide.images.length > 0 && (
-                      <div className="grid grid-cols-1 gap-4">
-                        {slide.images.map((img, imgIdx) => (
-                          <div key={imgIdx} className="group relative rounded-2xl overflow-hidden border border-border shadow-md bg-black">
-                             <img 
-                              src={`/files/${notebook.id}/images/${img.path}`} 
-                              className="w-full h-auto max-h-[400px] object-contain transition-transform duration-500 group-hover:scale-[1.02]"
-                             />
-                             {img.description && (
-                               <div className="absolute bottom-0 left-0 right-0 p-3 bg-black/60 backdrop-blur-md opacity-0 group-hover:opacity-100 transition-opacity">
-                                 <p className="text-[10px] text-white/80 leading-relaxed italic">{img.description}</p>
-                               </div>
-                             )}
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                    
-                    {slide.text && (
-                      <div className="prose prose-invert prose-sm max-w-none">
-                        <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                          {slide.text}
-                        </ReactMarkdown>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              ))
-            )}
-          </div>
         ) : (
           <div className="h-full p-8 overflow-y-auto custom-scrollbar min-h-0">
             <div className="md-content max-w-none">
