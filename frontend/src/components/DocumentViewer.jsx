@@ -42,28 +42,6 @@ const TextSection = React.memo(({ text }) => {
 });
 TextSection.displayName = 'TextSection';
 
-const PdfPageCard = React.memo(({ frame, notebookId }) => {
-  const [loaded, setLoaded] = useState(false);
-  const imgSrc = `/files/${notebookId}/images/${frame.image_path.split(/[\\/]/).pop()}`;
-  return (
-    <div className="mx-auto max-w-5xl px-4 pb-6" style={{ contentVisibility: 'auto', containIntrinsicSize: '1px 800px' }}>
-      <div className="p-1.5 text-center text-[10px] font-bold text-muted-foreground bg-muted/5 border-b border-border/10 rounded-t-lg">
-        Стр. {frame.page}
-      </div>
-      <div className="relative bg-black rounded-b-lg overflow-hidden">
-        {!loaded && <div className="skeleton-shimmer" style={{ width: '100%', paddingBottom: '130%' }} />}
-        <img 
-          src={imgSrc}
-          loading="lazy"
-          className={`w-full h-auto mx-auto ${loaded ? 'opacity-100' : 'opacity-0'} transition-opacity duration-300`}
-          onLoad={() => setLoaded(true)}
-          onClick={() => window.open(imgSrc, '_blank')}
-        />
-      </div>
-    </div>
-  );
-});
-PdfPageCard.displayName = 'PdfPageCard';
 
 export default function DocumentViewer({ file, notebook, onClose }) {
   const [content, setContent] = useState(null);
@@ -74,14 +52,12 @@ export default function DocumentViewer({ file, notebook, onClose }) {
   const [currentTime, setCurrentTime] = useState(0);
   const [showRawText, setShowRawText] = useState(false);
   const [showImagesOnly, setShowImagesOnly] = useState(false);
-  const [showExportMenu, setShowExportMenu] = useState(false);
   const vidRef = useRef(null);
   const feedRef = useRef(null);
   const itemRefs = useRef({});
   const lastSoughtTime = useRef(null);
   const textScrollRef = useRef(null);
   const imageScrollRef = useRef(null);
-  const pdfImageScrollRef = useRef(null);
 
   const filename = typeof file === 'string' ? file : file?.file_name;
   const page = typeof file === 'object' ? file?.page : null;
@@ -98,7 +74,7 @@ export default function DocumentViewer({ file, notebook, onClose }) {
   let fileUrl = filename ? `/files/${notebook.id}/data/${encodeURIComponent(filename)}` : '';
   
   const viewerUrl = isPdf 
-    ? `/static/pdfjs/web/viewer.html?file=${encodeURIComponent(fileUrl)}&textlayer=off&disablefontface=true${page ? `#page=${page}` : ''}`
+    ? `/static/pdfjs/web/viewer.html?file=${encodeURIComponent(fileUrl)}${page ? `#page=${page}` : ''}`
     : fileUrl;
 
   useEffect(() => {
@@ -258,16 +234,6 @@ export default function DocumentViewer({ file, notebook, onClose }) {
     if (el) imageVirtualizer.measureElement(el);
   }, [imageVirtualizer]);
   
-  const pdfImageVirtualizer = useVirtualizer({
-    count: videoMeta?.frames?.length || 0,
-    getScrollElement: () => pdfImageScrollRef.current,
-    estimateSize: () => 900,
-    overscan: 1,
-  });
-  
-  const measurePdfImageRow = useCallback((el) => {
-    if (el) pdfImageVirtualizer.measureElement(el);
-  }, [pdfImageVirtualizer]);
 
   // Закрытие дропдауна по клику снаружи
   useEffect(() => {
@@ -398,31 +364,15 @@ export default function DocumentViewer({ file, notebook, onClose }) {
 
       <div className="flex-1 overflow-hidden relative flex flex-col">
 
-        {/* ── PDF: страницы как изображения (быстрее) или PDF.js fallback ── */}
+        {/* ── PDF iframe — всегда смонтирован ── */}
         {!loading && isPdf && (
-          videoMeta?.frames?.length > 0 ? (
-            <div ref={pdfImageScrollRef} className="absolute inset-0 z-10 overflow-y-auto custom-scrollbar" style={{ display: showRawText || showImagesOnly ? 'none' : 'block' }}>
-              <div style={{ height: `${pdfImageVirtualizer.getTotalSize()}px`, position: 'relative' }}>
-                {pdfImageVirtualizer.getVirtualItems().map(virtualRow => {
-                  const f = videoMeta.frames[virtualRow.index];
-                  return (
-                    <div key={virtualRow.key} data-index={virtualRow.index} ref={measurePdfImageRow}
-                      style={{ position: 'absolute', top: 0, left: 0, width: '100%', transform: `translateY(${virtualRow.start}px)` }}>
-                      <PdfPageCard frame={f} notebookId={notebook.id} />
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          ) : (
-            <div className="absolute inset-0 z-10" style={{ display: showRawText || showImagesOnly ? 'none' : 'block' }}>
-              <iframe 
-                key={`${filename}__p${page ?? 'all'}`}
-                src={viewerUrl}
-                className="w-full h-full border-none"
-              />
-            </div>
-          )
+          <div className="absolute inset-0 z-10" style={{ display: showRawText || showImagesOnly ? 'none' : 'block' }}>
+            <iframe 
+              key={`${filename}__p${page ?? 'all'}`}
+              src={viewerUrl}
+              className="w-full h-full border-none"
+            />
+          </div>
         )}
         {loading ? (
           <div className="h-full flex flex-col items-center justify-center gap-4 text-muted-foreground">
@@ -611,7 +561,7 @@ export default function DocumentViewer({ file, notebook, onClose }) {
         ) : isPpt && pptxData?.has_pdf ? (
           <iframe 
             key={`${filename}__p${page ?? 'all'}_ppt`}
-            src={`/static/pdfjs/web/viewer.html?file=${encodeURIComponent(`/files/${notebook.id}/data/${pptxData.pdf_name}`)}&textlayer=off&disablefontface=true${page ? `#page=${page}` : ''}`}
+            src={`/static/pdfjs/web/viewer.html?file=${encodeURIComponent(`/files/${notebook.id}/data/${pptxData.pdf_name}`)}${page ? `#page=${page}` : ''}`}
             className="w-full h-full border-none"
           />
         ) : !isPdf && (
