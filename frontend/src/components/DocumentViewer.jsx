@@ -4,7 +4,6 @@ import { X, FileText, Play, Image as ImageIcon, Clock, AlertCircle, Download, Ch
 import { marked } from 'marked';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { cn } from '../lib/utils';
-import { PDFViewer } from '@embedpdf/react-pdf-viewer';
 
 const FrameCard = React.memo(({ frame, notebookId }) => {
   const [imgLoaded, setImgLoaded] = useState(false);
@@ -42,7 +41,6 @@ const TextSection = React.memo(({ text }) => {
   return <div className="md-content max-w-none" dangerouslySetInnerHTML={{ __html: html }} />;
 });
 TextSection.displayName = 'TextSection';
-
 
 
 export default function DocumentViewer({ file, notebook, onClose }) {
@@ -366,16 +364,14 @@ export default function DocumentViewer({ file, notebook, onClose }) {
       </div>
 
       <div className="flex-1 overflow-hidden relative flex flex-col">
-        {/* ── PDF: PDFium WASM (Chrome PDF engine) ── */}
+
+        {/* ── PDF iframe — всегда смонтирован ── */}
         {!loading && isPdf && (
           <div className="absolute inset-0 z-10" style={{ display: showRawText || showImagesOnly ? 'none' : 'block' }}>
-            <PDFViewer
-              key={filename}
-              config={{
-                src: new URL(fileUrl, window.location.origin).href,
-                tabBar: 'never',
-              }}
-              style={{ width: '100%', height: '100%' }}
+            <iframe 
+              key={`${filename}__p${page ?? 'all'}`}
+              src={viewerUrl}
+              className="w-full h-full border-none"
             />
           </div>
         )}
