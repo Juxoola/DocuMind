@@ -373,8 +373,6 @@ export default function DocumentViewer({ file, notebook, onClose }) {
               key={filename}
               config={{
                 src: new URL(fileUrl, window.location.origin).href,
-                zoom: { defaultZoomLevel: 'automatic' },
-                disabledCategories: ['annotation', 'redaction', 'stamp', 'signature', 'form', 'attachment'],
                 tabBar: 'never',
               }}
               style={{ width: '100%', height: '100%' }}
