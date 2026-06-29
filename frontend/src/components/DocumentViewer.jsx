@@ -116,6 +116,7 @@ export default function DocumentViewer({ file, notebook, onClose }) {
   const [currentTime, setCurrentTime] = useState(0);
   const [showRawText, setShowRawText] = useState(false);
   const [showImagesOnly, setShowImagesOnly] = useState(false);
+  const [showExportMenu, setShowExportMenu] = useState(false);
   const vidRef = useRef(null);
   const feedRef = useRef(null);
   const itemRefs = useRef({});
