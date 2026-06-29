@@ -5,6 +5,40 @@ import { marked } from 'marked';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { cn } from '../lib/utils';
 
+const FrameCard = React.memo(({ frame, notebookId }) => {
+  const imgSrc = `/files/${notebookId}/images/${frame.image_path.split(/[\\/]/).pop()}`;
+  return (
+    <div className="bg-card border border-border/50 rounded-2xl overflow-hidden shadow-md animate-fadeInUp" style={{ contentVisibility: 'auto', containIntrinsicSize: '1px 400px' }}>
+      <div className="p-3 border-b bg-muted/20 flex items-center justify-between">
+        <span className="text-[10px] font-black uppercase tracking-widest text-primary">Стр {frame.page}</span>
+        <ImageIcon size={14} className="text-muted-foreground" />
+      </div>
+      <div className="p-4 flex flex-col md:flex-row gap-6">
+        <div className="w-full md:w-1/2 rounded-xl overflow-hidden border border-border/40 bg-black">
+          <img 
+            src={imgSrc}
+            loading="lazy"
+            className="w-full h-auto object-contain cursor-zoom-in hover:scale-105 transition-transform duration-500" 
+            onClick={() => window.open(imgSrc, '_blank')}
+          />
+        </div>
+        <div className="w-full md:w-1/2 space-y-3">
+          <h4 className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Описание</h4>
+          <div className="text-xs leading-relaxed text-foreground/80 font-medium md-content max-w-none" dangerouslySetInnerHTML={{ __html: marked.parse(frame.description || '', { gfm: true, breaks: true }) }} />
+        </div>
+      </div>
+    </div>
+  );
+});
+FrameCard.displayName = 'FrameCard';
+
+const TextSection = React.memo(({ text }) => {
+  const html = useMemo(() => marked.parse(text, { gfm: true, breaks: true }), [text]);
+  if (!text) return null;
+  return <div className="md-content max-w-none" dangerouslySetInnerHTML={{ __html: html }} />;
+});
+TextSection.displayName = 'TextSection';
+
 export default function DocumentViewer({ file, notebook, onClose }) {
   const [content, setContent] = useState(null);
   const [contentLoading, setContentLoading] = useState(false);
@@ -158,16 +192,13 @@ export default function DocumentViewer({ file, notebook, onClose }) {
     return result;
   }, [content]);
   
-  const sectionHtml = useMemo(() => {
-    return sections.map(s => marked.parse(s, { gfm: true, breaks: true }));
-  }, [sections]);
-  
   const rowVirtualizer = useVirtualizer({
     count: sections.length,
     getScrollElement: () => textScrollRef.current,
-    estimateSize: (i) => Math.max(60, Math.ceil((sectionHtml[i]?.length || 100) / 80) * 22),
+    estimateSize: (i) => Math.max(60, Math.ceil((sections[i]?.length || 100) / 80) * 22),
     overscan: 3,
   });
+  
   
   const measureTextRow = useCallback((el) => {
     if (el) rowVirtualizer.measureElement(el);
@@ -337,26 +368,7 @@ export default function DocumentViewer({ file, notebook, onClose }) {
                         paddingBottom: '1.5rem',
                       }}
                     >
-                      <div className="bg-card border border-border/50 rounded-2xl overflow-hidden shadow-md animate-fadeInUp">
-                        <div className="p-3 border-b bg-muted/20 flex items-center justify-between">
-                          <span className="text-[10px] font-black uppercase tracking-widest text-primary">Стр {f.page}</span>
-                          <ImageIcon size={14} className="text-muted-foreground" />
-                        </div>
-                        <div className="p-4 flex flex-col md:flex-row gap-6">
-                          <div className="w-full md:w-1/2 rounded-xl overflow-hidden border border-border/40 bg-black">
-                            <img 
-                              src={`/files/${notebook.id}/images/${f.image_path.split(/[\\/]/).pop()}`} 
-                              loading="lazy"
-                              className="w-full h-auto object-contain cursor-zoom-in hover:scale-105 transition-transform duration-500" 
-                              onClick={() => window.open(`/files/${notebook.id}/images/${f.image_path.split(/[\\/]/).pop()}`, '_blank')}
-                            />
-                          </div>
-                          <div className="w-full md:w-1/2 space-y-3">
-                            <h4 className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Описание</h4>
-                            <div className="text-xs leading-relaxed text-foreground/80 font-medium md-content max-w-none" dangerouslySetInnerHTML={{ __html: marked.parse(f.description || '', { gfm: true, breaks: true }) }} />
-                          </div>
-                        </div>
-                      </div>
+                      <FrameCard frame={f} notebookId={notebook.id} />
                     </div>
                   );
                 })}
@@ -385,7 +397,7 @@ export default function DocumentViewer({ file, notebook, onClose }) {
                       transform: `translateY(${virtualRow.start}px)`,
                     }}
                   >
-                    <div className="md-content max-w-none" dangerouslySetInnerHTML={{ __html: sectionHtml[virtualRow.index] }} />
+                    <TextSection text={sections[virtualRow.index]} />
                   </div>
                 ))}
               </div>
