@@ -478,9 +478,10 @@ async def get_source_content(filename: str, notebook_id: str):
                 page = meta.get("page", 0)
                 by_page[page].append(doc)
             pages_sorted = sorted(by_page.items())
-            full_text = "\n\n---\n\n".join(
-                "\n\n".join(chunks) for _, chunks in pages_sorted
-            )
+            parts = []
+            for page_num, chunks in pages_sorted:
+                parts.append(f"--- Стр. {page_num} ---\n" + "\n\n".join(chunks))
+            full_text = "\n\n".join(parts)
             _set_cached_source(cache_key, full_text)
             return {"text": full_text}
     except Exception:
@@ -623,9 +624,10 @@ async def export_text(filename: str, notebook_id: str, fmt: str = "txt"):
                         page = meta.get("page", 0)
                         by_page[page].append(doc)
                     pages_sorted = sorted(by_page.items())
-                    text = "\n\n---\n\n".join(
-                        "\n\n".join(chunks) for _, chunks in pages_sorted
-                    )
+                    parts = []
+                    for page_num, chunks in pages_sorted:
+                        parts.append(f"--- Стр. {page_num} ---\n" + "\n\n".join(chunks))
+                    text = "\n\n".join(parts)
             except Exception:
                 pass
         if not text:
