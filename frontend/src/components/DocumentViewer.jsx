@@ -329,9 +329,11 @@ export default function DocumentViewer({ file, notebook, onClose }) {
             </div>
             {videoMeta?.frames?.[0]?.description && (
               <div className="p-4 border-t border-border/30 bg-muted/20">
-                <p className="text-xs leading-relaxed text-foreground/80 font-medium whitespace-pre-wrap">
-                  {videoMeta.frames[0].description}
-                </p>
+                <div className="md-content max-w-none">
+                  <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                    {videoMeta.frames[0].description}
+                  </ReactMarkdown>
+                </div>
               </div>
             )}
           </div>
@@ -504,9 +506,9 @@ export default function DocumentViewer({ file, notebook, onClose }) {
                     
                     {slide.text && (
                       <div className="prose prose-invert prose-sm max-w-none">
-                        <p className="text-sm leading-relaxed text-foreground/80 whitespace-pre-wrap font-medium">
+                        <ReactMarkdown remarkPlugins={[remarkGfm]}>
                           {slide.text}
-                        </p>
+                        </ReactMarkdown>
                       </div>
                     )}
                   </div>
@@ -515,10 +517,12 @@ export default function DocumentViewer({ file, notebook, onClose }) {
             )}
           </div>
         ) : (
-          <div className="h-full p-8 overflow-y-auto prose prose-invert prose-sm max-w-none">
-            <pre className="whitespace-pre-wrap font-sans text-xs leading-loose text-foreground/80">
-              {content || 'Контент пуст или не может быть отображен.'}
-            </pre>
+          <div className="h-full p-8 overflow-y-auto custom-scrollbar min-h-0">
+            <div className="md-content max-w-none">
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                {content || 'Контент пуст или не может быть отображен.'}
+              </ReactMarkdown>
+            </div>
           </div>
         )}
       </div>
