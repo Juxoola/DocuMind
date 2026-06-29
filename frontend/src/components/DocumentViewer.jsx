@@ -371,7 +371,12 @@ export default function DocumentViewer({ file, notebook, onClose }) {
           <div className="absolute inset-0 z-10" style={{ display: showRawText || showImagesOnly ? 'none' : 'block' }}>
             <PDFViewer
               key={filename}
-              config={{ src: new URL(fileUrl, window.location.origin).href }}
+              config={{
+                src: new URL(fileUrl, window.location.origin).href,
+                zoom: { defaultZoomLevel: 'fit-width' },
+                disabledCategories: ['annotation', 'redaction', 'stamp', 'signature', 'form', 'attachment'],
+                tabBar: 'never',
+              }}
               style={{ width: '100%', height: '100%' }}
             />
           </div>
