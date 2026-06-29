@@ -7,6 +7,7 @@ import { cn } from '../lib/utils';
 
 export default function DocumentViewer({ file, notebook, onClose }) {
   const [content, setContent] = useState(null);
+  const [contentLoading, setContentLoading] = useState(false);
   const [loading, setLoading] = useState(true);
   const [pptxData, setPptxData] = useState(null);
   const [videoMeta, setVideoMeta] = useState(null);
@@ -64,13 +65,15 @@ export default function DocumentViewer({ file, notebook, onClose }) {
     }
 
     if (!isMedia) {
+      setContentLoading(true);
       fetch(`/api/source_content?filename=${encodeURIComponent(filename)}&notebook_id=${notebook.id}`)
         .then(r => r.json())
         .then(data => {
           setContent(data.text);
+          setContentLoading(false);
           if (!isSpecial) setLoading(false);
         })
-        .catch(() => { if (!isSpecial) setLoading(false); });
+        .catch(() => { setContentLoading(false); if (!isSpecial) setLoading(false); });
     }
   }, [filename, notebook.id]);
 
@@ -301,7 +304,12 @@ export default function DocumentViewer({ file, notebook, onClose }) {
           </div>
         ) : showRawText ? (
           <div className="flex-1 p-8 overflow-y-auto custom-scrollbar min-h-0">
-            {renderedContent || <p className="text-muted-foreground text-sm">Текст пуст или извлекается...</p>}
+            {contentLoading ? (
+              <div className="flex flex-col items-center justify-center h-full gap-3 text-muted-foreground">
+                <div className="w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+                <span className="text-[10px] font-bold uppercase tracking-wider">Извлечение текста...</span>
+              </div>
+            ) : renderedContent || <p className="text-muted-foreground text-sm">Текст пуст.</p>}
           </div>
         ) : isPdf ? (
           <iframe 
