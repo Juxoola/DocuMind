@@ -4,9 +4,6 @@ import { X, FileText, Play, Image as ImageIcon, Clock, AlertCircle, Download, Ch
 import { marked } from 'marked';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { cn } from '../lib/utils';
-import { Document, Page, pdfjs } from 'react-pdf';
-import 'react-pdf/dist/Page/TextLayer.css';
-pdfjs.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
 
 const FrameCard = React.memo(({ frame, notebookId }) => {
   const [imgLoaded, setImgLoaded] = useState(false);
@@ -45,67 +42,6 @@ const TextSection = React.memo(({ text }) => {
 });
 TextSection.displayName = 'TextSection';
 
-const PdfViewer = React.memo(({ fileUrl }) => {
-  const scrollRef = useRef(null);
-  const [numPages, setNumPages] = useState(0);
-  const [scale, setScale] = useState(1.2);
-
-  const rowVirtualizer = useVirtualizer({
-    count: numPages,
-    getScrollElement: () => scrollRef.current,
-    estimateSize: () => Math.round(900 * scale / 1.2),
-    overscan: 2,
-  });
-
-  function onLoadSuccess({ numPages }) {
-    setNumPages(numPages);
-  }
-
-  return (
-    <div className="h-full flex flex-col overflow-hidden">
-      <div className="flex items-center justify-between px-4 py-1.5 border-b border-border/20 bg-muted/5 flex-shrink-0">
-        <span className="text-[10px] font-bold text-muted-foreground">{numPages || 0} стр.</span>
-        <div className="flex items-center gap-2">
-          <button onClick={() => setScale(s => Math.max(0.5, s - 0.2))} className="text-[10px] px-2 py-0.5 bg-muted/30 rounded hover:bg-muted/60">−</button>
-          <span className="text-[10px] font-bold text-muted-foreground min-w-[3em] text-center">{Math.round(scale * 100)}%</span>
-          <button onClick={() => setScale(s => Math.min(3, s + 0.2))} className="text-[10px] px-2 py-0.5 bg-muted/30 rounded hover:bg-muted/60">+</button>
-        </div>
-      </div>
-      <div ref={scrollRef} className="flex-1 overflow-y-auto custom-scrollbar bg-muted/10" style={{ position: 'relative' }}>
-        <Document
-          file={fileUrl}
-          onLoadSuccess={onLoadSuccess}
-          loading={
-            <div className="h-full flex flex-col items-center justify-center gap-3 text-muted-foreground">
-              <div className="w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin" />
-              <span className="text-[10px] font-bold uppercase tracking-wider">Загрузка PDF...</span>
-            </div>
-          }
-          error={<div className="h-full flex items-center justify-center text-muted-foreground text-sm">Ошибка загрузки PDF</div>}
-        >
-          {numPages > 0 && (
-            <div style={{ height: `${rowVirtualizer.getTotalSize()}px`, position: 'relative' }}>
-              {rowVirtualizer.getVirtualItems().map(virtualRow => (
-                <div key={virtualRow.key}
-                  style={{ position: 'absolute', top: 0, left: 0, width: '100%', transform: `translateY(${virtualRow.start}px)` }}>
-                  <Page
-                    pageNumber={virtualRow.index + 1}
-                    scale={scale}
-                    renderTextLayer={true}
-                    renderAnnotationLayer={false}
-                    className="flex justify-center py-2"
-                  />
-                </div>
-              ))}
-            </div>
-          )}
-        </Document>
-      </div>
-    </div>
-  );
-});
-PdfViewer.displayName = 'PdfViewer';
-
 
 export default function DocumentViewer({ file, notebook, onClose }) {
   const [content, setContent] = useState(null);
@@ -138,6 +74,9 @@ export default function DocumentViewer({ file, notebook, onClose }) {
   
   let fileUrl = filename ? `/files/${notebook.id}/data/${encodeURIComponent(filename)}` : '';
   
+  const viewerUrl = isPdf 
+    ? `/static/pdfjs/web/viewer.html?file=${encodeURIComponent(fileUrl)}#pagemode=none${page ? `&page=${page}` : ''}`
+    : fileUrl;
 
   useEffect(() => {
     if (!filename) return;
@@ -426,10 +365,14 @@ export default function DocumentViewer({ file, notebook, onClose }) {
 
       <div className="flex-1 overflow-hidden relative flex flex-col">
 
-        {/* ── PDF: react-pdf (canvas + текстовый слой) ── */}
+        {/* ── PDF iframe — всегда смонтирован ── */}
         {!loading && isPdf && (
           <div className="absolute inset-0 z-10" style={{ display: showRawText || showImagesOnly ? 'none' : 'block' }}>
-            <PdfViewer fileUrl={fileUrl} />
+            <iframe 
+              key={`${filename}__p${page ?? 'all'}`}
+              src={viewerUrl}
+              className="w-full h-full border-none"
+            />
           </div>
         )}
         {loading ? (
