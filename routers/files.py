@@ -461,15 +461,26 @@ async def get_source_content(filename: str, notebook_id: str):
                 _set_cached_source(cache_key, text)
                 return {"text": text}
 
-    # ── ChromaDB: текст + описания изображений (всё уже в базе) ──
+    # ── ChromaDB: текст + описания, чередуя по страницам ──
     try:
         from src.rag.indexing import get_vector_store
 
         vector_store = await get_vector_store(notebook_id)
         collection = vector_store._collection
-        result = await asyncio.to_thread(collection.get, where={"file_name": filename})
+        result = await asyncio.to_thread(
+            collection.get, where={"file_name": filename}, include=["documents", "metadatas"]
+        )
         if result and result.get("documents"):
-            full_text = "\n\n---\n\n".join(result["documents"])
+            # Группируем чанки по странице, текст и описания чередуются
+            from collections import defaultdict
+            by_page: dict[int, list[str]] = defaultdict(list)
+            for doc, meta in zip(result["documents"], result["metadatas"]):
+                page = meta.get("page", 0)
+                by_page[page].append(doc)
+            pages_sorted = sorted(by_page.items())
+            full_text = "\n\n---\n\n".join(
+                "\n\n".join(chunks) for _, chunks in pages_sorted
+            )
             _set_cached_source(cache_key, full_text)
             return {"text": full_text}
     except Exception:
@@ -597,14 +608,24 @@ async def export_text(filename: str, notebook_id: str, fmt: str = "txt"):
                 async with aiofiles.open(extracted_path, "r", encoding="utf-8") as ef:
                     text = await ef.read()
         if not text:
-            # ChromaDB (текст + описания — всё уже в базе)
+            # ChromaDB: текст + описания, чередуя по страницам
             try:
                 from src.rag.indexing import get_vector_store
                 vector_store = await get_vector_store(notebook_id)
                 collection = vector_store._collection
-                result = await asyncio.to_thread(collection.get, where={"file_name": filename})
+                result = await asyncio.to_thread(
+                    collection.get, where={"file_name": filename}, include=["documents", "metadatas"]
+                )
                 if result and result.get("documents"):
-                    text = "\n\n---\n\n".join(result["documents"])
+                    from collections import defaultdict
+                    by_page = defaultdict(list)
+                    for doc, meta in zip(result["documents"], result["metadatas"]):
+                        page = meta.get("page", 0)
+                        by_page[page].append(doc)
+                    pages_sorted = sorted(by_page.items())
+                    text = "\n\n---\n\n".join(
+                        "\n\n".join(chunks) for _, chunks in pages_sorted
+                    )
             except Exception:
                 pass
         if not text:
