@@ -1,11 +1,12 @@
 // Просмотрщик документов: PDF, изображения, видео, аудио, текст.
-import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback, startTransition } from 'react';
 import { X, FileText, Play, Image as ImageIcon, Clock, AlertCircle, Download, ChevronDown } from 'lucide-react';
 import { marked } from 'marked';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { cn } from '../lib/utils';
 
 const FrameCard = React.memo(({ frame, notebookId }) => {
+  const [imgLoaded, setImgLoaded] = useState(false);
   const imgSrc = `/files/${notebookId}/images/${frame.image_path.split(/[\\/]/).pop()}`;
   return (
     <div className="bg-card border border-border/50 rounded-2xl overflow-hidden shadow-md animate-fadeInUp" style={{ contentVisibility: 'auto', containIntrinsicSize: '1px 400px' }}>
@@ -14,11 +15,13 @@ const FrameCard = React.memo(({ frame, notebookId }) => {
         <ImageIcon size={14} className="text-muted-foreground" />
       </div>
       <div className="p-4 flex flex-col md:flex-row gap-6">
-        <div className="w-full md:w-1/2 rounded-xl overflow-hidden border border-border/40 bg-black">
+        <div className="w-full md:w-1/2 rounded-xl overflow-hidden border border-border/40 bg-black relative">
+          {!imgLoaded && <div className="absolute inset-0 skeleton-shimmer" style={{ aspectRatio: '3/4' }} />}
           <img 
             src={imgSrc}
             loading="lazy"
-            className="w-full h-auto object-contain cursor-zoom-in hover:scale-105 transition-transform duration-500" 
+            className={`w-full h-auto object-contain cursor-zoom-in hover:scale-105 transition-transform duration-500 ${imgLoaded ? 'opacity-100' : 'opacity-0'}`}
+            onLoad={() => setImgLoaded(true)}
             onClick={() => window.open(imgSrc, '_blank')}
           />
         </div>
@@ -129,6 +132,22 @@ export default function DocumentViewer({ file, notebook, onClose }) {
       }
     }
   }, [startTime, isMedia, file]);
+
+  // ── Предзагрузка первого изображения фрейма ──
+  useEffect(() => {
+    const links = [];
+    if (videoMeta?.frames?.length > 0 && !showImagesOnly) {
+      const firstImg = videoMeta.frames[0];
+      const imgUrl = `/files/${notebook.id}/images/${firstImg.image_path.split(/[\\/]/).pop()}`;
+      const link = document.createElement('link');
+      link.rel = 'preload';
+      link.as = 'image';
+      link.href = imgUrl;
+      document.head.appendChild(link);
+      links.push(link);
+    }
+    return () => links.forEach(l => document.head.removeChild(l));
+  }, [videoMeta, notebook.id]);
 
   const seekMedia = (time) => {
     if (vidRef.current) {
@@ -281,7 +300,7 @@ export default function DocumentViewer({ file, notebook, onClose }) {
           {!isMedia && (
             <div className="flex bg-muted/30 p-1 rounded-xl border border-border/40">
               <button 
-                onClick={() => { setShowRawText(false); setShowImagesOnly(false); }}
+                onClick={() => startTransition(() => { setShowRawText(false); setShowImagesOnly(false); })}
                 className={cn(
                   "px-3 py-1.5 text-[10px] font-bold rounded-lg transition-all",
                   (!showRawText && !showImagesOnly) ? "bg-card text-primary shadow-sm" : "text-muted-foreground hover:text-foreground"
@@ -290,7 +309,7 @@ export default function DocumentViewer({ file, notebook, onClose }) {
                 Документ
               </button>
               <button 
-                onClick={() => { setShowRawText(true); setShowImagesOnly(false); }}
+                onClick={() => startTransition(() => { setShowRawText(true); setShowImagesOnly(false); })}
                 className={cn(
                   "px-3 py-1.5 text-[10px] font-bold rounded-lg transition-all",
                   showRawText ? "bg-card text-primary shadow-sm" : "text-muted-foreground hover:text-foreground"
@@ -300,7 +319,7 @@ export default function DocumentViewer({ file, notebook, onClose }) {
               </button>
               {(isPdf || isPpt) && videoMeta?.frames?.length > 0 && (
                 <button 
-                  onClick={() => { setShowRawText(false); setShowImagesOnly(true); }}
+                onClick={() => startTransition(() => { setShowRawText(false); setShowImagesOnly(true); })}
                   className={cn(
                     "px-3 py-1.5 text-[10px] font-bold rounded-lg transition-all",
                     showImagesOnly ? "bg-card text-primary shadow-sm" : "text-muted-foreground hover:text-foreground"
@@ -343,6 +362,17 @@ export default function DocumentViewer({ file, notebook, onClose }) {
       </div>
 
       <div className="flex-1 overflow-hidden relative flex flex-col">
+
+        {/* ── PDF iframe — всегда смонтирован ── */}
+        {!loading && isPdf && (
+          <div className="absolute inset-0 z-10" style={{ display: showRawText || showImagesOnly ? 'none' : 'block' }}>
+            <iframe 
+              key={`${filename}__p${page ?? 'all'}`}
+              src={viewerUrl}
+              className="w-full h-full border-none"
+            />
+          </div>
+        )}
         {loading ? (
           <div className="h-full flex flex-col items-center justify-center gap-4 text-muted-foreground">
              <div className="w-10 h-10 border-2 border-primary border-t-transparent rounded-full animate-spin shadow-[0_0_15px_rgba(var(--primary),0.3)]" />
@@ -403,12 +433,6 @@ export default function DocumentViewer({ file, notebook, onClose }) {
               </div>
             ) : <p className="text-muted-foreground text-sm">Текст пуст.</p>}
           </div>
-        ) : isPdf ? (
-          <iframe 
-            key={`${filename}__p${page ?? 'all'}`}
-            src={viewerUrl}
-            className="w-full h-full border-none"
-          />
         ) : isImage ? (
           <div className="h-full overflow-y-auto">
             <div className="p-4">
@@ -539,7 +563,7 @@ export default function DocumentViewer({ file, notebook, onClose }) {
             src={`/static/pdfjs/web/viewer.html?file=${encodeURIComponent(`/files/${notebook.id}/data/${pptxData.pdf_name}`)}${page ? `#page=${page}` : ''}`}
             className="w-full h-full border-none"
           />
-        ) : (
+        ) : !isPdf && (
           <div className="h-full p-8 overflow-y-auto custom-scrollbar min-h-0">
             <div className="md-content max-w-none" dangerouslySetInnerHTML={{ __html: marked.parse(content || 'Контент пуст или не может быть отображен.', { gfm: true, breaks: true }) }} />
           </div>

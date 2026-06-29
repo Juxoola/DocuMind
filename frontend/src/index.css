@@ -253,3 +253,13 @@
 .md-content em { font-style: italic; opacity: 0.9; }
 
 
+/* ── Скелетон для изображений ── */
+.skeleton-shimmer {
+  background: linear-gradient(90deg, hsl(222 47% 11%) 25%, hsl(222 47% 15%) 50%, hsl(222 47% 11%) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s ease-in-out infinite;
+}
+@keyframes shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
