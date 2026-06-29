@@ -12,6 +12,7 @@
     "test:watch": "vitest"
   },
   "dependencies": {
+    "@embedpdf/react-pdf-viewer": "^2.14.4",
     "@tailwindcss/vite": "^4.2.4",
     "@tanstack/react-virtual": "^3.14.2",
     "axios": "^1.15.2",
@@ -19,6 +20,7 @@
     "katex": "^0.16.45",
     "lucide-react": "^1.14.0",
     "marked": "^18.0.5",
+    "mupdf": "^1.28.0",
     "react": "^19.2.5",
     "react-dom": "^19.2.5",
     "react-markdown": "^10.1.0",

@@ -4,6 +4,7 @@ import { X, FileText, Play, Image as ImageIcon, Clock, AlertCircle, Download, Ch
 import { marked } from 'marked';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { cn } from '../lib/utils';
+import { PDFViewer } from '@embedpdf/react-pdf-viewer';
 
 const FrameCard = React.memo(({ frame, notebookId }) => {
   const [imgLoaded, setImgLoaded] = useState(false);
@@ -364,14 +365,12 @@ export default function DocumentViewer({ file, notebook, onClose }) {
       </div>
 
       <div className="flex-1 overflow-hidden relative flex flex-col">
-
-        {/* ── PDF iframe — всегда смонтирован ── */}
+        {/* ── PDF: PDFium WASM (Chrome PDF engine) ── */}
         {!loading && isPdf && (
           <div className="absolute inset-0 z-10" style={{ display: showRawText || showImagesOnly ? 'none' : 'block' }}>
-            <iframe 
-              key={`${filename}__p${page ?? 'all'}`}
-              src={viewerUrl}
-              className="w-full h-full border-none"
+            <PDFViewer
+              config={{ src: new URL(fileUrl, window.location.origin).href }}
+              style={{ width: '100%', height: '100%' }}
             />
           </div>
         )}
