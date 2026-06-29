@@ -398,6 +398,11 @@ async def delete_file(filename: str, notebook_id: str):
                         await asyncio.sleep(0.2)
 
         await _sync_remove_with_retry(file_path)
+        # Удаляем кеш предварительного извлечения
+        extracted = os.path.join(paths["data"], f"{filename}.extracted.md")
+        if os.path.exists(extracted):
+            try: await aiofiles.os.remove(extracted)
+            except Exception: pass
     from src.rag.indexing import get_vector_store
 
     vector_store = await get_vector_store(notebook_id)
@@ -445,6 +450,16 @@ async def get_source_content(filename: str, notebook_id: str):
     cached = _get_cached_source(cache_key)
     if cached is not None:
         return {"text": cached}
+
+    # ── Быстрый путь: читаем предварительно извлечённый .extracted.md ──
+    if ext == ".pdf":
+        extracted_path = os.path.join(paths["data"], f"{filename}.extracted.md")
+        if os.path.exists(extracted_path):
+            async with aiofiles.open(extracted_path, "r", encoding="utf-8") as f:
+                text = await f.read()
+            if text:
+                _set_cached_source(cache_key, text)
+                return {"text": text}
 
     if ext == ".pdf":
         text = await asyncio.to_thread(_build_interleaved_text, file_path, paths["data"], filename)

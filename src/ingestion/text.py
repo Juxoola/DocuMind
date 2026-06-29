@@ -137,6 +137,20 @@ async def process_pdf(
                     )
                 )
         logger.info(f"[Ingestion] pymupdf4llm: {len(md_chunks)} чанков, {len(nodes)} узлов")
+
+        # ── Сохраняем извлечённый текст на диск для мгновенного доступа ──
+        try:
+            extracted_parts = []
+            for chunk in md_chunks:
+                t = chunk.get("text", "")
+                if t and t.strip():
+                    extracted_parts.append(t)
+            if extracted_parts:
+                extracted_path = os.path.join(os.path.dirname(file_path), f"{file_name}.extracted.md")
+                async with aiofiles.open(extracted_path, "w", encoding="utf-8") as ef:
+                    await ef.write("\n\n---\n\n".join(extracted_parts))
+        except Exception as e:
+            logger.warning(f"[Ingestion] Не удалось сохранить .extracted.md: {e}")
     except ImportError:
         logger.warning("[Ingestion] pymupdf4llm не установлен — fallback на page.get_text()")
         for page_num in range(total_pages):
