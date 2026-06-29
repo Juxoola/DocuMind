@@ -611,7 +611,7 @@ export default function DocumentViewer({ file, notebook, onClose }) {
         ) : isPpt && pptxData?.has_pdf ? (
           <iframe 
             key={`${filename}__p${page ?? 'all'}_ppt`}
-            src={`/static/pdfjs/web/viewer.html?file=${encodeURIComponent(`/files/${notebook.id}/data/${pptxData.pdf_name}`)}${page ? `#page=${page}` : ''}`}
+            src={`/static/pdfjs/web/viewer.html?file=${encodeURIComponent(`/files/${notebook.id}/data/${pptxData.pdf_name}`)}&textlayer=off&disablefontface=true${page ? `#page=${page}` : ''}`}
             className="w-full h-full border-none"
           />
         ) : !isPdf && (
