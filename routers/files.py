@@ -461,7 +461,7 @@ async def get_source_content(filename: str, notebook_id: str):
                 _set_cached_source(cache_key, text)
                 return {"text": text}
 
-    # ── ChromaDB: быстрый fallback для старых файлов без .extracted.md ──
+    # ── ChromaDB: текст из базы + описания изображений из JSON ──
     try:
         from src.rag.indexing import get_vector_store
 
@@ -470,17 +470,33 @@ async def get_source_content(filename: str, notebook_id: str):
         result = await asyncio.to_thread(collection.get, where={"file_name": filename})
         if result and result.get("documents"):
             full_text = "\n\n---\n\n".join(result["documents"])
+
+            # Для PDF добавляем описания изображений (есть только в JSON)
+            if ext == ".pdf":
+                json_path = os.path.join(paths["data"], f"{filename}.json")
+                if os.path.exists(json_path):
+                    try:
+                        import aiofiles as _af
+                        async with _af.open(json_path, "rb") as jf:
+                            jdata = orjson.loads(await jf.read())
+                        frames = jdata.get("frames", [])
+                        if frames:
+                            descs = []
+                            for fr in frames:
+                                d = fr.get("description", "").strip()
+                                p = fr.get("page")
+                                if d and p is not None:
+                                    descs.append(f"\n\n--- Стр. {p} (описание изображения) ---\n{d}")
+                            if descs:
+                                full_text += "\n\n" + "\n".join(descs)
+                    except Exception:
+                        pass
+
             _set_cached_source(cache_key, full_text)
             return {"text": full_text}
     except Exception:
         pass
 
-    # ── Медленный fallback: парсим PDF pymupdf4llm (только если ChromaDB пуста) ──
-    if ext == ".pdf":
-        text = await asyncio.to_thread(_build_interleaved_text, file_path, paths["data"], filename)
-        if text:
-            _set_cached_source(cache_key, text)
-            return {"text": text}
     return {"text": "Содержимое документа не найдено."}
 
 
