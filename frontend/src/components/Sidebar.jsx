@@ -1,6 +1,5 @@
 // Боковая панель: список файлов, загрузка, состояние ingestion.
 import React, { useState } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
 import {
   FileText,
   Upload,
@@ -104,7 +103,7 @@ export default function Sidebar({
       } catch (err) {}
     };
     checkLlama();
-    const timer = setInterval(checkLlama, 5000);
+    const timer = setInterval(checkLlama, 10000);
     return () => clearInterval(timer);
   }, []);
 
@@ -347,11 +346,9 @@ export default function Sidebar({
                   <span className="text-[9px] font-bold text-primary">{Math.round(uploadState.progress)}%</span>
                 </div>
                 <div className="w-full bg-primary/10 h-1.5 rounded-full overflow-hidden shadow-inner">
-                  <motion.div 
-                    className="bg-primary h-full shadow-[0_0_10px_rgba(var(--primary),0.5)]" 
-                    initial={{ width: 0 }}
-                    animate={{ width: `${uploadState.progress}%` }}
-                    transition={{ type: "spring", stiffness: 100, damping: 20 }}
+                  <div 
+                    className="bg-primary h-full shadow-[0_0_10px_rgba(var(--primary),0.5)] transition-[width] duration-500 ease-out" 
+                    style={{ width: `${uploadState.progress}%` }}
                   />
                 </div>
               </div>
@@ -367,10 +364,9 @@ export default function Sidebar({
                   <span className="text-[9px] font-bold text-muted-foreground">{Math.round(uploadState.batchProgress)}%</span>
                 </div>
                 <div className="w-full bg-muted h-1 rounded-full overflow-hidden">
-                  <motion.div 
-                    className="bg-muted-foreground/40 h-full" 
-                    initial={{ width: 0 }}
-                    animate={{ width: `${uploadState.batchProgress}%` }}
+                  <div 
+                    className="bg-muted-foreground/40 h-full transition-[width] duration-300 ease-out" 
+                    style={{ width: `${uploadState.batchProgress}%` }}
                   />
                 </div>
               </div>
@@ -678,21 +674,14 @@ export default function Sidebar({
         </div>
       </div>
 
-      <AnimatePresence>
-        {viewingBm && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
+      {viewingBm && (
+          <div
             onClick={() => setViewingBm(null)}
-            className="fixed inset-0 z-[200] flex items-center justify-center bg-black/60 backdrop-blur-md p-4"
+            className="fixed inset-0 z-[200] flex items-center justify-center bg-black/60 backdrop-blur-md p-4 animate-fadeIn"
           >
-            <motion.div
-              initial={{ scale: 0.92, opacity: 0, y: 20 }}
-              animate={{ scale: 1, opacity: 1, y: 0 }}
-              exit={{ scale: 0.92, opacity: 0, y: 20 }}
+            <div
               onClick={(e) => e.stopPropagation()}
-              className="relative w-full max-w-2xl max-h-[85vh] flex flex-col bg-card border border-border shadow-2xl rounded-3xl overflow-hidden"
+              className="relative w-full max-w-2xl max-h-[85vh] flex flex-col bg-card border border-border shadow-2xl rounded-3xl overflow-hidden animate-scaleIn"
             >
               <div className="flex items-start justify-between p-5 border-b border-border/50 gap-3">
                 <div className="min-w-0 flex-1">
@@ -816,26 +805,18 @@ export default function Sidebar({
                   <Trash2 size={13} />
                 </button>
               </div>
-            </motion.div>
-          </motion.div>
+            </div>
+          </div>
         )}
-      </AnimatePresence>
 
-      <AnimatePresence>
-        {editingBm && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
+      {editingBm && (
+          <div
             onClick={() => setEditingBm(null)}
-            className="fixed inset-0 z-[200] flex items-center justify-center bg-black/60 backdrop-blur-md p-4"
+            className="fixed inset-0 z-[200] flex items-center justify-center bg-black/60 backdrop-blur-md p-4 animate-fadeIn"
           >
-            <motion.div
-              initial={{ scale: 0.95, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.95, opacity: 0 }}
+            <div
               onClick={(e) => e.stopPropagation()}
-              className="w-full max-w-md bg-card border border-border shadow-2xl rounded-2xl p-5"
+              className="w-full max-w-md bg-card border border-border shadow-2xl rounded-2xl p-5 animate-scaleIn"
             >
               <h3 className="text-base font-bold mb-4">Редактировать закладку</h3>
               <div className="space-y-3">
@@ -876,10 +857,9 @@ export default function Sidebar({
                   Сохранить
                 </button>
               </div>
-            </motion.div>
-          </motion.div>
+            </div>
+          </div>
         )}
-      </AnimatePresence>
     </div>
   );
 }

@@ -1,6 +1,5 @@
 // Выбор блокнота: список, поиск, сортировка, создание/удаление.
 import React, { useState, useEffect } from 'react';
-import { motion } from 'framer-motion';
 import { Plus, Trash2, Book, Clock } from 'lucide-react';
 import axios from 'axios';
 import { cn } from '../lib/utils';
@@ -70,36 +69,28 @@ export default function NotebookSelector({ onSelect }) {
 
   // ── Рендер компонента ──
   return (
-    <motion.div 
-      initial={{ opacity: 0, y: 20 }}
-      animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0, scale: 0.95 }}
-      className="flex flex-col items-center justify-start min-h-screen p-8 bg-background"
+    <div 
+      className="animate-fadeInUp flex flex-col items-center justify-start min-h-screen p-8 bg-background"
     >
       <div className="text-center mb-12 mt-12">
-        <motion.h1 
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          transition={{ delay: 0.2 }}
-          className="text-6xl font-bold tracking-tighter mb-4"
+        <h1 
+          className="animate-fadeIn text-6xl font-bold tracking-tighter mb-4"
         >
           DocuMind <span className="text-primary">Local</span>
-        </motion.h1>
+        </h1>
         <p className="text-muted-foreground text-lg max-w-md mx-auto">
           Ваши персональные ИИ-блокноты. Вся мощь анализа документов в полной приватности.
         </p>
       </div>
 
       <div className="flex flex-col items-center gap-6 w-full max-w-5xl mb-12">
-        <motion.button
-          whileHover={{ scale: 1.02 }}
-          whileTap={{ scale: 0.98 }}
+        <button
           onClick={() => setIsCreateModalOpen(true)}
-          className="flex items-center gap-2 bg-primary text-primary-foreground px-8 py-3 rounded-xl font-semibold shadow-lg shadow-primary/20 transition-all w-full md:w-auto justify-center"
+          className="flex items-center gap-2 bg-primary text-primary-foreground px-8 py-3 rounded-xl font-semibold shadow-lg shadow-primary/20 transition-all hover:scale-[1.02] active:scale-[0.98] w-full md:w-auto justify-center"
         >
           <Plus size={20} />
           Создать новый блокнот
-        </motion.button>
+        </button>
 
         <div className="flex flex-col md:flex-row gap-4 w-full items-center bg-card/30 backdrop-blur-md p-2 rounded-2xl border border-border/40 shadow-inner">
           <div className="relative flex-1 w-full flex items-center">
@@ -139,13 +130,10 @@ export default function NotebookSelector({ onSelect }) {
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 w-full max-w-5xl">
         {filteredNotebooks.map((nb, i) => (
-          <motion.div
+          <div
             key={nb.id}
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.1 * i }}
             onClick={() => onSelect(nb)}
-            className="group relative glass-card p-8 rounded-3xl cursor-pointer overflow-hidden border border-border/50 hover:border-primary/30"
+            className="animate-fadeInUp group relative glass-card p-8 rounded-3xl cursor-pointer overflow-hidden border border-border/50 hover:border-primary/30"
           >
             <div className="absolute top-0 right-0 p-4 opacity-0 group-hover:opacity-100 transition-opacity z-10">
               <button 
@@ -170,7 +158,7 @@ export default function NotebookSelector({ onSelect }) {
             <div className="mt-8 flex items-center text-sm font-medium text-primary opacity-0 group-hover:opacity-100 transition-all transform translate-x-[-10px] group-hover:translate-x-0">
               Открыть блокнот →
             </div>
-          </motion.div>
+          </div>
         ))}
       </div>
 
@@ -184,16 +172,12 @@ export default function NotebookSelector({ onSelect }) {
 
       {isCreateModalOpen && (
         <div className="fixed inset-0 z-[200] flex items-center justify-center p-4">
-          <motion.div 
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
+          <div 
+            className="animate-fadeIn absolute inset-0 bg-background/80 backdrop-blur-md"
             onClick={() => setIsCreateModalOpen(false)}
-            className="absolute inset-0 bg-background/80 backdrop-blur-md"
           />
-          <motion.div 
-            initial={{ scale: 0.9, opacity: 0, y: 20 }}
-            animate={{ scale: 1, opacity: 1, y: 0 }}
-            className="relative bg-card border border-border shadow-2xl rounded-3xl p-8 w-full max-w-md"
+          <div 
+            className="animate-scaleIn relative bg-card border border-border shadow-2xl rounded-3xl p-8 w-full max-w-md"
           >
             <h2 className="text-2xl font-bold mb-2 text-center">Новый блокнот</h2>
             <p className="text-muted-foreground text-sm text-center mb-8">
@@ -227,9 +211,9 @@ export default function NotebookSelector({ onSelect }) {
                 </button>
               </div>
             </form>
-          </motion.div>
+          </div>
         </div>
       )}
-    </motion.div>
+    </div>
   );
 }

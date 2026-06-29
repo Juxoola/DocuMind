@@ -1,7 +1,7 @@
 // Панель инструментов чата: слайдеры параметров, выбор режима ответа.
 import React, { useState, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { motion, AnimatePresence } from 'framer-motion';
+
 import { ChevronDown, SlidersHorizontal, Sparkles, Zap, FileText, Check, ListChecks, ListOrdered, AlignLeft, Scale, GraduationCap, Smile } from 'lucide-react';
 import { cn } from '../lib/utils';
 
@@ -247,14 +247,9 @@ function AnswerModeSelect({ value, onChange }) {
       </button>
 
       {open && createPortal(
-        <AnimatePresence>
-          <motion.div
+          <div
             ref={menuRef}
             role="listbox"
-            initial={{ opacity: 0, y: -4, scale: 0.98 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: -4, scale: 0.98 }}
-            transition={{ duration: 0.12 }}
             style={{
               position: 'fixed',
               top: menuPos.top,
@@ -262,7 +257,7 @@ function AnswerModeSelect({ value, onChange }) {
               minWidth: 280,
               maxWidth: 360,
             }}
-            className="z-[100] bg-popover/95 backdrop-blur-xl border border-border/60 rounded-xl shadow-2xl overflow-hidden"
+            className="z-[100] bg-popover/95 backdrop-blur-md border border-border/60 rounded-xl shadow-2xl overflow-hidden animate-popIn"
             onMouseDown={(e) => e.stopPropagation()}
           >
             <div className="px-3 py-2 text-[9px] font-black uppercase tracking-widest text-muted-foreground/70 border-b border-white/5">
@@ -298,8 +293,7 @@ function AnswerModeSelect({ value, onChange }) {
                 </button>
               );
             })}
-          </motion.div>
-        </AnimatePresence>,
+          </div>,
         document.body
       )}
     </>
@@ -309,15 +303,11 @@ function AnswerModeSelect({ value, onChange }) {
 // Панель параметров генерации (тоггл-секция)
 export function TuningPanel({ isTuningOpen, maxTokens, setMaxTokens, thinkingMode, thinkingBudget, setThinkingBudget, contextStrategy, setContextStrategy }) {
   return (
-    <AnimatePresence>
-      {isTuningOpen && (
-        <motion.div
-          initial={{ height: 0, opacity: 0 }}
-          animate={{ height: 'auto', opacity: 1 }}
-          exit={{ height: 0, opacity: 0 }}
-          transition={{ type: 'spring', damping: 25, stiffness: 220 }}
-          className="border-b border-border bg-card/25 backdrop-blur-md overflow-hidden z-10"
-        >
+    <div className={cn(
+      "grid transition-all duration-250 ease-out border-b z-10",
+      isTuningOpen ? "grid-rows-[1fr] border-border bg-card/25 backdrop-blur-md" : "grid-rows-[0fr] border-transparent"
+    )}>
+      <div className="overflow-hidden">
           <div className="p-5 flex flex-col gap-5">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
               <SleekSlider
@@ -421,9 +411,8 @@ export function TuningPanel({ isTuningOpen, maxTokens, setMaxTokens, thinkingMod
               </div>
             </div>
           </div>
-        </motion.div>
-      )}
-    </AnimatePresence>
+        </div>
+      </div>
   );
 }
 

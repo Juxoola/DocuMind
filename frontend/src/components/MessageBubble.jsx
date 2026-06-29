@@ -1,16 +1,47 @@
 // Пузырь сообщения: рендер пользовательских и AI-ответов с источниками, закладками.
 import React, { useState, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { motion, AnimatePresence } from 'framer-motion';
 import { ChevronRight, Zap, Bookmark, BookmarkCheck, Copy, Check, X as XIcon } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import remarkMath from 'remark-math';
-import rehypeKatex from 'rehype-katex';
-import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
-import { atomDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
+import { PrismLight as SyntaxHighlighter } from 'react-syntax-highlighter';
+import atomDark from 'react-syntax-highlighter/dist/esm/styles/prism/atom-dark';
+import js from 'react-syntax-highlighter/dist/esm/languages/prism/javascript';
+import ts from 'react-syntax-highlighter/dist/esm/languages/prism/typescript';
+import py from 'react-syntax-highlighter/dist/esm/languages/prism/python';
+import bash from 'react-syntax-highlighter/dist/esm/languages/prism/bash';
+import jsonLang from 'react-syntax-highlighter/dist/esm/languages/prism/json';
+import yaml from 'react-syntax-highlighter/dist/esm/languages/prism/yaml';
+import sql from 'react-syntax-highlighter/dist/esm/languages/prism/sql';
+import cssLang from 'react-syntax-highlighter/dist/esm/languages/prism/css';
+import rustLang from 'react-syntax-highlighter/dist/esm/languages/prism/rust';
+import cppLang from 'react-syntax-highlighter/dist/esm/languages/prism/cpp';
+
+// Регистрируем только нужные языки — вместо ~2.5MB полного Prism
+SyntaxHighlighter.registerLanguage('javascript', js);
+SyntaxHighlighter.registerLanguage('js', js);
+SyntaxHighlighter.registerLanguage('jsx', js);
+SyntaxHighlighter.registerLanguage('typescript', ts);
+SyntaxHighlighter.registerLanguage('ts', ts);
+SyntaxHighlighter.registerLanguage('tsx', ts);
+SyntaxHighlighter.registerLanguage('python', py);
+SyntaxHighlighter.registerLanguage('py', py);
+SyntaxHighlighter.registerLanguage('bash', bash);
+SyntaxHighlighter.registerLanguage('sh', bash);
+SyntaxHighlighter.registerLanguage('shell', bash);
+SyntaxHighlighter.registerLanguage('json', jsonLang);
+SyntaxHighlighter.registerLanguage('yaml', yaml);
+SyntaxHighlighter.registerLanguage('yml', yaml);
+SyntaxHighlighter.registerLanguage('sql', sql);
+SyntaxHighlighter.registerLanguage('css', cssLang);
+SyntaxHighlighter.registerLanguage('rust', rustLang);
+SyntaxHighlighter.registerLanguage('rs', rustLang);
+SyntaxHighlighter.registerLanguage('cpp', cppLang);
+SyntaxHighlighter.registerLanguage('c', cppLang);
+SyntaxHighlighter.registerLanguage('html', cppLang);
+SyntaxHighlighter.registerLanguage('xml', cppLang);
 import { cn } from '../lib/utils';
-import { preProcessMessage } from '../lib/markdownRender';
+import { preProcessMessage, loadMathPlugins } from '../lib/markdownRender';
 import { CitationButton } from '../lib/CitationTooltip';
 import { extractCleanContent, copyAsRichText } from '../lib/copyToClipboard';
 import axios from 'axios';
@@ -59,23 +90,19 @@ const ThinkingBlock = ({ content, isStreaming }) => {
           </span>
         )}
       </button>
-      <AnimatePresence initial={false}>
-        {open && (
-          <motion.div
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: 'auto', opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            transition={{ duration: 0.2 }}
+      <div className={cn(
+        "grid transition-all duration-200 ease-out",
+        open ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0"
+      )}>
+        <div className="overflow-hidden">
+          <div
+            ref={bodyRef}
+            className="px-4 pb-4 pt-2 text-[11px] text-muted-foreground/90 italic border-t border-purple-500/10 whitespace-pre-wrap max-h-96 overflow-y-auto leading-relaxed custom-scrollbar bg-purple-500/5"
           >
-            <div
-              ref={bodyRef}
-              className="px-4 pb-4 pt-2 text-[11px] text-muted-foreground/90 italic border-t border-purple-500/10 whitespace-pre-wrap max-h-96 overflow-y-auto leading-relaxed custom-scrollbar bg-purple-500/5"
-            >
-              {content}
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+            {content}
+          </div>
+        </div>
+      </div>
     </div>
   );
 };
@@ -117,6 +144,15 @@ const MessageItem = React.memo(({
   const [copied, setCopied] = useState(false);
   const copyTimeoutRef = useRef(null);
   const bubbleRef = useRef(null);
+  const [mathPlugins, setMathPlugins] = useState(null);
+
+  // ── Lazy-загрузка math-плагинов: только при наличии $ в тексте ──
+  useEffect(() => {
+    if (mathPlugins) return;
+    if (msg.content && /\$\$[\s\S]*?\$\$|\$[^$\n]+?\$|\\[[\s\S]*?\\]/.test(msg.content)) {
+      loadMathPlugins().then(setMathPlugins);
+    }
+  }, [msg.content, mathPlugins]);
 
   const handleCopy = async () => {
     const extracted = extractCleanContent(bubbleRef.current);
@@ -225,8 +261,8 @@ const MessageItem = React.memo(({
         )}
         <div className="prose prose-invert prose-sm max-w-none">
           <ReactMarkdown
-            remarkPlugins={[remarkGfm, remarkMath]}
-            rehypePlugins={[rehypeKatex]}
+            remarkPlugins={[remarkGfm, ...(mathPlugins ? [mathPlugins.remarkMath] : [])]}
+            rehypePlugins={mathPlugins ? [mathPlugins.rehypeKatex] : []}
             components={{
               a: ({ href, children }) => {
                 if (href?.startsWith('#cite:')) {
@@ -381,11 +417,9 @@ const MessageItem = React.memo(({
   };
 
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 10 }}
-      animate={{ opacity: 1, y: 0 }}
+    <div
       className={cn(
-        "flex w-full",
+        "flex w-full animate-fadeInUp",
         msg.role === 'user' ? "justify-end" : "justify-start"
       )}
     >
@@ -398,15 +432,10 @@ const MessageItem = React.memo(({
 
       {/* Попап закладки */}
       {bmPopover && msg.role === 'ai' && createPortal(
-        <AnimatePresence>
-          <motion.div
+          <div
             ref={bmPopoverRef}
-            initial={{ opacity: 0, y: -4, scale: 0.96 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: -4, scale: 0.96 }}
-            transition={{ duration: 0.12 }}
             style={{ position: 'fixed', top: bmCoords.top, left: bmCoords.left, zIndex: 9999 }}
-            className="w-80 p-3 bg-card border border-border shadow-2xl rounded-2xl"
+            className="w-80 p-3 bg-card border border-border shadow-2xl rounded-2xl animate-scaleIn"
             onClick={(e) => e.stopPropagation()}
             onMouseDown={(e) => e.stopPropagation()}
           >
@@ -453,11 +482,10 @@ const MessageItem = React.memo(({
                 {bmSaving ? 'Сохранение…' : 'Сохранить'}
               </button>
             </div>
-          </motion.div>
-        </AnimatePresence>,
+          </div>,
         document.body
       )}
-    </motion.div>
+    </div>
   );
 }, (prev, next) => {
   return (

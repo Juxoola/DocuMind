@@ -2,12 +2,6 @@
 import '@testing-library/jest-dom/vitest'
 import React from 'react'
 
-// ── Mock framer-motion ──
-vi.mock('framer-motion', () => ({
-  motion: new Proxy({}, { get: () => 'div' }),
-  AnimatePresence: ({ children }) => children,
-}))
-
 // ── Mock lucide-react icons — use createElement to avoid JSX in .js ──
 vi.mock('lucide-react', () => {
   const names = [
@@ -19,7 +13,8 @@ vi.mock('lucide-react', () => {
     'Bookmark', 'BookmarkCheck', 'Tag', 'RotateCcw',
     'Eye', 'Pencil', 'Copy', 'Check',
     'ListChecks', 'ListOrdered', 'AlignLeft', 'Scale',
-    'GraduationCap', 'Smile',
+    'GraduationCap', 'Smile', 'Layout', 'PowerOff', 'Video', 'Music',
+    'FileCode', 'FileSpreadsheet', 'File', 'AlertCircle', 'Download',
   ]
   const icons = {}
   names.forEach(name => {
@@ -46,11 +41,26 @@ vi.mock('remark-gfm', () => ({ default: () => {} }))
 vi.mock('remark-math', () => ({ default: () => {} }))
 vi.mock('rehype-katex', () => ({ default: () => {} }))
 
-// ── Mock react-syntax-highlighter ──
+// ── Mock react-syntax-highlighter (PrismLight) ──
+const SyntaxHighlighterMock = ({ children }) => React.createElement('pre', { 'data-testid': 'syntax' }, children);
+SyntaxHighlighterMock.registerLanguage = () => {};
+SyntaxHighlighterMock.registerLanguage = SyntaxHighlighterMock.registerLanguage;
 vi.mock('react-syntax-highlighter', () => ({
-  Prism: ({ children }) => React.createElement('pre', { 'data-testid': 'syntax' }, children),
+  PrismLight: Object.assign(({ children }) => React.createElement('pre', { 'data-testid': 'syntax' }, children), {
+    registerLanguage: () => {},
+  }),
 }))
-vi.mock('react-syntax-highlighter/dist/esm/styles/prism', () => ({ atomDark: {} }))
+vi.mock('react-syntax-highlighter/dist/esm/styles/prism/atom-dark', () => ({ default: {} }))
+vi.mock('react-syntax-highlighter/dist/esm/languages/prism/javascript', () => ({ default: {} }))
+vi.mock('react-syntax-highlighter/dist/esm/languages/prism/typescript', () => ({ default: {} }))
+vi.mock('react-syntax-highlighter/dist/esm/languages/prism/python', () => ({ default: {} }))
+vi.mock('react-syntax-highlighter/dist/esm/languages/prism/bash', () => ({ default: {} }))
+vi.mock('react-syntax-highlighter/dist/esm/languages/prism/json', () => ({ default: {} }))
+vi.mock('react-syntax-highlighter/dist/esm/languages/prism/yaml', () => ({ default: {} }))
+vi.mock('react-syntax-highlighter/dist/esm/languages/prism/sql', () => ({ default: {} }))
+vi.mock('react-syntax-highlighter/dist/esm/languages/prism/css', () => ({ default: {} }))
+vi.mock('react-syntax-highlighter/dist/esm/languages/prism/rust', () => ({ default: {} }))
+vi.mock('react-syntax-highlighter/dist/esm/languages/prism/cpp', () => ({ default: {} }))
 
 // ── Mock @tanstack/react-virtual ──
 vi.mock('@tanstack/react-virtual', () => ({

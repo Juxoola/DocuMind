@@ -1,9 +1,8 @@
 // Основной layout: боковая панель + чат + просмотрщик документов.
-import React, { useState, useEffect, useRef } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import React, { useState, useEffect, useRef, lazy, Suspense } from 'react';
 import Sidebar from './Sidebar';
 import ChatArea from './ChatArea';
-import DocumentViewer from './DocumentViewer';
+const DocumentViewer = lazy(() => import('./DocumentViewer'));
 import { ChevronRight } from 'lucide-react';
 import { cn } from '../lib/utils';
 
@@ -12,6 +11,7 @@ export default function MainApp({ notebook, onExit }) {
   const [selectedSources, setSelectedSources] = useState([]);
   const [viewerFile, setViewerFile] = useState(null);
   const [isViewerOpen, setIsViewerOpen] = useState(false);
+  const [viewerClosing, setViewerClosing] = useState(false);
   const [viewerWidth, setViewerWidth] = useState(600);
   const [isResizing, setIsResizing] = useState(false);
   const [sidebarWidth, setSidebarWidth] = useState(300);
@@ -20,7 +20,9 @@ export default function MainApp({ notebook, onExit }) {
     return saved ? parseInt(saved) : 1400;
   });
   const viewerDragCleanupRef = useRef(null);
+  const viewerPanelRef = useRef(null);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  const [sidebarClosing, setSidebarClosing] = useState(false);
   const [uploadState, setUploadState] = useState({
     isUploading: false,
     progress: 0,
@@ -278,21 +280,39 @@ export default function MainApp({ notebook, onExit }) {
 
   const handleExit = () => {
     setIsViewerOpen(false);
+    setViewerClosing(false);
     setViewerFile(null);
     onExit();
+  };
+
+  const closeViewer = () => {
+    if (!isViewerOpen || viewerClosing) return;
+    setViewerClosing(true);
+  };
+
+  const onViewerCloseAnimationEnd = () => {
+    setIsViewerOpen(false);
+    setViewerClosing(false);
+    setViewerFile(null);
+  };
+
+  const closeSidebar = () => {
+    if (!isSidebarOpen || sidebarClosing) return;
+    setSidebarClosing(true);
+  };
+
+  const onSidebarCloseAnimationEnd = () => {
+    setIsSidebarOpen(false);
+    setSidebarClosing(false);
   };
 
   return (
     <div className="flex h-screen w-full overflow-hidden bg-background relative">
 
-      <AnimatePresence initial={false}>
-        {isSidebarOpen && (
-          <motion.div
-            initial={{ x: '-100%', opacity: 0 }}
-            animate={{ x: 0, opacity: 1 }}
-            exit={{ x: '-100%', opacity: 0 }}
-            transition={{ type: 'spring', damping: 25, stiffness: 200 }}
-            className="fixed left-0 top-0 bottom-0 border-r z-[100] bg-background shadow-2xl flex-shrink-0"
+      {(isSidebarOpen || sidebarClosing) && (
+          <div
+            onAnimationEnd={sidebarClosing ? onSidebarCloseAnimationEnd : undefined}
+            className={`fixed left-0 top-0 bottom-0 border-r z-[100] bg-background shadow-2xl flex-shrink-0 ${sidebarClosing ? 'animate-slideOutLeft' : 'animate-slideInLeft'}`}
             style={{ width: sidebarWidth }}
           >
             <Sidebar 
@@ -304,7 +324,7 @@ export default function MainApp({ notebook, onExit }) {
               onExit={handleExit}
               onOpenFile={openViewer}
               width={sidebarWidth}
-              onToggle={() => setIsSidebarOpen(false)}
+              onToggle={closeSidebar}
               uploadState={uploadState}
               onUpload={handleUpload}
             />
@@ -314,20 +334,17 @@ export default function MainApp({ notebook, onExit }) {
               className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize z-50 group/s-resizer hover:bg-primary/30 transition-colors"
               onMouseDown={onSidebarMouseDown}
             />
-          </motion.div>
+          </div>
         )}
-      </AnimatePresence>
 
 
       {!isSidebarOpen && (
-        <motion.button 
-          initial={{ opacity: 0, x: -20 }}
-          animate={{ opacity: 1, x: 0 }}
+        <button 
           onClick={() => setIsSidebarOpen(true)}
-          className="fixed top-4 left-4 z-[100] w-10 h-10 bg-card border border-border rounded-xl flex items-center justify-center shadow-lg hover:bg-muted transition-all text-muted-foreground"
+          className="fixed top-4 left-4 z-[100] w-10 h-10 bg-card border border-border rounded-xl flex items-center justify-center shadow-lg hover:bg-muted transition-all text-muted-foreground animate-fadeIn"
         >
           <ChevronRight size={20} />
-        </motion.button>
+        </button>
       )}
 
 
@@ -377,27 +394,20 @@ export default function MainApp({ notebook, onExit }) {
       </main>
 
 
-      <AnimatePresence>
-        {isViewerOpen && (
+      {(isViewerOpen || viewerClosing) && (
           <>
-            <motion.div 
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => setIsViewerOpen(false)}
-              className="fixed inset-0 bg-black/40 backdrop-blur-sm z-40"
+            <div 
+              onClick={closeViewer}
+              onAnimationEnd={viewerClosing ? onViewerCloseAnimationEnd : undefined}
+              className={`fixed inset-0 bg-black/40 backdrop-blur-sm z-40 ${viewerClosing ? 'animate-fadeOut' : 'animate-fadeIn'}`}
             />
-            <motion.div
-              initial={{ x: '100%' }}
-              animate={{ x: 0 }}
-              exit={{ x: '100%' }}
-              transition={{ type: 'spring', damping: 25, stiffness: 200 }}
+            <div
+              ref={viewerPanelRef}
               style={{ width: viewerWidth }}
-              className="fixed right-0 top-0 bottom-0 glass z-50 border-l flex flex-col shadow-2xl"
+              className={`fixed right-0 top-0 bottom-0 glass z-50 border-l flex flex-col shadow-2xl ${viewerClosing ? 'animate-slideOutRight' : 'animate-slideInRight'}`}
             >
 
               {isResizing && <div className="fixed inset-0 z-[100] cursor-col-resize" />}
-
 
               <div
                 className="absolute left-0 top-0 bottom-0 w-4 -left-2 cursor-col-resize z-[60] group/resizer"
@@ -406,19 +416,25 @@ export default function MainApp({ notebook, onExit }) {
                   setIsResizing(true);
                   const startX = e.clientX;
                   const startWidth = viewerWidth;
+                  const panel = viewerPanelRef.current;
+                  // Прямое DOM-обновление ширины: без React re-render, без reflow iframe
                   const onMouseMove = (e) => {
                     const newWidth = startWidth + (startX - e.clientX);
                     if (newWidth > 350 && newWidth < window.innerWidth * 0.9) {
-                      setViewerWidth(newWidth);
+                      if (panel) panel.style.width = newWidth + 'px';
                     }
                   };
-                  const onMouseUp = () => {
+                  const onMouseUp = (e) => {
                     setIsResizing(false);
                     document.removeEventListener('mousemove', onMouseMove);
                     document.removeEventListener('mouseup', onMouseUp);
                     viewerDragCleanupRef.current = null;
+                    // Коммит финальной ширины в React state только один раз
+                    const finalWidth = startWidth + (startX - e.clientX);
+                    if (finalWidth > 350 && finalWidth < window.innerWidth * 0.9) {
+                      setViewerWidth(finalWidth);
+                    }
                   };
-
                   viewerDragCleanupRef.current = onMouseUp;
                   document.addEventListener('mousemove', onMouseMove);
                   document.addEventListener('mouseup', onMouseUp);
@@ -427,26 +443,28 @@ export default function MainApp({ notebook, onExit }) {
                 <div className="w-[1.5px] h-full bg-border group-hover/resizer:bg-primary/50 mx-auto transition-colors shadow-[0_0_5px_rgba(var(--primary),0.2)]" />
               </div>
 
-              <div className={cn("flex-1 flex flex-col min-h-0 overflow-hidden", isResizing && "pointer-events-none select-none")}>
-                <DocumentViewer 
-                  file={viewerFile} 
-                  notebook={notebook}
-                  onClose={() => setIsViewerOpen(false)} 
-                />
+              <div className={cn("flex-1 flex flex-col min-h-0 overflow-hidden", isResizing && "pointer-events-none select-none")}
+                   style={{ contain: 'layout' }}>
+                <Suspense fallback={
+                  <div className="h-full flex items-center justify-center text-muted-foreground">
+                    <div className="w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+                  </div>
+                }>
+                  <DocumentViewer 
+                    file={viewerFile} 
+                    notebook={notebook}
+                    onClose={closeViewer} 
+                  />
+                </Suspense>
               </div>
-            </motion.div>
+            </div>
           </>
         )}
-      </AnimatePresence>
 
 
-      <AnimatePresence>
-        {uploadState.isUploading && (
-          <motion.div
-            initial={{ opacity: 0, y: 50, scale: 0.9 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: 50, scale: 0.9 }}
-            className="fixed bottom-6 right-6 z-[1000] w-72 glass border border-primary/20 rounded-3xl p-5 shadow-[0_20px_50px_rgba(0,0,0,0.3)] overflow-hidden"
+      {uploadState.isUploading && (
+          <div
+            className="fixed bottom-6 right-6 z-[1000] w-72 glass border border-primary/20 rounded-3xl p-5 shadow-[0_20px_50px_rgba(0,0,0,0.3)] overflow-hidden animate-popIn"
           >
 
             <div className="absolute -top-10 -right-10 w-24 h-24 bg-primary/20 blur-[40px] rounded-full pointer-events-none" />
@@ -479,10 +497,9 @@ export default function MainApp({ notebook, onExit }) {
                     <span className="text-[9px] font-bold text-primary">{Math.round(uploadState.progress)}%</span>
                   </div>
                   <div className="w-full h-1.5 bg-primary/10 rounded-full overflow-hidden shadow-inner">
-                    <motion.div 
-                      className="bg-primary h-full shadow-[0_0_10px_rgba(var(--primary),0.3)]"
-                      initial={{ width: 0 }}
-                      animate={{ width: `${uploadState.progress}%` }}
+                    <div 
+                      className="bg-primary h-full shadow-[0_0_10px_rgba(var(--primary),0.3)] transition-[width] duration-300 ease-out"
+                      style={{ width: `${uploadState.progress}%` }}
                     />
                   </div>
                 </div>
@@ -493,10 +510,9 @@ export default function MainApp({ notebook, onExit }) {
                     <span className="text-[9px] font-bold text-muted-foreground">{Math.round(uploadState.batchProgress)}%</span>
                   </div>
                   <div className="w-full h-1 bg-muted rounded-full overflow-hidden">
-                    <motion.div 
-                      className="bg-muted-foreground/40 h-full"
-                      initial={{ width: 0 }}
-                      animate={{ width: `${uploadState.batchProgress}%` }}
+                    <div 
+                      className="bg-muted-foreground/40 h-full transition-[width] duration-300 ease-out"
+                      style={{ width: `${uploadState.batchProgress}%` }}
                     />
                   </div>
                 </div>
@@ -508,9 +524,8 @@ export default function MainApp({ notebook, onExit }) {
                 </p>
               </div>
             </div>
-          </motion.div>
+          </div>
         )}
-      </AnimatePresence>
     </div>
   );
 }

@@ -11,7 +11,6 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from fastapi.staticfiles import StaticFiles
 
 import config
 from routers.notebooks import _NB_ID_PATTERN
@@ -211,7 +210,27 @@ async def health():
 
 
 os.makedirs(os.path.join(config.BASE_DIR, "static"), exist_ok=True)
-app.mount("/static", StaticFiles(directory=os.path.join(config.BASE_DIR, "static")), name="static")
+
+from starlette.staticfiles import StaticFiles as _StaticFiles
+
+
+class _CachedStaticFiles(_StaticFiles):
+    """StaticFiles с Cache-Control заголовками."""
+
+    async def get_response(self, path, scope):
+        response = await super().get_response(path, scope)
+        if response.status_code == 200:
+            # JS/CSS/pdf.js — долгий кеш, статика не меняется в рантайме
+            if path.endswith((".js", ".css", ".wasm")):
+                response.headers["Cache-Control"] = "public, max-age=604800, immutable"
+            elif path.endswith((".woff2", ".woff", ".ttf")):
+                response.headers["Cache-Control"] = "public, max-age=2592000, immutable"
+        return response
+
+
+app.mount(
+    "/static", _CachedStaticFiles(directory=os.path.join(config.BASE_DIR, "static")), name="static"
+)
 
 
 # Кастомный endpoint для раздачи файлов из notebooks/

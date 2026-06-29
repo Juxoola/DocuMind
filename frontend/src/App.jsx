@@ -3,28 +3,38 @@ import React, { useState } from 'react';
 import NotebookSelector from './components/NotebookSelector';
 import MainApp from './components/MainApp';
 import ErrorBoundary from './components/ErrorBoundary';
-import { AnimatePresence } from 'framer-motion';
 
 function App() {
   const [currentNotebook, setCurrentNotebook] = useState(null);
+  const [transitioning, setTransitioning] = useState(null); // 'open' | 'close' | null
+
+  const handleSelect = (nb) => {
+    setTransitioning('open');
+    setCurrentNotebook(nb);
+  };
+
+  const handleExit = () => {
+    setTransitioning('close');
+    setCurrentNotebook(null);
+  };
 
   return (
     <ErrorBoundary>
       <div className="min-h-screen bg-background text-foreground overflow-hidden">
-        <AnimatePresence mode="wait">
-          {!currentNotebook ? (
+        {!currentNotebook ? (
+          <div className={`transition-opacity duration-300 ${transitioning === 'close' ? 'animate-fadeIn' : ''}`}>
             <NotebookSelector
-              key="selector"
-              onSelect={(nb) => setCurrentNotebook(nb)}
+              onSelect={handleSelect}
             />
-          ) : (
+          </div>
+        ) : (
+          <div className={`animate-fadeIn`}>
             <MainApp
-              key="app"
               notebook={currentNotebook}
-              onExit={() => setCurrentNotebook(null)}
+              onExit={handleExit}
             />
-          )}
-        </AnimatePresence>
+          </div>
+        )}
       </div>
     </ErrorBoundary>
   );

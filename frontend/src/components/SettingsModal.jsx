@@ -1,12 +1,11 @@
 // Модалка настроек: LLM, RAG, GGUF-модели, конфигурация.
 import React, { useState, useEffect } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
 import { X, Save, Cpu, RefreshCw } from 'lucide-react';
 import { cn } from '../lib/utils';
 import LLMSettings from './LLMSettings';
 import RAGSettings from './RAGSettings';
 
-export default function SettingsModal({ isOpen, onClose, settings, onSave }) {
+export default function SettingsModal({ isOpen, closing, onClose, onAnimEnd, settings, llmStatus, onSave }) {
     // ── Состояние компонента ──
     const [localSettings, setLocalSettings] = useState(settings);
     const [activeTab, setActiveTab] = useState('llm');
@@ -30,29 +29,12 @@ export default function SettingsModal({ isOpen, onClose, settings, onSave }) {
         }
     }, [isOpen, settings]);
 
-    // ── SSE-подключение для отслеживания загрузки модели ──
+    // ── Используем llmStatus из пропсов вместо дублирующего EventSource ──
     useEffect(() => {
-        if (!isOpen) return;
-        let es;
-        let reconnectTimer;
-        const connect = () => {
-            es = new EventSource('/api/llm-status/stream');
-            es.onmessage = (e) => {
-                try {
-                    const data = JSON.parse(e.data);
-                    setLlmLoadState(prev => ({ ...prev, ...data }));
-                } catch (err) { }
-            };
-            es.onerror = () => {
-                if (es) { es.close(); es = null; }
-                reconnectTimer = setTimeout(connect, 2000);
-            };
-        };
-        connect();
-        return () => {
-                clearTimeout(reconnectTimer);
-        };
-    }, [isOpen]);
+        if (llmStatus) {
+            setLlmLoadState(prev => ({ ...prev, ...llmStatus }));
+        }
+    }, [llmStatus]);
 
     // ── API-запросы для управления конфигурацией ──
     const fetchRagConfig = async () => {
@@ -185,25 +167,19 @@ export default function SettingsModal({ isOpen, onClose, settings, onSave }) {
     };
 
     // ── Рендер модального окна настроек ──
-    if (!isOpen) return null;
+    if (!isOpen && !closing) return null;
 
     return (
-        <AnimatePresence>
-            <div className="fixed inset-0 z-[10000] flex items-center justify-center p-4">
-                <motion.div 
-                    initial={{ opacity: 0 }}
-                    animate={{ opacity: 1 }}
-                    exit={{ opacity: 0 }}
-                    onClick={onClose}
-                    className="absolute inset-0 bg-black/60 backdrop-blur-md"
-                />
-                
-                <motion.div
-                    initial={{ scale: 0.9, opacity: 0, y: 20 }}
-                    animate={{ scale: 1, opacity: 1, y: 0 }}
-                    exit={{ scale: 0.9, opacity: 0, y: 20 }}
-                    className="relative w-full max-w-lg bg-card border border-border shadow-2xl rounded-3xl overflow-hidden max-h-[90vh] flex flex-col"
-                >
+        <div className="fixed inset-0 z-[10000] flex items-center justify-center p-4">
+            <div 
+                onClick={closing ? undefined : onClose}
+                onAnimationEnd={closing ? onAnimEnd : undefined}
+                className={`absolute inset-0 bg-black/60 backdrop-blur-md ${closing ? 'animate-fadeOut' : 'animate-fadeIn'}`}
+            />
+            
+            <div
+                className={`relative w-full max-w-lg bg-card border border-border shadow-2xl rounded-3xl overflow-hidden max-h-[90vh] flex flex-col ${closing ? 'animate-scaleOut' : 'animate-scaleIn'}`}
+            >
                     <div className="flex items-center justify-between p-6 border-b border-border/50 flex-shrink-0">
                         <h2 className="text-xl font-bold flex items-center gap-2">
                             <span className="p-2 bg-primary/10 rounded-xl text-primary">
@@ -243,6 +219,7 @@ export default function SettingsModal({ isOpen, onClose, settings, onSave }) {
 
                     <div className="flex-1 overflow-y-auto">
                         {activeTab === 'llm' && (
+                            <div key="llm-tab" className="animate-fadeIn">
                             <LLMSettings
                                 localSettings={localSettings}
                                 setLocalSettings={setLocalSettings}
@@ -260,14 +237,17 @@ export default function SettingsModal({ isOpen, onClose, settings, onSave }) {
                                 toggleDir={toggleDir}
                                 updateSearchDirs={updateSearchDirs}
                             />
+                            </div>
                         )}
 
                         {activeTab === 'rag' && (
+                            <div key="rag-tab" className="animate-fadeIn">
                             <RAGSettings
                                 ragConfig={ragConfig}
                                 setRagConfig={setRagConfig}
                                 ggufModels={ggufModels}
                             />
+                            </div>
                         )}
                     </div>
 
@@ -292,8 +272,7 @@ export default function SettingsModal({ isOpen, onClose, settings, onSave }) {
                             <Save size={16} /> Сохранить
                         </button>
                     </div>
-                </motion.div>
+                </div>
             </div>
-        </AnimatePresence>
     );
 }

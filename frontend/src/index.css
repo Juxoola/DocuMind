@@ -36,7 +36,7 @@
 }
 
 @utility glass {
-  @apply bg-background/60 backdrop-blur-xl border-border/50;
+  @apply bg-background/60 backdrop-blur-md border-border/50;
 }
 
 @utility glass-card {
@@ -72,6 +72,82 @@
 }
 .prose {
   @apply max-w-full;
+}
+
+/* ── CSS-анимации: замена framer-motion ── */
+@keyframes fadeInUp {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes fadeOut {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+@keyframes slideOutRight {
+  from { transform: translateX(0); }
+  to { transform: translateX(100%); }
+}
+@keyframes slideInRight {
+  from { transform: translateX(100%); }
+  to { transform: translateX(0); }
+}
+@keyframes slideInLeft {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(0); }
+}
+@keyframes slideOutLeft {
+  from { transform: translateX(0); }
+  to { transform: translateX(-100%); }
+}
+@keyframes scaleIn {
+  from { opacity: 0; transform: scale(0.96) translateY(-4px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
+}
+@keyframes scaleOut {
+  from { opacity: 1; transform: scale(1) translateY(0); }
+  to { opacity: 0; transform: scale(0.96) translateY(-4px); }
+}
+@keyframes popIn {
+  from { opacity: 0; transform: scale(0.9); }
+  to { opacity: 1; transform: scale(1); }
+}
+.animate-fadeInUp {
+  animation: fadeInUp 0.2s ease-out both;
+}
+.animate-fadeIn {
+  animation: fadeIn 0.15s ease-out both;
+}
+.animate-slideInRight {
+  animation: slideInRight 0.3s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.animate-slideInLeft {
+  animation: slideInLeft 0.25s ease-out both;
+}
+.animate-slideOutLeft {
+  animation: slideOutLeft 0.25s ease-in both;
+}
+.animate-scaleIn {
+  animation: scaleIn 0.15s ease-out both;
+}
+.animate-popIn {
+  animation: popIn 0.12s ease-out both;
+}
+.animate-fadeOut {
+  animation: fadeOut 0.2s ease-in both;
+}
+.animate-slideOutRight {
+  animation: slideOutRight 0.25s cubic-bezier(0.4, 0, 1, 1) both;
+}
+.animate-scaleOut {
+  animation: scaleOut 0.2s ease-in both;
+}
+/* Контейнер анимации: отключаем transition для дочерних framer-motion замен */
+.no-transition > * {
+  animation-fill-mode: both;
 }
 
 /* Custom Scrollbar Styles */

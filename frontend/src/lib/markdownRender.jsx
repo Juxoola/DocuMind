@@ -1,10 +1,22 @@
 // Рендер markdown-сообщений LLM: цитаты [N], LaTeX, блоки кода.
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import remarkMath from 'remark-math';
-import rehypeKatex from 'rehype-katex';
 import { CitationButton, CitationTooltipPortal } from './CitationTooltip';
+
+// ── Lazy-загрузка math-плагинов: грузим только при наличии $ в тексте ──
+let remarkMath = null;
+let rehypeKatex = null;
+
+export async function loadMathPlugins() {
+  if (!remarkMath) {
+    [remarkMath, rehypeKatex] = await Promise.all([
+      import('remark-math'),
+      import('rehype-katex'),
+    ]);
+  }
+  return { remarkMath: remarkMath.default, rehypeKatex: rehypeKatex.default };
+}
 
 // ── Предобработка текста: конвертация LaTeX, цитат [N], блоков кода ──
 export function preProcessMessage(text) {
@@ -38,7 +50,20 @@ export function preProcessMessage(text) {
 
 export function LlmMarkdown({ text, sources = [], onCite, className = '' }) {
   const [hovered, setHovered] = useState(null);
+  const [mathPlugins, setMathPlugins] = useState(null);
   const timeoutRef = useRef(null);
+
+  // ── Определяем наличие LaTeX и грузим плагины лениво ──
+  const hasMath = useMemo(() => {
+    if (!text) return false;
+    return /\$\$[\s\S]*?\$\$|\$[^$\n]+?\$|\\[[\s\S]*?\\]|\\([\s\S]*?\\)/.test(text);
+  }, [text]);
+
+  useEffect(() => {
+    if (hasMath && !mathPlugins) {
+      loadMathPlugins().then(setMathPlugins);
+    }
+  }, [hasMath, mathPlugins]);
 
   // ── Хуки для управления тултипом цитат ──
   const cancelClose = () => {
@@ -63,8 +88,8 @@ export function LlmMarkdown({ text, sources = [], onCite, className = '' }) {
     <>
       <div className={`prose prose-invert prose-sm max-w-none ${className}`}>
         <ReactMarkdown
-          remarkPlugins={[remarkGfm, remarkMath]}
-          rehypePlugins={[rehypeKatex]}
+          remarkPlugins={[remarkGfm, ...(mathPlugins ? [mathPlugins.remarkMath] : [])]}
+          rehypePlugins={mathPlugins ? [mathPlugins.rehypeKatex] : []}
           components={{
             a: ({ href, children }) => {
               if (href?.startsWith('#cite:')) {

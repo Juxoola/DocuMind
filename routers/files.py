@@ -366,6 +366,7 @@ async def delete_file(filename: str, notebook_id: str):
 
     notebook_id = validate_nb_id(notebook_id)
     filename = safe_filename(filename)
+    _source_content_cache.pop(f"{notebook_id}:{filename}", None)
     paths = config.get_notebook_paths(notebook_id)
     file_path = os.path.join(paths["data"], filename)
     if os.path.exists(file_path):
@@ -417,6 +418,22 @@ async def delete_file(filename: str, notebook_id: str):
     return {"status": "ok"}
 
 
+# ── Кеш source_content: {key: (timestamp, text)} — TTL 5 минут ──
+_source_content_cache: dict[str, tuple[float, str]] = {}
+_CACHE_TTL = 300
+
+
+def _get_cached_source(key: str) -> str | None:
+    entry = _source_content_cache.get(key)
+    if entry and (time.time() - entry[0]) < _CACHE_TTL:
+        return entry[1]
+    return None
+
+
+def _set_cached_source(key: str, text: str):
+    _source_content_cache[key] = (time.time(), text)
+
+
 @router.get("/api/source_content")
 async def get_source_content(filename: str, notebook_id: str):
     filename = safe_filename(filename)
@@ -424,9 +441,15 @@ async def get_source_content(filename: str, notebook_id: str):
     paths = config.get_notebook_paths(notebook_id)
     file_path = os.path.join(paths["data"], filename)
 
+    cache_key = f"{notebook_id}:{filename}"
+    cached = _get_cached_source(cache_key)
+    if cached is not None:
+        return {"text": cached}
+
     if ext == ".pdf":
         text = await asyncio.to_thread(_build_interleaved_text, file_path, paths["data"], filename)
         if text:
+            _set_cached_source(cache_key, text)
             return {"text": text}
     try:
         from src.rag.indexing import get_vector_store
@@ -436,6 +459,7 @@ async def get_source_content(filename: str, notebook_id: str):
         result = await asyncio.to_thread(collection.get, where={"file_name": filename})
         if result and result.get("documents"):
             full_text = "\n\n---\n\n".join(result["documents"])
+            _set_cached_source(cache_key, full_text)
             return {"text": full_text}
     except Exception:
         pass
@@ -680,6 +704,11 @@ async def get_video_metadata(filename: str, notebook_id: str):
 @router.delete("/api/clear")
 async def clear_notebook(notebook_id: str):
     from src.rag.indexing import close_all_clients as _close_all
+
+    # Очищаем кеш source_content для этого блокнота
+    _prefix = f"{notebook_id}:"
+    for k in [k for k in _source_content_cache if k.startswith(_prefix)]:
+        del _source_content_cache[k]
 
     async def _clear_data():
         await _close_all()

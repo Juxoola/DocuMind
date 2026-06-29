@@ -1,6 +1,5 @@
 // Просмотрщик документов: PDF, изображения, видео, аудио, текст.
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { motion } from 'framer-motion';
 import { X, FileText, Play, Image as ImageIcon, Clock, AlertCircle, Download, ChevronDown } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -124,6 +123,18 @@ export default function DocumentViewer({ file, notebook, onClose }) {
     { fmt: 'pdf', label: 'PDF (.pdf)', icon: '📑' },
   ];
 
+  // ── Мемоизация markdown-контента: не перепарсивать при toggle вкладок ──
+  const renderedContent = useMemo(() => {
+    if (!content) return null;
+    return (
+      <div className="md-content max-w-none">
+        <ReactMarkdown remarkPlugins={[remarkGfm]}>
+          {content}
+        </ReactMarkdown>
+      </div>
+    );
+  }, [content]);
+
   // Закрытие дропдауна по клику снаружи
   useEffect(() => {
     if (!showExportMenu) return;
@@ -234,7 +245,7 @@ export default function DocumentViewer({ file, notebook, onClose }) {
               <ChevronDown size={12} />
             </button>
             {showExportMenu && (
-              <div data-export-menu className="absolute right-0 top-full mt-1 bg-card border border-border/60 rounded-xl shadow-xl z-50 py-1 min-w-[160px]">
+              <div data-export-menu className="absolute right-0 top-full mt-1 bg-card border border-border/60 rounded-xl shadow-xl z-50 py-1 min-w-[160px] animate-scaleIn">
                 {exportFormats.map(({ fmt, label, icon }) => (
                   <button
                     key={fmt}
@@ -260,11 +271,9 @@ export default function DocumentViewer({ file, notebook, onClose }) {
         ) : showImagesOnly ? (
           <div className="h-full overflow-y-auto p-6 space-y-6 custom-scrollbar bg-muted/5">
             {videoMeta?.frames?.map((f, i) => (
-              <motion.div 
+              <div 
                 key={i}
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                className="bg-card border border-border/50 rounded-2xl overflow-hidden shadow-md"
+                className="bg-card border border-border/50 rounded-2xl overflow-hidden shadow-md animate-fadeInUp"
               >
                 <div className="p-3 border-b bg-muted/20 flex items-center justify-between">
                   <span className="text-[10px] font-black uppercase tracking-widest text-primary">Стр {f.page}</span>
@@ -287,16 +296,12 @@ export default function DocumentViewer({ file, notebook, onClose }) {
                     </div>
                   </div>
                 </div>
-              </motion.div>
+              </div>
             ))}
           </div>
         ) : showRawText ? (
           <div className="flex-1 p-8 overflow-y-auto custom-scrollbar min-h-0">
-            <div className="md-content max-w-none">
-              <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                {content || 'Текст пуст или извлекается...'}
-              </ReactMarkdown>
-            </div>
+            {renderedContent || <p className="text-muted-foreground text-sm">Текст пуст или извлекается...</p>}
           </div>
         ) : isPdf ? (
           <iframe 
@@ -379,19 +384,13 @@ export default function DocumentViewer({ file, notebook, onClose }) {
                   feedItems.map((ev, i) => {
                     const isActive = activeIndex === i;
                     return (
-                      <motion.div 
+                      <div 
                         key={i}
                         ref={el => itemRefs.current[i] = el}
-                        initial={{ opacity: 0, x: 20 }}
-                        animate={{ 
-                          opacity: 1, 
-                          x: 0,
-                          scale: isActive ? 1.02 : 1,
-                        }}
                         className={cn(
-                          "group p-4 rounded-2xl transition-all duration-300 cursor-pointer border",
+                          "group p-4 rounded-2xl transition-all duration-300 cursor-pointer border animate-fadeIn",
                           isActive 
-                            ? "bg-primary/10 border-primary/40 shadow-[0_8px_20px_rgba(var(--primary),0.1)] ring-1 ring-primary/20" 
+                            ? "bg-primary/10 border-primary/40 shadow-[0_8px_20px_rgba(var(--primary),0.1)] ring-1 ring-primary/20 scale-[1.02]" 
                             : "bg-muted/30 border-border/40 hover:border-primary/30 hover:bg-muted/50"
                         )}
                         onClick={() => seekMedia(ev.time)}
@@ -428,7 +427,7 @@ export default function DocumentViewer({ file, notebook, onClose }) {
                             {ev.text || ev.description || ''}
                           </ReactMarkdown>
                         </div>
-                      </motion.div>
+                      </div>
                     );
                   })
                 ) : (
@@ -463,13 +462,11 @@ export default function DocumentViewer({ file, notebook, onClose }) {
               </div>
             ) : (
               pptxData.slides?.map((slide, i) => (
-                <motion.div 
+                <div 
                   key={i}
                   ref={el => itemRefs.current[slide.number] = el}
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
                   className={cn(
-                    "bg-card border rounded-3xl overflow-hidden shadow-xl transition-all",
+                    "bg-card border rounded-3xl overflow-hidden shadow-xl transition-all animate-fadeInUp",
                     page === slide.number ? "ring-2 ring-primary border-primary/50" : "border-border/50"
                   )}
                 >
@@ -505,7 +502,7 @@ export default function DocumentViewer({ file, notebook, onClose }) {
                       </div>
                     )}
                   </div>
-                </motion.div>
+                </div>
               ))
             )}
           </div>

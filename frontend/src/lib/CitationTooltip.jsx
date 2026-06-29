@@ -1,7 +1,6 @@
 // Тултип-цитата: кнопка [N] и всплывающее окно с текстом источника.
 import React, { useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { motion, AnimatePresence } from 'framer-motion';
 import { FileText } from 'lucide-react';
 
 // Единый компонент кнопки-цитаты и тултипа — используется и в чате, и в модале закладки
@@ -52,15 +51,10 @@ export function CitationTooltipPortal({ hoveredSource, onClose, onCancelClose, o
   const n = (src._n != null) ? src._n : null;
 
   return createPortal(
-    <AnimatePresence>
-      <motion.div
-        initial={{ opacity: 0, y: 10, scale: 0.95 }}
-        animate={{ opacity: 1, y: 0, scale: 1 }}
-        exit={{ opacity: 0, scale: 0.95 }}
-        transition={{ duration: 0.12 }}
+      <div
+        className="animate-scaleIn fixed w-80 p-4 bg-card/98 border border-border/80 shadow-[0_20px_50px_rgba(0,0,0,0.5)] rounded-2xl z-[9999] pointer-events-auto backdrop-blur-2xl text-left"
         onMouseEnter={onCancelClose}
         onMouseLeave={onResumeClose}
-        className="fixed w-80 p-4 bg-card/98 border border-border/80 shadow-[0_20px_50px_rgba(0,0,0,0.5)] rounded-2xl z-[9999] pointer-events-auto backdrop-blur-2xl text-left"
         style={{
           left: Math.max(20, Math.min(window.innerWidth - 340, x - 160)),
           bottom: window.innerHeight - y + 12,
@@ -110,8 +104,7 @@ export function CitationTooltipPortal({ hoveredSource, onClose, onCancelClose, o
             ),
           }}
         />
-      </motion.div>
-    </AnimatePresence>,
+      </div>,
     document.body
   );
 }

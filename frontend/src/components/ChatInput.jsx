@@ -1,6 +1,6 @@
 // Область ввода: textarea, прикрепление файлов, кнопка отправки.
 import { useRef } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+
 import { Send, Square, Image as ImageIcon, Plus, X as XIcon, RefreshCw } from 'lucide-react';
 import { cn } from '../lib/utils';
 
@@ -27,29 +27,22 @@ export default function ChatInput({
     return (
         <>
             {/* Оверлей drag-and-drop */}
-            <AnimatePresence>
-                {isDragging && (
-                    <motion.div
-                        initial={{ opacity: 0 }}
-                        animate={{ opacity: 1 }}
-                        exit={{ opacity: 0 }}
-                        className="absolute inset-0 z-50 flex items-center justify-center bg-primary/10 backdrop-blur-[2px] border-2 border-dashed border-primary m-4 rounded-3xl pointer-events-none"
-                    >
-                        <div className="flex flex-col items-center gap-3 text-primary">
-                            <Plus size={48} className="animate-pulse" />
-                            <p className="font-bold text-lg">Отпустите, чтобы прикрепить фото</p>
-                        </div>
-                    </motion.div>
-                )}
-            </AnimatePresence>
+            {isDragging && (
+                <div
+                    className="absolute inset-0 z-50 flex items-center justify-center bg-primary/10 backdrop-blur-[2px] border-2 border-dashed border-primary m-4 rounded-3xl pointer-events-none animate-fadeIn"
+                >
+                    <div className="flex flex-col items-center gap-3 text-primary">
+                        <Plus size={48} className="animate-pulse" />
+                        <p className="font-bold text-lg">Отпустите, чтобы прикрепить фото</p>
+                    </div>
+                </div>
+            )}
 
             <div className="px-6 pb-6">
                 {/* ── Превью прикреплённого изображения ── */}
                 {imagePreview && (
-                    <motion.div
-                        initial={{ opacity: 0, y: 10 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        className="mb-3 relative inline-block"
+                    <div
+                        className="mb-3 relative inline-block animate-fadeInUp"
                     >
                         <img src={imagePreview} alt="Preview" className="h-20 w-auto rounded-xl border border-primary/30 shadow-lg" />
                         <button
@@ -58,7 +51,7 @@ export default function ChatInput({
                         >
                             <XIcon size={12} />
                         </button>
-                    </motion.div>
+                    </div>
                 )}
                 <div className="relative">
                     {/* ── Поле ввода и прикрепление файлов ── */}

@@ -1,6 +1,5 @@
 // Браузер GGUF моделей: выбор моделей, управление директориями поиска.
 import React from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
 import { HardDrive, FolderOpen, RefreshCw, ChevronDown, ChevronRight } from 'lucide-react';
 import { cn } from '../lib/utils';
 
@@ -68,14 +67,10 @@ export default function IngestionSettings({
                                 </span>
                             </div>
                         </button>
-                        <AnimatePresence>
-                            {expandedDirs[modelGroup.dir] && (
-                                <motion.div
-                                    initial={{ height: 0, opacity: 0 }}
-                                    animate={{ height: "auto", opacity: 1 }}
-                                    exit={{ height: 0, opacity: 0 }}
-                                    className="overflow-hidden"
-                                >
+                        {expandedDirs[modelGroup.dir] && (
+                        <div
+                            className="overflow-hidden animate-fadeIn"
+                        >
                                     {/* ── Список моделей в директории ── */}
                                     <div className="px-3 pb-3 space-y-2">
                                         {modelGroup.gguf_files.map((ggufFile) => {
@@ -132,9 +127,8 @@ export default function IngestionSettings({
                                             </div>
                                         )}
                                     </div>
-                                </motion.div>
-                            )}
-                        </AnimatePresence>
+                                </div>
+                        )}
                     </div>
                 ))}
             </div>

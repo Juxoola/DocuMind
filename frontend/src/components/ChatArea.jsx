@@ -20,6 +20,7 @@ export default function ChatArea({ notebook, selectedSources, onOpenSource, llmS
   const [stats, setStats] = useState(null);
   const [maxTokens, setMaxTokens] = useState(() => parseInt(localStorage.getItem('chat_max_tokens')) || 1024);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [settingsClosing, setSettingsClosing] = useState(false);
   const [isTuningOpen, setIsTuningOpen] = useState(false);
   const [contextStrategy, setContextStrategy] = useState(() => localStorage.getItem('chat_context_strategy') || 'sliding');
   const [thinkingMode, setThinkingMode] = useState(() => localStorage.getItem('chat_thinking_mode') === 'true');
@@ -134,7 +135,7 @@ export default function ChatArea({ notebook, selectedSources, onOpenSource, llmS
 
   useEffect(() => {
     calcContextUsage();
-    contextIntervalRef.current = setInterval(calcContextUsage, 5000);
+    contextIntervalRef.current = setInterval(calcContextUsage, 10000);
     return () => clearInterval(contextIntervalRef.current);
   }, [calcContextUsage]);
 
@@ -252,13 +253,20 @@ export default function ChatArea({ notebook, selectedSources, onOpenSource, llmS
       <ChatInput input={input} setInput={setInput} isLoading={isLoading} imagePreview={imagePreview} removeImage={removeImage} handleSend={handleSend} handleImageChange={handleImageChange} handlePaste={handlePaste} handleDragOver={handleDragOver} handleDragLeave={handleDragLeave} isDragging={isDragging} abortController={abortController} abortControllerRef={abortControllerRef} llmStatus={llmStatus} textareaRef={textareaRef} />
 
       <Suspense fallback={null}>
-        {isSettingsOpen && (
-          <SettingsModal isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} settings={llmSettings} onSave={(newSettings) => {
-            setLlmSettings(newSettings);
-            const { llm_api_key, ...rest } = newSettings;
-            try { sessionStorage.setItem('llm_api_key', llm_api_key || ''); } catch (e) { /* sessionStorage disabled */ }
-            localStorage.setItem('llm_settings', JSON.stringify(rest));
-          }} />
+        {(isSettingsOpen || settingsClosing) && (
+          <SettingsModal 
+            isOpen={isSettingsOpen} 
+            closing={settingsClosing}
+            onClose={() => setSettingsClosing(true)} 
+            onAnimEnd={() => { setIsSettingsOpen(false); setSettingsClosing(false); }}
+            settings={llmSettings} 
+            llmStatus={llmStatus} 
+            onSave={(newSettings) => {
+              setLlmSettings(newSettings);
+              const { llm_api_key, ...rest } = newSettings;
+              try { sessionStorage.setItem('llm_api_key', llm_api_key || ''); } catch (e) { /* sessionStorage disabled */ }
+              localStorage.setItem('llm_settings', JSON.stringify(rest));
+            }} />
         )}
       </Suspense>
     </div>
