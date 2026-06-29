@@ -1,8 +1,8 @@
 // Просмотрщик документов: PDF, изображения, видео, аудио, текст.
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { X, FileText, Play, Image as ImageIcon, Clock, AlertCircle, Download, ChevronDown } from 'lucide-react';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
+import { marked } from 'marked';
+import { useVirtualizer } from '@tanstack/react-virtual';
 import { cn } from '../lib/utils';
 
 export default function DocumentViewer({ file, notebook, onClose }) {
@@ -19,6 +19,8 @@ export default function DocumentViewer({ file, notebook, onClose }) {
   const feedRef = useRef(null);
   const itemRefs = useRef({});
   const lastSoughtTime = useRef(null);
+  const textScrollRef = useRef(null);
+  const imageScrollRef = useRef(null);
 
   const filename = typeof file === 'string' ? file : file?.file_name;
   const page = typeof file === 'object' ? file?.page : null;
@@ -126,17 +128,61 @@ export default function DocumentViewer({ file, notebook, onClose }) {
     { fmt: 'pdf', label: 'PDF (.pdf)', icon: '📑' },
   ];
 
-  // ── Мемоизация markdown-контента: не перепарсивать при toggle вкладок ──
-  const renderedContent = useMemo(() => {
-    if (!content) return null;
-    return (
-      <div className="md-content max-w-none">
-        <ReactMarkdown remarkPlugins={[remarkGfm]}>
-          {content}
-        </ReactMarkdown>
-      </div>
-    );
+  // ── Разбиение контента на секции для виртуального скролла ──
+  const sections = useMemo(() => {
+    if (!content) return [];
+    const parts = content.split(/(?=^#{1,3}\s)/m);
+    const result = [];
+    for (let part of parts) {
+      part = part.trim();
+      if (!part) continue;
+      if (part.length > 4000) {
+        const paras = part.split(/\n\s*\n/);
+        let buf = '', cnt = 0;
+        for (const para of paras) {
+          const p = para.trim();
+          if (!p) continue;
+          if (buf && (cnt > 25 || (buf + '\n\n' + p).length > 4000)) {
+            result.push(buf);
+            buf = p; cnt = p.split('\n').length;
+          } else {
+            buf = buf ? buf + '\n\n' + p : p;
+            cnt += p.split('\n').length;
+          }
+        }
+        if (buf) result.push(buf);
+      } else {
+        result.push(part);
+      }
+    }
+    return result;
   }, [content]);
+  
+  const sectionHtml = useMemo(() => {
+    return sections.map(s => marked.parse(s, { gfm: true, breaks: true }));
+  }, [sections]);
+  
+  const rowVirtualizer = useVirtualizer({
+    count: sections.length,
+    getScrollElement: () => textScrollRef.current,
+    estimateSize: (i) => Math.max(60, Math.ceil((sectionHtml[i]?.length || 100) / 80) * 22),
+    overscan: 3,
+  });
+  
+  const measureTextRow = useCallback((el) => {
+    if (el) rowVirtualizer.measureElement(el);
+  }, [rowVirtualizer]);
+  
+  const imageVirtualizer = useVirtualizer({
+    count: videoMeta?.frames?.length || 0,
+    getScrollElement: () => imageScrollRef.current,
+    estimateSize: () => 350,
+    overscan: 2,
+  });
+  
+  const measureImageRow = useCallback((el) => {
+    if (el) imageVirtualizer.measureElement(el);
+  }, [imageVirtualizer]);
 
   // Закрытие дропдауна по клику снаружи
   useEffect(() => {
@@ -272,44 +318,78 @@ export default function DocumentViewer({ file, notebook, onClose }) {
              <span className="text-[10px] font-bold uppercase tracking-tighter">Загрузка контента...</span>
           </div>
         ) : showImagesOnly ? (
-          <div className="h-full overflow-y-auto p-6 space-y-6 custom-scrollbar bg-muted/5">
-            {videoMeta?.frames?.map((f, i) => (
-              <div 
-                key={i}
-                className="bg-card border border-border/50 rounded-2xl overflow-hidden shadow-md animate-fadeInUp"
-              >
-                <div className="p-3 border-b bg-muted/20 flex items-center justify-between">
-                  <span className="text-[10px] font-black uppercase tracking-widest text-primary">Стр {f.page}</span>
-                  <ImageIcon size={14} className="text-muted-foreground" />
-                </div>
-                <div className="p-4 flex flex-col md:flex-row gap-6">
-                  <div className="w-full md:w-1/2 rounded-xl overflow-hidden border border-border/40 bg-black">
-                    <img 
-                      src={`/files/${notebook.id}/images/${f.image_path.split(/[\\/]/).pop()}`} 
-                      className="w-full h-auto object-contain cursor-zoom-in hover:scale-105 transition-transform duration-500" 
-                      onClick={() => window.open(`/files/${notebook.id}/images/${f.image_path.split(/[\\/]/).pop()}`, '_blank')}
-                    />
-                  </div>
-                  <div className="w-full md:w-1/2 space-y-3">
-                    <h4 className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Описание</h4>
-                    <div className="text-xs leading-relaxed text-foreground/80 font-medium md-content max-w-none">
-                      <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                        {f.description || ''}
-                      </ReactMarkdown>
+          <div ref={imageScrollRef} className="h-full overflow-y-auto p-6 custom-scrollbar bg-muted/5" style={{ position: 'relative' }}>
+            {(videoMeta?.frames?.length || 0) > 0 ? (
+              <div style={{ height: `${imageVirtualizer.getTotalSize()}px`, position: 'relative' }}>
+                {imageVirtualizer.getVirtualItems().map(virtualRow => {
+                  const f = videoMeta.frames[virtualRow.index];
+                  return (
+                    <div
+                      key={virtualRow.key}
+                      data-index={virtualRow.index}
+                      ref={measureImageRow}
+                      style={{
+                        position: 'absolute',
+                        top: 0,
+                        left: 0,
+                        width: '100%',
+                        transform: `translateY(${virtualRow.start}px)`,
+                        paddingBottom: '1.5rem',
+                      }}
+                    >
+                      <div className="bg-card border border-border/50 rounded-2xl overflow-hidden shadow-md animate-fadeInUp">
+                        <div className="p-3 border-b bg-muted/20 flex items-center justify-between">
+                          <span className="text-[10px] font-black uppercase tracking-widest text-primary">Стр {f.page}</span>
+                          <ImageIcon size={14} className="text-muted-foreground" />
+                        </div>
+                        <div className="p-4 flex flex-col md:flex-row gap-6">
+                          <div className="w-full md:w-1/2 rounded-xl overflow-hidden border border-border/40 bg-black">
+                            <img 
+                              src={`/files/${notebook.id}/images/${f.image_path.split(/[\\/]/).pop()}`} 
+                              loading="lazy"
+                              className="w-full h-auto object-contain cursor-zoom-in hover:scale-105 transition-transform duration-500" 
+                              onClick={() => window.open(`/files/${notebook.id}/images/${f.image_path.split(/[\\/]/).pop()}`, '_blank')}
+                            />
+                          </div>
+                          <div className="w-full md:w-1/2 space-y-3">
+                            <h4 className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Описание</h4>
+                            <div className="text-xs leading-relaxed text-foreground/80 font-medium md-content max-w-none" dangerouslySetInnerHTML={{ __html: marked.parse(f.description || '', { gfm: true, breaks: true }) }} />
+                          </div>
+                        </div>
+                      </div>
                     </div>
-                  </div>
-                </div>
+                  );
+                })}
               </div>
-            ))}
+            ) : null}
           </div>
         ) : showRawText ? (
-          <div className="flex-1 p-8 overflow-y-auto custom-scrollbar min-h-0">
+          <div ref={textScrollRef} className="flex-1 p-8 overflow-y-auto custom-scrollbar min-h-0" style={{ position: 'relative' }}>
             {contentLoading ? (
               <div className="flex flex-col items-center justify-center h-full gap-3 text-muted-foreground">
                 <div className="w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin" />
                 <span className="text-[10px] font-bold uppercase tracking-wider">Извлечение текста...</span>
               </div>
-            ) : renderedContent || <p className="text-muted-foreground text-sm">Текст пуст.</p>}
+            ) : sections.length > 0 ? (
+              <div style={{ height: `${rowVirtualizer.getTotalSize()}px`, position: 'relative' }}>
+                {rowVirtualizer.getVirtualItems().map(virtualRow => (
+                  <div
+                    key={virtualRow.key}
+                    data-index={virtualRow.index}
+                    ref={measureTextRow}
+                    style={{
+                      position: 'absolute',
+                      top: 0,
+                      left: 0,
+                      width: '100%',
+                      transform: `translateY(${virtualRow.start}px)`,
+                    }}
+                  >
+                    <div className="md-content max-w-none" dangerouslySetInnerHTML={{ __html: sectionHtml[virtualRow.index] }} />
+                  </div>
+                ))}
+              </div>
+            ) : <p className="text-muted-foreground text-sm">Текст пуст.</p>}
           </div>
         ) : isPdf ? (
           <iframe 
@@ -329,11 +409,7 @@ export default function DocumentViewer({ file, notebook, onClose }) {
             </div>
             {videoMeta?.frames?.[0]?.description && (
               <div className="p-4 border-t border-border/30 bg-muted/20">
-                <div className="md-content max-w-none">
-                  <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                    {videoMeta.frames[0].description}
-                  </ReactMarkdown>
-                </div>
+                <div className="md-content max-w-none" dangerouslySetInnerHTML={{ __html: marked.parse(videoMeta.frames[0].description, { gfm: true, breaks: true }) }} />
               </div>
             )}
           </div>
@@ -432,11 +508,7 @@ export default function DocumentViewer({ file, notebook, onClose }) {
                         <div className={cn(
                           "text-xs leading-relaxed transition-colors md-content max-w-none",
                           isActive ? "text-foreground font-medium" : "text-foreground/70"
-                        )}>
-                          <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                            {ev.text || ev.description || ''}
-                          </ReactMarkdown>
-                        </div>
+                        )} dangerouslySetInnerHTML={{ __html: marked.parse(ev.text || ev.description || '', { gfm: true, breaks: true }) }} />
                       </div>
                     );
                   })
@@ -457,11 +529,7 @@ export default function DocumentViewer({ file, notebook, onClose }) {
           />
         ) : (
           <div className="h-full p-8 overflow-y-auto custom-scrollbar min-h-0">
-            <div className="md-content max-w-none">
-              <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                {content || 'Контент пуст или не может быть отображен.'}
-              </ReactMarkdown>
-            </div>
+            <div className="md-content max-w-none" dangerouslySetInnerHTML={{ __html: marked.parse(content || 'Контент пуст или не может быть отображен.', { gfm: true, breaks: true }) }} />
           </div>
         )}
       </div>
