@@ -8550,7 +8550,7 @@ var _l10n_utils = __webpack_require__(30);
 var _pdf_page_view = __webpack_require__(31);
 var _pdf_rendering_queue = __webpack_require__(24);
 var _pdf_link_service = __webpack_require__(7);
-const DEFAULT_CACHE_SIZE = 10;
+const DEFAULT_CACHE_SIZE = 30;
 const PagesCountLimit = {
   FORCE_SCROLL_MODE_PAGE: 15000,
   FORCE_LAZY_PAGE_INIT: 100,
