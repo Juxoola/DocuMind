@@ -44,6 +44,33 @@ const TextSection = React.memo(({ text }) => {
 TextSection.displayName = 'TextSection';
 
 
+const PdfResizeWrapper = ({ fileUrl }) => {
+  const ref = useRef(null);
+  const [resizeKey, setResizeKey] = useState(0);
+
+  useEffect(() => {
+    const el = ref.current?.parentElement;
+    if (!el) return;
+    let timer;
+    const observer = new ResizeObserver(() => {
+      clearTimeout(timer);
+      timer = setTimeout(() => setResizeKey(k => k + 1), 150);
+    });
+    observer.observe(el);
+    return () => { observer.disconnect(); clearTimeout(timer); };
+  }, []);
+
+  return (
+    <div ref={ref} className="h-full">
+      <PDFViewer
+        key={`${fileUrl}_${resizeKey}`}
+        config={{ src: fileUrl }}
+        style={{ width: '100%', height: '100%' }}
+      />
+    </div>
+  );
+};
+
 export default function DocumentViewer({ file, notebook, onClose }) {
   const [content, setContent] = useState(null);
   const [contentLoading, setContentLoading] = useState(false);
@@ -368,10 +395,9 @@ export default function DocumentViewer({ file, notebook, onClose }) {
         {/* ── PDF: PDFium WASM (Chrome PDF engine) ── */}
         {!loading && isPdf && (
           <div className="absolute inset-0 z-10" style={{ display: showRawText || showImagesOnly ? 'none' : 'block' }}>
-            <PDFViewer
+            <PdfResizeWrapper
               key={filename}
-              config={{ src: new URL(fileUrl, window.location.origin).href }}
-              style={{ width: '100%', height: '100%' }}
+              fileUrl={new URL(fileUrl, window.location.origin).href}
             />
           </div>
         )}
