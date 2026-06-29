@@ -461,11 +461,7 @@ async def get_source_content(filename: str, notebook_id: str):
                 _set_cached_source(cache_key, text)
                 return {"text": text}
 
-    if ext == ".pdf":
-        text = await asyncio.to_thread(_build_interleaved_text, file_path, paths["data"], filename)
-        if text:
-            _set_cached_source(cache_key, text)
-            return {"text": text}
+    # ── ChromaDB: быстрый fallback для старых файлов без .extracted.md ──
     try:
         from src.rag.indexing import get_vector_store
 
@@ -478,6 +474,13 @@ async def get_source_content(filename: str, notebook_id: str):
             return {"text": full_text}
     except Exception:
         pass
+
+    # ── Медленный fallback: парсим PDF pymupdf4llm (только если ChromaDB пуста) ──
+    if ext == ".pdf":
+        text = await asyncio.to_thread(_build_interleaved_text, file_path, paths["data"], filename)
+        if text:
+            _set_cached_source(cache_key, text)
+            return {"text": text}
     return {"text": "Содержимое документа не найдено."}
 
 
