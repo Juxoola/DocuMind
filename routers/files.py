@@ -500,90 +500,7 @@ async def get_source_content(filename: str, notebook_id: str):
     return {"text": "Содержимое документа не найдено."}
 
 
-# ── Извлечение текста из PDF (pymupdf4llm или fitz) ──
-def _extract_pdf_text(file_path: str) -> list[str]:
-    try:
-        import pymupdf4llm
 
-        chunks = pymupdf4llm.to_markdown(file_path, page_chunks=True, write_images=False)
-        pages = []
-        for chunk in chunks:
-            text = chunk.get("text", "")
-            import re
-
-            text = re.sub(r"^(#{1,6})\s*\*\*(.+?)\*\*\s*$", r"\1 \2", text, flags=re.MULTILINE)
-            text = re.sub(r"\*\*==>.+?intentionally omitted.+?<==\*\*", "", text)
-            text = re.sub(r"\*\*(.+?\.{3,}\d+)\*\*", r"\1", text)
-            text = re.sub(r"\n\s*\d{1,3}\s*\n", "\n", text)
-            text = text.replace("\\n", "\n")
-            text = re.sub(r"\n{3,}", "\n\n", text)
-            pages.append(text)
-        return pages
-    except ImportError:
-        import fitz
-
-        doc = fitz.open(file_path)
-        pages = [page.get_text() for page in doc]
-        doc.close()
-        return pages
-
-
-# ── Сборка текста PDF с описаниями изображений ──
-def _build_interleaved_text(file_path: str, data_dir: str, filename: str) -> str:
-
-    pages = _extract_pdf_text(file_path)
-    descriptions: dict[int, str] = {}
-    json_path = os.path.join(data_dir, f"{filename}.json")
-    if os.path.exists(json_path):
-        with open(json_path, "rb") as f:
-            data = orjson.loads(f.read())
-        for frame in data.get("frames", []):
-            desc = frame.get("description", "").strip()
-            page = frame.get("page")
-            if desc and page is not None:
-                descriptions[int(page)] = desc
-    parts = []
-    for i, page_text in enumerate(pages):
-        page_num = i + 1
-        has_text = bool(page_text.strip())
-        has_desc = page_num in descriptions
-        if not has_text and not has_desc:
-            continue
-        parts.append(f"\n\n--- Стр. {page_num} ---\n")
-        if has_text:
-            parts.append(page_text)
-        if has_desc:
-            parts.append(f"\n{descriptions[page_num]}\n")
-    return "\n".join(parts)
-
-
-# ── Извлечение текста из файлов разных форматов ──
-def _extract_text_from_file(file_path: str, ext: str) -> str:
-
-    if not os.path.exists(file_path):
-        return ""
-    try:
-        if ext == ".pdf":
-            return "\n".join(_extract_pdf_text(file_path))
-        elif ext in (".txt", ".md", ".csv", ".json", ".log"):
-            with open(file_path, encoding="utf-8", errors="replace") as f:
-                return f.read()
-        elif ext in (".docx", ".doc"):
-            from docx import Document
-
-            return "\n".join(p.text for p in Document(file_path).paragraphs)
-        elif ext in (".pptx", ".ppt"):
-            from pptx import Presentation
-
-            texts = []
-            for slide in Presentation(file_path).slides:
-                for shape in slide.shapes:
-                    if shape.has_text_frame:
-                        texts.append(shape.text_frame.text)
-            return "\n".join(texts)
-    except Exception:
-        pass
-    return ""
 
 
 _PDF_CSS = """
@@ -689,12 +606,39 @@ async def export_text(filename: str, notebook_id: str, fmt: str = "txt"):
             text = f"Описание/транскрипт для {filename} не найдены."
     else:
         file_path = os.path.join(paths["data"], filename)
-        if ext == ".pdf":
-            text = await asyncio.to_thread(
-                _build_interleaved_text, file_path, paths["data"], filename
-            )
-        else:
-            text = await asyncio.to_thread(_extract_text_from_file, file_path, ext)
+
+        # Пытаемся взять текст из тех же источников, что и source_content
+        cache_key = f"{notebook_id}:{filename}"
+        cached = _get_cached_source(cache_key)
+        if cached is not None:
+            text = cached
+        elif ext == ".pdf":
+            # .extracted.md
+            extracted_path = os.path.join(paths["data"], f"{filename}.extracted.md")
+            if os.path.exists(extracted_path):
+                async with aiofiles.open(extracted_path, "r", encoding="utf-8") as ef:
+                    text = await ef.read()
+        if not text:
+            # ChromaDB + JSON описания
+            try:
+                from src.rag.indexing import get_vector_store
+                vector_store = await get_vector_store(notebook_id)
+                collection = vector_store._collection
+                result = await asyncio.to_thread(collection.get, where={"file_name": filename})
+                if result and result.get("documents"):
+                    text = "\n\n---\n\n".join(result["documents"])
+                    if ext == ".pdf":
+                        json_path = os.path.join(paths["data"], f"{filename}.json")
+                        if os.path.exists(json_path):
+                            async with aiofiles.open(json_path, "rb") as jf:
+                                jdata = orjson.loads(await jf.read())
+                            for fr in jdata.get("frames", []):
+                                d = fr.get("description", "").strip()
+                                p = fr.get("page")
+                                if d and p is not None:
+                                    text += f"\n\n--- Стр. {p} (описание) ---\n{d}"
+            except Exception:
+                pass
         if not text:
             text = f"Содержимое {filename} не найдено."
 
