@@ -302,6 +302,7 @@ async def chat(request: ChatRequest):
                             safe = buf[: -len(CLOSE_TAG)] if len(buf) > len(CLOSE_TAG) else ""
                             if safe:
                                 yield sse_event({"type": "thinking_chunk", "text": safe})
+                                buf = buf[-len(CLOSE_TAG) :]
                     elif phase == "answer":
                         flushed = sse_buf.append(buf)
                         if flushed:

@@ -34,6 +34,32 @@ logger = logging.getLogger(__name__)
 _whisper_model_cache: dict = {}
 _whisper_lock = threading.Lock()
 
+# ── Кэш доступности CUDA в bundled ffmpeg ──────────────────────────────
+_ffmpeg_cuda_available: bool | None = None
+
+
+async def _probe_ffmpeg_cuda(ffmpeg: str) -> bool:
+    """Один раз проверяет, поддерживает ли bundled ffmpeg CUDA hwaccel."""
+    global _ffmpeg_cuda_available
+    if _ffmpeg_cuda_available is not None:
+        return _ffmpeg_cuda_available
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            ffmpeg,
+            "-hide_banner",
+            "-hwaccels",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        out, _ = await asyncio.wait_for(proc.communicate(), timeout=5)
+        _ffmpeg_cuda_available = b"cuda" in out.lower()
+    except Exception:
+        _ffmpeg_cuda_available = False
+    logger.info(
+        f"[FFmpeg] CUDA hwaccel: {'да' if _ffmpeg_cuda_available else 'нет (CPU-fallback)'}"
+    )
+    return _ffmpeg_cuda_available
+
 
 # Замена ffmpeg в WhisperX на bundled imageio-ffmpeg
 def _patch_whisperx_ffmpeg():
@@ -119,16 +145,18 @@ async def unload_whisper_model():
     await asyncio.to_thread(_unload)
 
 
-# Извлечение кадра из видео через FFmpeg с аппаратным ускорением
+# Извлечение кадра из видео через FFmpeg (CUDA или CPU-fallback)
 async def save_high_res_frame(video_path, time_sec, output_path):
     try:
         from imageio_ffmpeg import get_ffmpeg_exe
 
-        cmd = [
-            get_ffmpeg_exe(),
-            "-y",
-            "-hwaccel",
-            "cuda",
+        ffmpeg = get_ffmpeg_exe()
+        has_cuda = await _probe_ffmpeg_cuda(ffmpeg)
+
+        cmd = [ffmpeg, "-y"]
+        if has_cuda:
+            cmd += ["-hwaccel", "cuda"]
+        cmd += [
             "-ss",
             str(time_sec),
             "-i",
@@ -242,36 +270,27 @@ async def process_audio_video(
         from imageio_ffmpeg import get_ffmpeg_exe
 
         ffmpeg = get_ffmpeg_exe()
+        has_cuda = await _probe_ffmpeg_cuda(ffmpeg)
 
         PIXEL_THR, UPDATE_PCT, NEW_SLIDE_PCT, MOTION_PCT = 15, 0.002, 0.04, 0.002
         STABLE_WAIT_SEC, CHECK_STEP_SEC = 3.0, 1.0
         COMPARE_SIZE = (320, 180)
 
-        cmd = [
-            ffmpeg,
-            "-hide_banner",
-            "-loglevel",
-            "error",
-            "-hwaccel",
-            "cuda",
-            "-hwaccel_output_format",
-            "cuda",
-            "-i",
-            file_path,
-            "-vf",
-            f"fps=1/{CHECK_STEP_SEC},scale_cuda={COMPARE_SIZE[0]}:{COMPARE_SIZE[1]}:format=yuv420p,hwdownload,format=yuv420p,format=bgr24",
-            "-f",
-            "image2pipe",
-            "-vcodec",
-            "rawvideo",
-            "-pix_fmt",
-            "bgr24",
-            "pipe:1",
-        ]
+        # ── Команда ffmpeg: CUDA или CPU-fallback ──────────────────────
+        cmd = [ffmpeg, "-hide_banner", "-loglevel", "error"]
+        if has_cuda:
+            cmd += ["-hwaccel", "cuda", "-hwaccel_output_format", "cuda"]
+        cmd += ["-i", file_path]
+        if has_cuda:
+            vf = f"fps=1/{CHECK_STEP_SEC},scale_cuda={COMPARE_SIZE[0]}:{COMPARE_SIZE[1]}:format=yuv420p,hwdownload,format=yuv420p,format=bgr24"
+        else:
+            vf = f"fps=1/{CHECK_STEP_SEC},scale={COMPARE_SIZE[0]}:{COMPARE_SIZE[1]},format=bgr24"
+        cmd += ["-vf", vf, "-f", "image2pipe", "-vcodec", "rawvideo", "-pix_fmt", "bgr24", "pipe:1"]
 
         process = await asyncio.create_subprocess_exec(
             *cmd,
             stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
         )
         if notebook_id is not None:
             register_subprocess(notebook_id, process)
@@ -343,8 +362,15 @@ async def process_audio_video(
                         f"Анализ видео: {format_seconds(current_sec)} / {format_seconds(duration_sec)}",
                     )
         finally:
-            process.stdout.close()
             process.kill()
+            try:
+                stderr_data = await asyncio.wait_for(process.stderr.read(4096), timeout=5)
+                if stderr_data:
+                    logger.warning(
+                        f"[FFmpeg stderr] {stderr_data.decode(errors='replace').strip()}"
+                    )
+            except Exception:
+                pass
             await asyncio.wait_for(process.wait(), timeout=30)
             if notebook_id is not None:
                 unregister_subprocess(notebook_id, process)
