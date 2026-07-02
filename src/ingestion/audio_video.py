@@ -262,7 +262,6 @@ async def process_audio_video(
         def _detect_scenes_cv2():
             _HIST_THRESH = 0.55
             _MIN_SCENE_LEN = 90  # ~3с при 30fps — не дублируем похожие кадры
-            _MAX_SCENES = 60  # лимит для vision (OOM-guard)
             _CHECK_EVERY = 3
             _HIST_SIZE = [64, 64, 64]
             _H_RANGES = [0, 180]
@@ -307,12 +306,6 @@ async def process_audio_video(
                 frame_idx += 1
 
             cap.release()
-
-            # Если сцен слишком много — равномерная выборка (не больше _MAX_SCENES)
-            if len(scenes) > _MAX_SCENES:
-                step = len(scenes) / _MAX_SCENES
-                scenes = [scenes[int(i * step)] for i in range(_MAX_SCENES)]
-                logger.info(f"[SceneDetect] {len(scenes)} кадров (downsampled из >{_MAX_SCENES})")
 
             return scenes
 

@@ -401,8 +401,10 @@ async def delete_file(filename: str, notebook_id: str):
         # Удаляем кеш предварительного извлечения
         extracted = os.path.join(paths["data"], f"{filename}.extracted.md")
         if os.path.exists(extracted):
-            try: await aiofiles.os.remove(extracted)
-            except Exception: pass
+            try:
+                await aiofiles.os.remove(extracted)
+            except Exception:
+                pass
     from src.rag.indexing import get_vector_store
 
     vector_store = await get_vector_store(notebook_id)
@@ -455,7 +457,7 @@ async def get_source_content(filename: str, notebook_id: str):
     if ext == ".pdf":
         extracted_path = os.path.join(paths["data"], f"{filename}.extracted.md")
         if os.path.exists(extracted_path):
-            async with aiofiles.open(extracted_path, "r", encoding="utf-8") as f:
+            async with aiofiles.open(extracted_path, encoding="utf-8") as f:
                 text = await f.read()
             if text:
                 _set_cached_source(cache_key, text)
@@ -473,6 +475,7 @@ async def get_source_content(filename: str, notebook_id: str):
         if result and result.get("documents"):
             # Группируем чанки по странице, текст и описания чередуются
             from collections import defaultdict
+
             by_page: dict[int, list[str]] = defaultdict(list)
             for doc, meta in zip(result["documents"], result["metadatas"]):
                 page = meta.get("page", 0)
@@ -488,9 +491,6 @@ async def get_source_content(filename: str, notebook_id: str):
         pass
 
     return {"text": "Содержимое документа не найдено."}
-
-
-
 
 
 _PDF_CSS = """
@@ -579,6 +579,7 @@ async def export_text(filename: str, notebook_id: str, fmt: str = "txt"):
                 data = orjson.loads(await f.read())
             if is_media:
                 transcript = data.get("transcript", [])
+                parts = []
                 if transcript:
                     lines = []
                     for seg in transcript:
@@ -587,7 +588,21 @@ async def export_text(filename: str, notebook_id: str, fmt: str = "txt"):
                         h, m = divmod(m, 60)
                         ts = f"{h:02d}:{m:02d}:{s:02d}" if h else f"{m:02d}:{s:02d}"
                         lines.append(f"[{ts}] {seg.get('text', '')}")
-                    text = "\n".join(lines)
+                    parts.append("\n".join(lines))
+                frames = data.get("frames", [])
+                if frames:
+                    frame_lines = []
+                    for fr in frames:
+                        t = fr.get("time", 0)
+                        desc = fr.get("description", "")
+                        if desc:
+                            m, s = divmod(int(t), 60)
+                            h, m = divmod(m, 60)
+                            ts = f"{h:02d}:{m:02d}:{s:02d}" if h else f"{m:02d}:{s:02d}"
+                            frame_lines.append(f"[{ts}] {desc}")
+                    if frame_lines:
+                        parts.append("\n\n## Описания кадров\n\n" + "\n\n".join(frame_lines))
+                text = "\n\n".join(parts)
             elif is_image:
                 frames = data.get("frames", [])
                 if frames and frames[0].get("description"):
@@ -606,19 +621,23 @@ async def export_text(filename: str, notebook_id: str, fmt: str = "txt"):
             # .extracted.md
             extracted_path = os.path.join(paths["data"], f"{filename}.extracted.md")
             if os.path.exists(extracted_path):
-                async with aiofiles.open(extracted_path, "r", encoding="utf-8") as ef:
+                async with aiofiles.open(extracted_path, encoding="utf-8") as ef:
                     text = await ef.read()
         if not text:
             # ChromaDB: текст + описания, чередуя по страницам
             try:
                 from src.rag.indexing import get_vector_store
+
                 vector_store = await get_vector_store(notebook_id)
                 collection = vector_store._collection
                 result = await asyncio.to_thread(
-                    collection.get, where={"file_name": filename}, include=["documents", "metadatas"]
+                    collection.get,
+                    where={"file_name": filename},
+                    include=["documents", "metadatas"],
                 )
                 if result and result.get("documents"):
                     from collections import defaultdict
+
                     by_page = defaultdict(list)
                     for doc, meta in zip(result["documents"], result["metadatas"]):
                         page = meta.get("page", 0)
