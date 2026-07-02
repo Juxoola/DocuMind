@@ -258,11 +258,12 @@ async def process_audio_video(
 
         # Histogram-based scene detection: сравниваем HSV-гистограммы
         # соседних кадров. Смена фиксируется при превышении порога
-        # _bhattacharyya, с debounce min_scene_len кадров.
+        # bhattacharyya, с debounce min_scene_len кадров.
         def _detect_scenes_cv2():
-            _HIST_THRESH = 0.40
-            _MIN_SCENE_LEN = 20
-            _CHECK_EVERY = 2  # проверять каждый N-й кадр для скорости
+            _HIST_THRESH = 0.55
+            _MIN_SCENE_LEN = 90  # ~3с при 30fps — не дублируем похожие кадры
+            _MAX_SCENES = 60  # лимит для vision (OOM-guard)
+            _CHECK_EVERY = 3
             _HIST_SIZE = [64, 64, 64]
             _H_RANGES = [0, 180]
             _SV_RANGES = [0, 256]
@@ -306,6 +307,13 @@ async def process_audio_video(
                 frame_idx += 1
 
             cap.release()
+
+            # Если сцен слишком много — равномерная выборка (не больше _MAX_SCENES)
+            if len(scenes) > _MAX_SCENES:
+                step = len(scenes) / _MAX_SCENES
+                scenes = [scenes[int(i * step)] for i in range(_MAX_SCENES)]
+                logger.info(f"[SceneDetect] {len(scenes)} кадров (downsampled из >{_MAX_SCENES})")
+
             return scenes
 
         try:
