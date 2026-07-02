@@ -9,7 +9,6 @@ import uuid
 
 import aiofiles
 import cv2
-import numpy as np
 import orjson
 import torch
 from llama_index.core.schema import TextNode
@@ -22,8 +21,6 @@ from src.ingestion.utils import (
     IngestionCancelled,
     cleanup_gpu,
     format_seconds,
-    register_subprocess,
-    unregister_subprocess,
 )
 from src.ingestion.vision import describe_image_with_lmstudio, get_vision_url
 
@@ -230,9 +227,8 @@ async def process_audio_video(
                 segs.append({"start": seg["start"], "end": seg["end"], "text": seg["text"].strip()})
             return segs, dur
 
-        duration_sec = 0
         prog(20, "VAD + транскрибация ...")
-        transcript_data, duration_sec = await asyncio.to_thread(_transcribe)
+        transcript_data, _duration_sec = await asyncio.to_thread(_transcribe)
     except Exception as e:
         logger.error(f"WhisperX error: {e}")
     finally:
@@ -256,130 +252,79 @@ async def process_audio_video(
                 chunk_text = ""
     prog(60, "Транскрибация завершена")
 
-    # Детекция сцен видео: извлечение кадров при изменении содержимого
+    # Детекция сцен видео: histogram comparison через OpenCV
     if is_video:
-        prog(62, "Анализ изменений в видео...")
-        cap = cv2.VideoCapture(file_path)
-        try:
+        prog(62, "Поиск сцен в видео...")
+
+        # Histogram-based scene detection: сравниваем HSV-гистограммы
+        # соседних кадров. Смена фиксируется при превышении порога
+        # _bhattacharyya, с debounce min_scene_len кадров.
+        def _detect_scenes_cv2():
+            _HIST_THRESH = 0.40
+            _MIN_SCENE_LEN = 20
+            _CHECK_EVERY = 2  # проверять каждый N-й кадр для скорости
+            _HIST_SIZE = [64, 64, 64]
+            _H_RANGES = [0, 180]
+            _SV_RANGES = [0, 256]
+            _RANGES = _H_RANGES + _SV_RANGES + _SV_RANGES
+
+            cap = cv2.VideoCapture(file_path)
+            if not cap.isOpened():
+                return []
             fps = cap.get(cv2.CAP_PROP_FPS) or 25
-            total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-            duration_sec = total_frames / fps if fps > 0 else 0
-        finally:
-            cap.release()
+            total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
 
-        from imageio_ffmpeg import get_ffmpeg_exe
+            prev_hist = None
+            scenes = []  # [(start_sec, end_sec)]
+            last_cut_frame = -_MIN_SCENE_LEN
+            frame_idx = 0
+            last_hist_frame = -_CHECK_EVERY
 
-        ffmpeg = get_ffmpeg_exe()
-        has_cuda = await _probe_ffmpeg_cuda(ffmpeg)
-
-        PIXEL_THR, UPDATE_PCT, NEW_SLIDE_PCT, MOTION_PCT = 15, 0.002, 0.04, 0.002
-        STABLE_WAIT_SEC, CHECK_STEP_SEC = 3.0, 1.0
-        COMPARE_SIZE = (320, 180)
-
-        # ── Команда ffmpeg: CUDA или CPU-fallback ──────────────────────
-        cmd = [ffmpeg, "-hide_banner", "-loglevel", "error"]
-        if has_cuda:
-            cmd += ["-hwaccel", "cuda", "-hwaccel_output_format", "cuda"]
-        cmd += ["-i", file_path]
-        if has_cuda:
-            vf = f"fps=1/{CHECK_STEP_SEC},scale_cuda={COMPARE_SIZE[0]}:{COMPARE_SIZE[1]}:format=yuv420p,hwdownload,format=yuv420p,format=bgr24"
-        else:
-            vf = f"fps=1/{CHECK_STEP_SEC},scale={COMPARE_SIZE[0]}:{COMPARE_SIZE[1]},format=bgr24"
-        cmd += ["-vf", vf, "-f", "image2pipe", "-vcodec", "rawvideo", "-pix_fmt", "bgr24", "pipe:1"]
-
-        process = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        if notebook_id is not None:
-            register_subprocess(notebook_id, process)
-        frame_list = []
-        try:
-            prev_saved_thumb = None
-            last_seen_thumb = None
-            stable_since_sec = 0
-            current_sec = 0
-            chunk_size = COMPARE_SIZE[0] * COMPARE_SIZE[1] * 3
-            cancel_check_every = 5
-            frame_counter = 0
             while True:
-                if frame_counter % cancel_check_every == 0 and _is_cancelled():
-                    logger.info(
-                        f"[Ingestion] Отмена во время извлечения кадров видео ({format_seconds(current_sec)})"
-                    )
-                    try:
-                        process.kill()
-                    except Exception:
-                        pass
-                    raise IngestionCancelled(
-                        f"Cancelled during frame extraction at {format_seconds(current_sec)}"
-                    )
-                raw_frame = await process.stdout.read(chunk_size)
-                if not raw_frame or len(raw_frame) != chunk_size:
+                ok, frame = cap.read()
+                if not ok:
                     break
-                thumb = np.frombuffer(raw_frame, dtype="uint8").reshape(
-                    (COMPARE_SIZE[1], COMPARE_SIZE[0], 3)
+                if frame_idx - last_hist_frame < _CHECK_EVERY:
+                    frame_idx += 1
+                    continue
+                last_hist_frame = frame_idx
+
+                hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+                hist = cv2.calcHist([hsv], [0, 1, 2], None, _HIST_SIZE, _RANGES)
+                cv2.normalize(hist, hist)
+
+                if prev_hist is not None and (frame_idx - last_cut_frame) >= _MIN_SCENE_LEN:
+                    diff = cv2.compareHist(prev_hist, hist, cv2.HISTCMP_BHATTACHARYYA)
+                    if diff >= _HIST_THRESH:
+                        sec = frame_idx / fps
+                        if scenes:
+                            scenes[-1] = (scenes[-1][0], sec)
+                        scenes.append((sec, total / fps))
+                        last_cut_frame = frame_idx
+
+                prev_hist = hist
+                frame_idx += 1
+
+            cap.release()
+            return scenes
+
+        try:
+            scene_list = await asyncio.to_thread(_detect_scenes_cv2)
+        except Exception as e:
+            logger.error(f"Ошибка детекции сцен: {e}")
+            scene_list = []
+
+        frame_list = []
+        n_scenes = len(scene_list)
+        for i, (start_sec, _end_sec) in enumerate(scene_list):
+            img_path = os.path.join(images_dir, f"v_{uuid.uuid4().hex[:6]}.jpg")
+            await save_high_res_frame(file_path, start_sec, img_path)
+            frame_list.append((img_path, start_sec))
+            if (i + 1) % 10 == 0 or i == n_scenes - 1:
+                prog(
+                    62 + int(((i + 1) / max(n_scenes, 1)) * 3),
+                    f"Извлечено кадров: {i + 1}/{n_scenes}",
                 )
-                if last_seen_thumb is None:
-                    last_seen_thumb = thumb
-                    stable_since_sec = current_sec
-                    img_path = os.path.join(images_dir, f"v_{uuid.uuid4().hex[:6]}.jpg")
-                    await save_high_res_frame(file_path, current_sec, img_path)
-                    frame_list.append((img_path, current_sec))
-                    prev_saved_thumb = thumb
-                else:
-                    diff_motion = cv2.absdiff(thumb, last_seen_thumb)
-                    motion_pct = float(np.sum(diff_motion > PIXEL_THR)) / diff_motion.size
-                    if motion_pct >= MOTION_PCT:
-                        stable_since_sec = current_sec
-                    else:
-                        if current_sec - stable_since_sec >= STABLE_WAIT_SEC:
-                            if prev_saved_thumb is not None:
-                                diff_saved = cv2.absdiff(thumb, prev_saved_thumb)
-                                saved_pct = float(np.sum(diff_saved > PIXEL_THR)) / diff_saved.size
-                                if saved_pct >= UPDATE_PCT:
-                                    img_path = os.path.join(
-                                        images_dir, f"v_{uuid.uuid4().hex[:6]}.jpg"
-                                    )
-                                    await save_high_res_frame(file_path, current_sec, img_path)
-                                    if saved_pct >= NEW_SLIDE_PCT:
-                                        frame_list.append((img_path, current_sec))
-                                    else:
-                                        if frame_list:
-                                            try:
-                                                await aiofiles.os.remove(frame_list[-1][0])
-                                            except Exception:
-                                                pass
-                                            frame_list[-1] = (img_path, current_sec)
-                                    prev_saved_thumb = thumb
-                            stable_since_sec = current_sec
-                last_seen_thumb = thumb
-                current_sec += CHECK_STEP_SEC
-                if int(current_sec) % 5 == 0:
-                    prog(
-                        62 + int((current_sec / duration_sec) * 3) if duration_sec > 0 else 62,
-                        f"Анализ видео: {format_seconds(current_sec)} / {format_seconds(duration_sec)}",
-                    )
-        finally:
-            process.kill()
-            try:
-                stderr_data = await asyncio.wait_for(process.stderr.read(4096), timeout=5)
-                if stderr_data:
-                    logger.warning(
-                        f"[FFmpeg stderr] {stderr_data.decode(errors='replace').strip()}"
-                    )
-            except Exception:
-                pass
-            await asyncio.wait_for(process.wait(), timeout=30)
-            if notebook_id is not None:
-                unregister_subprocess(notebook_id, process)
-
-        last_seen_thumb = None
-        prev_saved_thumb = None
-        import gc
-
-        gc.collect()
 
         n = len(frame_list)
         shared_llm_url = None
