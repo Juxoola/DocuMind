@@ -15,6 +15,10 @@ logger = logging.getLogger(__name__)
 # Глобальный URL vision-сервера: обновляется при restart watchdog
 _vision_url: str | None = None
 
+# Флаг "сервер перезагружается" — vision-запросы ждут вместо спама
+_vision_ready = asyncio.Event()
+_vision_ready.set()  # изначально "готов"
+
 
 # Кодирование изображения в base64 с ресайзом при превышении лимита
 def get_image_base64(image_path, max_dimension=1568):
@@ -88,6 +92,7 @@ async def get_vision_url(llm_settings, progress_cb=None):
         )
         global _vision_url
         _vision_url = url
+        _vision_ready.set()
         return url
     except Exception as e:
         logger.error(f"[Vision] Ошибка ленивого запуска: {e}")
@@ -97,6 +102,10 @@ async def get_vision_url(llm_settings, progress_cb=None):
 def set_vision_url(url: str | None):
     global _vision_url
     _vision_url = url
+    if url:
+        _vision_ready.set()
+    else:
+        _vision_ready.clear()
 
 
 def _clean_think_tags(text):
@@ -131,10 +140,21 @@ async def describe_image_with_lmstudio(
 
     vision_url = existing_llm_url or _vision_url
     if vision_url:
-        for attempt in range(2):
+        for attempt in range(3):
             if cancel_check and cancel_check():
                 logger.info("[Ingestion] Отмена: vision запрос пропущен")
                 return "Изображение без описания."
+            # Если сервер перезагружается — ждём до 30с вместо спама
+            if not _vision_ready.is_set():
+                try:
+                    await asyncio.wait_for(_vision_ready.wait(), timeout=30)
+                except TimeoutError:
+                    logger.warning("[Vision] Сервер не восстановился за 30с, пропуск кадра")
+                    return "Изображение без описания."
+                vision_url = _vision_url or vision_url
+                if cancel_check and cancel_check():
+                    return "Изображение без описания."
+
             try:
                 v_temp = float(llm_settings.get("vision_temperature") or config.VISION_TEMPERATURE)
                 v_max = int(llm_settings.get("vision_max_tokens") or 4096)
@@ -193,8 +213,15 @@ async def describe_image_with_lmstudio(
                 else:
                     logger.error(f"[Ingestion] Ошибка GGUF {r.status_code}: {r.text}")
             except Exception as e:
-                logger.error(f"[Ingestion] Ошибка запроса (попытка {attempt + 1}): {e}")
-                await asyncio.sleep(1)
+                # Connection error = сервер перезагружается: ждём с backoff
+                backoff = [3, 8, 15][min(attempt, 2)]
+                logger.warning(
+                    f"[Ingestion] Ошибка запроса (попытка {attempt + 1}): {e}. "
+                    f"Ожидание {backoff}с..."
+                )
+                # Сбросить URL — watchdog мог назначить новый порт
+                vision_url = _vision_url or vision_url
+                await asyncio.sleep(backoff)
         return "Ошибка анализа после всех попыток"
 
     api_url = (llm_settings.get("llm_url") if llm_settings else None) or config.LM_STUDIO_URL

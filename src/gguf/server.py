@@ -156,6 +156,11 @@ async def _watchdog_memory(server_key: str, process, role: str):
                     f"[GGUF Watchdog] {role}/{os.path.basename(server_key)}: "
                     f"RSS {rss_mb}MB > {limit_mb}MB limit. Restarting..."
                 )
+                # Сигнал vision-запросам: ждите, сервер умирает
+                if role == "vision":
+                    from src.ingestion.vision import set_vision_url
+
+                    set_vision_url(None)
                 await _kill_server_process(process)
                 try:
                     await asyncio.wait_for(process.wait(), timeout=5)
@@ -613,6 +618,11 @@ async def get_vision_server(
                 return f"http://127.0.0.1:{_server_ports[server_key]}"
             else:
                 logger.info("[GGUF Server] Vision: настройки изменились, перезапуск...")
+
+    # Сигнал vision-запросам: сервер перезагружается
+    from src.ingestion.vision import set_vision_url
+
+    set_vision_url(None)
 
     await unload_all_models(role="vision")
 
