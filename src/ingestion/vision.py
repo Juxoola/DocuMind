@@ -120,7 +120,7 @@ async def describe_image_with_lmstudio(
     image_path, llm_settings=None, existing_llm_url=None, cancel_check=None
 ):
 
-    prompt = """Опиши изображение.
+    prompt = """Опиши изображение. Используй markdown: заголовки (#, ##), списки (-), таблицы, fenced code blocks (```) для кода, $$ для формул.
 
 Если диаграмма/схема/таблица (даже если есть текст) — подробно: заголовок,
 все блоки, стрелки, связи, подписи, содержимое ячеек, иерархия.
