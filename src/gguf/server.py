@@ -67,8 +67,8 @@ async def _kill_server_process(process) -> None:
         except Exception:
             try:
                 process.kill()
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Не удалось убить процесс GGUF-сервера fallback kill: {e}")
     else:
         process.kill()
 
@@ -110,12 +110,12 @@ async def _wait_for_server(
         backoff = min(backoff * 2, 1.0)
     try:
         await _kill_server_process(process)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug(f"_kill_server_process failed в _wait_for_server (timeout): {e}")
     try:
         await asyncio.wait_for(process.wait(), timeout=5)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug(f"process.wait() timeout в _wait_for_server: {e}")
     raise TimeoutError(f"{role.capitalize()} сервер не ответил за 60 секунд")
 
 
@@ -164,8 +164,8 @@ async def _watchdog_memory(server_key: str, process, role: str):
                 await _kill_server_process(process)
                 try:
                     await asyncio.wait_for(process.wait(), timeout=5)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"process.wait() timeout при auto-restart watchdog ({role}): {e}")
                 await asyncio.sleep(2)
                 async with _lock:
                     cfg = _server_configs.get(server_key)
@@ -292,8 +292,8 @@ async def unload_rag_models_safe():
         from src.rag.models import unload_rag_models
 
         unload_rag_models(hard=False)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug(f"Не удалось выгрузить RAG-модели (unload_rag_models_safe): {e}")
 
 
 def _build_llm_config(
@@ -766,14 +766,14 @@ async def unload_all_models(role: str = None):
             try:
                 client = await _get_health_client()
                 await client.post(f"http://127.0.0.1:{port}/slots/0/clear")
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Не удалось очистить слоты GGUF-сервера на порту {port}: {e}")
         try:
             await _kill_server_process(process)
             try:
                 await asyncio.wait_for(process.wait(), timeout=10)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"process.wait() timeout при остановке {path}: {e}")
             for _ in range(10):
                 if not _proc_alive(process):
                     break
@@ -799,8 +799,8 @@ async def unload_all_models(role: str = None):
     if torch.cuda.is_available():
         try:
             torch.cuda.ipc_collect()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"torch.cuda.ipc_collect failed: {e}")
     await asyncio.sleep(0.1)
 
 

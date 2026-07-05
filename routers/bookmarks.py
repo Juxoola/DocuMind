@@ -20,7 +20,7 @@ router = APIRouter(tags=["bookmarks"])
 
 # ── Получение закладок ──
 @router.get("/api/bookmarks")
-async def api_list_bookmarks(notebook_id: str = Query(...)):
+async def api_list_bookmarks(notebook_id: str = Query(...)) -> dict:
 
     notebook_id = validate_nb_id(notebook_id)
     return {"bookmarks": await list_bookmarks(notebook_id)}
@@ -50,7 +50,7 @@ class CreateBookmarkRequest(BaseModel):
 
 # ── Создание и обновление закладок ──
 @router.post("/api/bookmarks")
-async def api_create_bookmark(req: CreateBookmarkRequest):
+async def api_create_bookmark(req: CreateBookmarkRequest) -> dict:
 
     req.notebook_id = validate_nb_id(req.notebook_id)
     try:
@@ -66,7 +66,7 @@ class UpdateBookmarkRequest(BaseModel):
 
 
 @router.patch("/api/bookmarks/{bookmark_id}")
-async def api_update_bookmark(bookmark_id: str, req: UpdateBookmarkRequest):
+async def api_update_bookmark(bookmark_id: str, req: UpdateBookmarkRequest) -> dict:
 
     req.notebook_id = validate_nb_id(req.notebook_id)
     patch = {k: v for k, v in req.model_dump().items() if k != "notebook_id" and v is not None}

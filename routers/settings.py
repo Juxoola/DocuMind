@@ -14,7 +14,7 @@ router = APIRouter(tags=["settings"])
 
 # ── Конфигурация GGUF: пути поиска и параметры по умолчанию ──
 @router.get("/api/gguf-config")
-async def api_get_gguf_config():
+async def api_get_gguf_config() -> dict:
     return {
         "search_dirs": config.GGUF_SEARCH_DIRS,
         "default_ctx_size": config.GGUF_CTX_SIZE,
@@ -106,7 +106,7 @@ class UpdateRagConfigRequest(BaseModel):
 
 # ── Применение новой конфигурации RAG с перезагрузкой моделей ──
 @router.post("/api/update-rag-config")
-async def update_rag_config(req: UpdateRagConfigRequest):
+async def update_rag_config(req: UpdateRagConfigRequest) -> dict:
     from src.rag.models import preload_all_models, unload_rag_models
 
     old_embedding = config.EMBEDDING_MODEL_NAME

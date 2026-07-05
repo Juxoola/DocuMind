@@ -505,8 +505,8 @@ async def get_source_content(filename: str, notebook_id: str):
             full_text = "\n\n".join(parts)
             _set_cached_source(cache_key, full_text)
             return {"text": full_text}
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("source_content: не удалось прочитать из ChromaDB: %s", e)
 
     return {"text": "Содержимое документа не найдено."}
 
@@ -670,8 +670,8 @@ async def export_text(filename: str, notebook_id: str, fmt: str = "txt"):
                     for page_num, chunks in pages_sorted:
                         parts.append(f"\n\n--- Стр. {page_num} ---\n\n" + "\n\n".join(chunks))
                     text = "\n\n".join(parts)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("export_text: не удалось прочитать из ChromaDB: %s", e)
         if not text:
             text = f"Содержимое {filename} не найдено."
 

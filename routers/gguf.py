@@ -27,7 +27,7 @@ router = APIRouter(tags=["gguf"])
 
 # ── Сканирование и статус GGUF-моделей ──
 @router.get("/api/gguf-models")
-async def api_scan_gguf_models():
+async def api_scan_gguf_models() -> dict:
     try:
         models = await scan_gguf_dirs()
         return {"models": models}
@@ -36,13 +36,13 @@ async def api_scan_gguf_models():
 
 
 @router.get("/api/gguf-loaded")
-async def api_gguf_loaded_models():
+async def api_gguf_loaded_models() -> dict:
     loaded = await get_loaded_models()
     return {"loaded_models": [os.path.basename(p) for p in loaded]}
 
 
 @router.get("/api/gguf-status")
-async def api_gguf_status():
+async def api_gguf_status() -> dict:
     count = await count_running_servers()
     return {"running_count": count}
 
@@ -73,13 +73,13 @@ async def _get_gguf_servers_info() -> list:
 
 
 @router.post("/api/gguf-unload")
-async def api_gguf_unload_all():
+async def api_gguf_unload_all() -> dict:
     await unload_all_models()
     return {"status": "ok", "msg": "Все модели выгружены"}
 
 
 @router.post("/api/gguf-kill-all")
-async def api_gguf_kill_all():
+async def api_gguf_kill_all() -> dict:
     await kill_stray_servers()
     await unload_all_models()
     return {"status": "ok", "msg": "Все процессы llama-server завершены"}
@@ -104,7 +104,7 @@ async def _run_nvidia_smi(query_args: list[str], timeout: float = 3) -> str | No
 
 # ── Мониторинг VRAM и процессов GPU ──
 @router.get("/api/vram")
-async def api_vram():
+async def api_vram() -> dict:
     if not await asyncio.to_thread(shutil.which, "nvidia-smi"):
         return {
             "gpu": {
@@ -210,7 +210,7 @@ async def api_preload_llm(request: PreloadLlmRequest):
 
 
 @router.get("/api/llm-status")
-async def api_llm_status():
+async def api_llm_status() -> dict:
     return await get_llm_status()
 
 
@@ -250,8 +250,8 @@ async def api_context_usage():
                     if ratio is not None and n_ctx:
                         n_used = round(ratio * n_ctx)
                         return {"used": n_used, "total": n_ctx, "pct": round(ratio * 100, 1)}
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("context-usage: не удалось получить метрики контекста: %s", e)
 
             resp = await client.get(f"http://127.0.0.1:{port}/slots")
             if resp.status_code == 200:

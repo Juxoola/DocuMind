@@ -69,7 +69,7 @@ async def migrate_old_data():
 
 # ── CRUD-эндпоинты блокнотов ──
 @router.get("/api/notebooks")
-async def get_notebooks():
+async def get_notebooks() -> dict:
     nbs = []
     if await aiofiles.os.path.exists(config.NOTEBOOKS_DIR):
         for entry in await aiofiles.os.listdir(config.NOTEBOOKS_DIR):
@@ -100,7 +100,7 @@ class CreateNotebookRequest(BaseModel):
 
 
 @router.post("/api/notebooks")
-async def create_notebook(req: CreateNotebookRequest):
+async def create_notebook(req: CreateNotebookRequest) -> dict:
     nb_id = str(uuid.uuid4())[:8]
     paths = config.get_notebook_paths(nb_id)
     await aiofiles.os.makedirs(paths["data"], exist_ok=True)
@@ -114,7 +114,7 @@ async def create_notebook(req: CreateNotebookRequest):
 
 # ── Удаление блокнота с очисткой ресурсов ──
 @router.delete("/api/notebooks/{nb_id}")
-async def delete_notebook(nb_id: str):
+async def delete_notebook(nb_id: str) -> dict:
     nb_id = validate_nb_id(nb_id)
     paths = config.get_notebook_paths(nb_id)
     base_path = paths["base"]

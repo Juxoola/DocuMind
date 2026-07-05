@@ -76,8 +76,9 @@ async def scan_gguf_dirs() -> list[dict]:
             if await aiofiles.os.path.exists(_GGUF_CACHE_FILE):
                 async with aiofiles.open(_GGUF_CACHE_FILE, encoding="utf-8") as f:
                     cached = orjson.loads(await f.read())
-        except Exception:
+        except Exception as e:
             cached = None
+            logger.debug(f"Ошибка чтения кэша scan_gguf_dirs: {e}")
 
         if cached:
             try:
@@ -90,8 +91,8 @@ async def scan_gguf_dirs() -> list[dict]:
                 ) and len(cached_mtimes) == len(roots)
                 if age < _GGUF_CACHE_TTL_SEC and roots_valid:
                     return cached.get("results", [])
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Ошибка проверки TTL/mtime кэша scan_gguf_dirs: {e}")
 
         results = await _scan_gguf_dirs_uncached()
         try:
@@ -116,8 +117,8 @@ async def invalidate_scan_cache():
         try:
             if await aiofiles.os.path.exists(_GGUF_CACHE_FILE):
                 await aiofiles.os.remove(_GGUF_CACHE_FILE)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"Не удалось удалить кэш scan_gguf_dirs: {e}")
 
 
 # ── Поиск GGUF-файла по имени в индексе ──

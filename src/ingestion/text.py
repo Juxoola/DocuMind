@@ -447,12 +447,15 @@ async def _surya_layout_pass(
         for region in page_regions:
             if _is_cancelled():
                 break
-            label = region["label"]
-            img = region["image"]
-            img_name = f"surya_{label.lower()}_p{page_idx + 1}_{uuid.uuid4().hex[:4]}.png"
-            img_path = os.path.join(images_dir, img_name)
-            await asyncio.to_thread(img.save, img_path)
-            frame_list.append({"page": page_idx + 1, "path": img_path})
+            try:
+                label = region["label"]
+                img = region["image"]
+                img_name = f"surya_{label.lower()}_p{page_idx + 1}_{uuid.uuid4().hex[:4]}.png"
+                img_path = os.path.join(images_dir, img_name)
+                await asyncio.to_thread(img.save, img_path)
+                frame_list.append({"page": page_idx + 1, "path": img_path})
+            except Exception:
+                logger.debug(f"[surya_layout] Не удалось сохранить region на странице {page_idx + 1}")
 
     surya_shutdown()
     return frame_list

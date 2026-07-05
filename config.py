@@ -25,7 +25,7 @@ os.makedirs(NOTEBOOKS_DIR, exist_ok=True)
 _notebook_paths_cache: dict[str, dict] = {}
 
 
-def get_notebook_paths(notebook_id: str):
+def get_notebook_paths(notebook_id: str) -> dict:
     cached = _notebook_paths_cache.get(notebook_id)
     if cached is not None:
         return cached

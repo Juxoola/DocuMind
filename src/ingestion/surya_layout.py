@@ -79,7 +79,7 @@ def _ensure_recognition():
 
 
 # Типы regions которые извлекаем как изображения
-IMAGE_REGIONS = {"Diagram", "Table", "Figure"}
+IMAGE_REGIONS = frozenset({"Diagram", "Table", "Figure"})
 
 
 # ── Определение layout regions на страницах ──

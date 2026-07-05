@@ -62,8 +62,8 @@ async def get_vector_store(notebook_id: str):
             _oldest_path, (_oldest_client, _) = _client_cache.popitem(last=False)
             try:
                 _oldest_client.close()
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Ошибка закрытия ChromaDB клиента (LRU eviction) {_oldest_path}: {e}")
             logger.debug(f"LRU eviction: закрыт ChromaDB клиент {_oldest_path}")
 
     await aiofiles.os.makedirs(db_path, exist_ok=True)
@@ -75,8 +75,8 @@ async def get_vector_store(notebook_id: str):
         if db_path in _client_cache:
             try:
                 db.close()
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Ошибка закрытия дублирующего ChromaDB клиента {db_path}: {e}")
             _, vector_store = _client_cache[db_path]
             _client_cache.move_to_end(db_path)
         else:
@@ -112,12 +112,12 @@ async def close_notebook_client(notebook_id: str):
                 col = client.get_collection("multimodal_rag")
                 col.delete()
                 client.delete_collection("multimodal_rag")
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Не удалось удалить коллекцию multimodal_rag для {notebook_id}: {e}")
             try:
                 client.close()
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Не удалось закрыть ChromaDB клиент {db_path}: {e}")
             logger.debug(f"ChromaDB клиент закрыт для {notebook_id} ({db_path})")
         except Exception as e:
             logger.debug(f"Ошибка закрытия ChromaDB клиента {db_path}: {e}")

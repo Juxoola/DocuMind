@@ -29,7 +29,7 @@ try:
     if os.path.exists(lib_dir):
         os.add_dll_directory(lib_dir)
 except Exception:
-    pass
+    logger.debug("Не удалось добавить DLL-директорию torch, используется стандартный путь")
 
 
 # Реестр дочерних процессов для отслеживания и завершения
@@ -63,7 +63,7 @@ def kill_subprocesses(notebook_id):
             if p.poll() is None:
                 p.kill()
         except Exception:
-            pass
+            logger.debug("Не удалось завершить дочерний процесс при kill_subprocesses")
     return len(procs)
 
 

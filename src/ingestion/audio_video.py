@@ -264,9 +264,9 @@ async def process_audio_video(
             _HIST_THRESH = 0.55
             _MIN_SCENE_LEN = 90  # ~3с при 30fps — не дублируем похожие кадры
             _CHECK_EVERY = 3
-            _HIST_SIZE = [64, 64, 64]
-            _H_RANGES = [0, 180]
-            _SV_RANGES = [0, 256]
+            _HIST_SIZE = (64, 64, 64)
+            _H_RANGES = (0, 180)
+            _SV_RANGES = (0, 256)
             _RANGES = _H_RANGES + _SV_RANGES + _SV_RANGES
 
             cap = cv2.VideoCapture(file_path)

@@ -116,8 +116,8 @@ async def _schedule_bm25_rebuild(notebook_id: str, db_path: str, new_nodes: list
         if old is not None:
             try:
                 old.cancel()
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Не удалось отменить таймер debounce для {notebook_id}: {e}")
         _bm25_pending_dbpath[notebook_id] = db_path
 
         if new_nodes:
@@ -173,8 +173,8 @@ async def flush_bm25_rebuild(
         if task is not None:
             try:
                 task.cancel()
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Не удалось отменить задачу flush_bm25 для {notebook_id}: {e}")
         path = _bm25_pending_dbpath.pop(notebook_id, None)
         pending = _bm25_pending_nodes.pop(notebook_id, [])
         if path is None and db_path is not None:
