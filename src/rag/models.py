@@ -49,12 +49,12 @@ async def init_settings(max_tokens=1024):
 
 # Загрузка GGUF embedding-модели через локальный сервер с автоопределением parallelism
 async def _init_embed_model():
-    model_name = config.EMBEDDING_MODEL_NAME
+    model_name = config.rag.embedding_model
 
     if not config.validate_gguf_path(model_name):
         raise RuntimeError(
             "Поддерживаются только GGUF-модели эмбеддингов. "
-            "Укажите путь к .gguf файлу в config.EMBEDDING_MODEL_NAME.\n"
+            "Укажите путь к .gguf файлу в config.rag.embedding_model.\n"
             f"Текущее значение: {model_name}"
         )
     logger.info(f"Инициализация GGUF эмбеддингов: {model_name}")
@@ -63,7 +63,7 @@ async def _init_embed_model():
     from src.gguf.server import get_gguf_embedding_url
 
     model_path = config.resolve_model_path(model_name)
-    url = await get_gguf_embedding_url(model_path, n_parallel=config.EMBEDDING_N_PARALLEL)
+    url = await get_gguf_embedding_url(model_path, n_parallel=config.rag.embedding_n_parallel)
     try:
         from src.gguf.server import get_active_embedding_parallel
 
@@ -94,17 +94,17 @@ async def preload_all_models():
         await init_settings()
     except Exception as e:
         logger.warning(f"  [RAG] ⚠ Эмбеддинги не загружены (будут загружены lazily): {e}")
-    if config.RERANKER_MODEL_NAME:
+    if config.rag.reranker_model:
         try:
-            if not config.validate_gguf_path(config.RERANKER_MODEL_NAME):
+            if not config.validate_gguf_path(config.rag.reranker_model):
                 logger.warning(
-                    f"  [RAG] ⚠ Реранкер пропущен: неверный формат ({config.RERANKER_MODEL_NAME})"
+                    f"  [RAG] ⚠ Реранкер пропущен: неверный формат ({config.rag.reranker_model})"
                 )
             else:
-                logger.info(f"  [RAG] Предзагрузка GGUF реранкера: {config.RERANKER_MODEL_NAME}")
+                logger.info(f"  [RAG] Предзагрузка GGUF реранкера: {config.rag.reranker_model}")
                 from src.gguf.server import get_gguf_embedding_url
 
-                model_path = config.resolve_model_path(config.RERANKER_MODEL_NAME)
+                model_path = config.resolve_model_path(config.rag.reranker_model)
                 await get_gguf_embedding_url(model_path, is_reranker=True)
         except Exception as e:
             logger.warning(f"  [RAG] ⚠ Реранкер не загружен (будет загружен lazily): {e}")

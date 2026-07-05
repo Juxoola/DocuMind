@@ -82,7 +82,7 @@ async def _wait_for_server(
     server_config: dict | None = None,
 ) -> str:
     start_wait = time.time()
-    backoff = 0.05
+    backoff = 0.01
     while time.time() - start_wait < 60:
         if await is_server_ready(port):
             logger.info(f"[GGUF Server] {role.capitalize()} готов!")
@@ -793,6 +793,16 @@ async def unload_all_models(role: str = None):
             _server_ports.pop(path, None)
             _server_configs.pop(path, None)
             _server_roles.pop(path, None)
+
+        # Clean up stale entries where the process is dead
+        stale_keys = [
+            k for k, p in _server_processes.items() if not _proc_alive(p)
+        ]
+        for k in stale_keys:
+            _server_processes.pop(k, None)
+            _server_ports.pop(k, None)
+            _server_configs.pop(k, None)
+            _server_roles.pop(k, None)
 
     from src.ingestion.utils import cleanup_gpu
 

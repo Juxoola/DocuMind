@@ -94,7 +94,7 @@ async def _rebuild_bm25_bg(notebook_id: str, db_path: str, new_nodes: list = Non
 
                 return BM25Retriever.from_defaults(
                     nodes=full_corpus,
-                    similarity_top_k=config.RAG_TOP_K_PER_FILE,
+                    similarity_top_k=config.rag.top_k_per_file,
                     language="russian",
                 )
 

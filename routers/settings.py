@@ -16,7 +16,7 @@ router = APIRouter(tags=["settings"])
 @router.get("/api/gguf-config")
 async def api_get_gguf_config() -> dict:
     return {
-        "search_dirs": config.GGUF_SEARCH_DIRS,
+        "search_dirs": config.rag.gguf_search_dirs,
         "default_ctx_size": config.GGUF_CTX_SIZE,
         "default_gpu_layers": config.GGUF_GPU_LAYERS,
         "default_threads": config.GGUF_THREADS,
@@ -43,7 +43,7 @@ class UpdateModelDirsRequest(BaseModel):
 @router.post("/api/update-model-dirs")
 async def update_model_dirs(req: UpdateModelDirsRequest):
     with config._config_lock:
-        config.GGUF_SEARCH_DIRS = req.dirs
+        config.rag.gguf_search_dirs = req.dirs
         data = config._collect_rag_config()
     await save_rag_config(config.RAG_CONFIG_FILE, data)
     config.invalidate_model_cache()
@@ -53,23 +53,23 @@ async def update_model_dirs(req: UpdateModelDirsRequest):
         await invalidate_scan_cache()
     except Exception:
         logger.debug("settings: не удалось инвалидировать кэш сканирования")
-    return {"status": "ok", "new_dirs": config.GGUF_SEARCH_DIRS}
+    return {"status": "ok", "new_dirs": config.rag.gguf_search_dirs}
 
 
 # ── Конфигурация RAG: модели, параметры поиска ──
 @router.get("/api/rag-config")
 async def get_rag_config():
     return {
-        "embedding_model": config.EMBEDDING_MODEL_NAME,
-        "reranker_model": config.RERANKER_MODEL_NAME,
-        "embedding_n_parallel": config.EMBEDDING_N_PARALLEL,
-        "top_k_per_file": config.RAG_TOP_K_PER_FILE,
-        "rerank_pool": config.RAG_RERANK_POOL,
-        "final_top_n": config.RAG_FINAL_TOP_N,
-        "use_reranker": config.USE_RERANKER,
-        "query_expansion": config.RAG_QUERY_EXPANSION,
-        "rerank_score_threshold": config.RERANK_SCORE_THRESHOLD,
-        "surya_mode": config.SURYA_MODE,
+        "embedding_model": config.rag.embedding_model,
+        "reranker_model": config.rag.reranker_model,
+        "embedding_n_parallel": config.rag.embedding_n_parallel,
+        "top_k_per_file": config.rag.top_k_per_file,
+        "rerank_pool": config.rag.rerank_pool,
+        "final_top_n": config.rag.final_top_n,
+        "use_reranker": config.rag.use_reranker,
+        "query_expansion": config.rag.query_expansion,
+        "rerank_score_threshold": config.rag.rerank_score_threshold,
+        "surya_mode": config.rag.surya_mode,
     }
 
 
@@ -109,22 +109,11 @@ class UpdateRagConfigRequest(BaseModel):
 async def update_rag_config(req: UpdateRagConfigRequest) -> dict:
     from src.rag.models import preload_all_models, unload_rag_models
 
-    old_embedding = config.EMBEDDING_MODEL_NAME
-    old_reranker = config.RERANKER_MODEL_NAME
+    old_embedding = config.rag.embedding_model
+    old_reranker = config.rag.reranker_model
 
     with config._config_lock:
-        if req.embedding_model:
-            config.EMBEDDING_MODEL_NAME = req.embedding_model
-        if req.reranker_model:
-            config.RERANKER_MODEL_NAME = req.reranker_model
-        config.EMBEDDING_N_PARALLEL = req.embedding_n_parallel
-        config.RAG_TOP_K_PER_FILE = req.top_k_per_file
-        config.RAG_RERANK_POOL = req.rerank_pool
-        config.RAG_FINAL_TOP_N = req.final_top_n
-        config.USE_RERANKER = req.use_reranker
-        config.RAG_QUERY_EXPANSION = req.query_expansion
-        config.RERANK_SCORE_THRESHOLD = req.rerank_score_threshold
-        config.SURYA_MODE = req.surya_mode
+        config.update_rag_config(req.model_dump())
         data = config._collect_rag_config()
     await save_rag_config(config.RAG_CONFIG_FILE, data)
 

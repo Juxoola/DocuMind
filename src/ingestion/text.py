@@ -3,6 +3,7 @@
 import asyncio
 import logging
 import os
+import re
 import uuid
 
 import aiofiles
@@ -18,6 +19,23 @@ from src.ingestion.utils import IngestionCancelled
 from src.ingestion.vision import describe_image_with_lmstudio, get_vision_url
 
 logger = logging.getLogger(__name__)
+
+# ── Pre-compiled regex patterns for markdown cleaning ──
+_RE_MD_H2STAR = re.compile(r'^(#{1,6})\s*\*\*(.+?)\*\*\s*$', re.MULTILINE)
+_RE_MD_PICTURE_OMITTED = re.compile(
+    r'\*{0,2}={1,2}> picture \[\d+ x \d+\] intentionally omitted <={1,2}\*{0,2}'
+)
+_RE_MD_PICTURE_TEXT = re.compile(
+    r'----- Start of picture text -----.*?----- End of picture text -----',
+    re.DOTALL,
+)
+_RE_MD_PAGE_REF = re.compile(r'\*\*(.+?\.{3,}\d+)\*\*')
+_RE_MD_PAGE_NUM = re.compile(r'\n\s*\d{1,3}\s*\n')
+_RE_MD_NEWLINES = re.compile(r'\n{3,}')
+_RE_MD_PICTURE_OMITTED_2 = re.compile(
+    r'=> picture \[\d+ x \d+\] intentionally omitted <=.*?(?=----- Start|$)',
+    re.DOTALL,
+)
 
 
 # Основной конвейер PDF: извлечение текста (pymupdf4llm), изображения (surya layout), Vision-анализ
@@ -43,7 +61,7 @@ async def process_pdf(
     results = []
     splitter = _get_splitter()
     total_pages = len(doc)
-    surya_mode = getattr(config, "SURYA_MODE", "disabled")
+    surya_mode = config.rag.surya_mode
 
     # ── Шаг 1: pymupdf4llm для текста ──
     use_surya_ocr = False
@@ -70,26 +88,16 @@ async def process_pdf(
             use_surya_ocr = True
         else:
             # Хороший текстовый PDF
-            import re
 
             # ── Очистка markdown от артефактов pymupdf ──
             def _clean_markdown(text):
-                text = re.sub(r"^(#{1,6})\s*\*\*(.+?)\*\*\s*$", r"\1 \2", text, flags=re.MULTILINE)
-                text = re.sub(
-                    r"\*{0,2}={1,2}> picture \[\d+ x \d+\] intentionally omitted <={1,2}\*{0,2}",
-                    "",
-                    text,
-                )
-                text = re.sub(
-                    r"----- Start of picture text -----.*?----- End of picture text -----",
-                    "",
-                    text,
-                    flags=re.DOTALL,
-                )
-                text = re.sub(r"\*\*(.+?\.{3,}\d+)\*\*", r"\1", text)
-                text = re.sub(r"\n\s*\d{1,3}\s*\n", "\n", text)
+                text = _RE_MD_H2STAR.sub(r"\1 \2", text)
+                text = _RE_MD_PICTURE_OMITTED.sub("", text)
+                text = _RE_MD_PICTURE_TEXT.sub("", text)
+                text = _RE_MD_PAGE_REF.sub(r"\1", text)
+                text = _RE_MD_PAGE_NUM.sub("\n", text)
                 text = text.replace("\\n", "\n")
-                text = re.sub(r"\n{3,}", "\n\n", text)
+                text = _RE_MD_NEWLINES.sub("\n\n", text)
                 text = text.strip()
                 return text
 
@@ -100,19 +108,9 @@ async def process_pdf(
                     md_text = _clean_markdown(md_text)
 
                     # Удаляем pymupdf image placeholders — surya layout извлекает изображения
-                    md_text = re.sub(
-                        r"=> picture \[\d+ x \d+\] intentionally omitted <=.*?(?=----- Start|$)",
-                        "",
-                        md_text,
-                        flags=re.DOTALL,
-                    )
-                    md_text = re.sub(
-                        r"----- Start of picture text -----.*?----- End of picture text -----",
-                        "",
-                        md_text,
-                        flags=re.DOTALL,
-                    )
-                    md_text = re.sub(r"\n{3,}", "\n\n", md_text).strip()
+                    md_text = _RE_MD_PICTURE_OMITTED_2.sub("", md_text)
+                    md_text = _RE_MD_PICTURE_TEXT.sub("", md_text)
+                    md_text = _RE_MD_NEWLINES.sub("\n\n", md_text).strip()
 
                     if md_text and md_text.strip():
                         # Добавляем номер страницы

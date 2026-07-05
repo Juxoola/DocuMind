@@ -5,7 +5,7 @@ import logging
 import os
 import re
 import statistics as _stats
-import threading
+
 import time as _time
 
 import aiofiles.os
@@ -40,7 +40,7 @@ logger = logging.getLogger(__name__)
 _async_rerank_http = httpx.AsyncClient(timeout=60)
 
 _qe_health_cache: dict[str, tuple[bool, float]] = {}
-_qe_health_cache_lock = threading.Lock()
+_qe_health_cache_lock = asyncio.Lock()
 _QE_HEALTH_TTL = 120.0
 
 _QE_RE_NUM = re.compile(r"^\d+[\.\)]\s*")
@@ -49,7 +49,7 @@ _QE_RE_BULLET = re.compile(r"^[-\*\+]\s*")
 
 async def _is_llm_healthy(url: str) -> bool:
     now = _time.time()
-    with _qe_health_cache_lock:
+    async with _qe_health_cache_lock:
         cached = _qe_health_cache.get(url)
     if cached and (now - cached[1]) < _QE_HEALTH_TTL:
         return cached[0]
@@ -60,7 +60,7 @@ async def _is_llm_healthy(url: str) -> bool:
         result = True
     except Exception:
         result = False
-    with _qe_health_cache_lock:
+    async with _qe_health_cache_lock:
         _qe_health_cache[url] = (result, now)
     return result
 
@@ -154,7 +154,7 @@ async def _get_qe_llm():
 def _rrf_fuse(*result_lists, k: int = None):
     scores: dict = {}
     nodes_by_id: dict = {}
-    k = k or config.RAG_RRF_K
+    k = k or config.rag.rrf_k
 
     for ranking in result_lists:
         for rank, nws in enumerate(ranking, start=1):
@@ -199,7 +199,7 @@ async def _load_bm25_retriever(notebook_id: str):
 async def _hybrid_search(index, query: str, allowed_files, bm25_retriever, qe_llm):
     all_nodes = []
 
-    if config.RAG_QUERY_EXPANSION:
+    if config.rag.query_expansion:
         if qe_llm:
             logger.info("  [RAG] Query Expansion включён (num_queries=3)")
         else:
@@ -210,7 +210,7 @@ async def _hybrid_search(index, query: str, allowed_files, bm25_retriever, qe_ll
     else:
         file_filter = _file_filter(allowed_files)
 
-    top_k_per_file = config.RAG_TOP_K_PER_FILE
+    top_k_per_file = config.rag.top_k_per_file
     vector_retriever = index.as_retriever(similarity_top_k=top_k_per_file, filters=file_filter)
 
     num_q = 3 if qe_llm else 1
@@ -219,16 +219,21 @@ async def _hybrid_search(index, query: str, allowed_files, bm25_retriever, qe_ll
 
     try:
         if use_qe:
-            per_file_retrievers = []
-            for fname in allowed_files:
-                per_file_retrievers.append(
-                    index.as_retriever(similarity_top_k=top_k_per_file, filters=_file_filter(fname))
-                )
+            # Single retriever for all files instead of N per-file retrievers
+            if len(allowed_files) > 1:
+                all_filter = MetadataFilters(filters=[
+                    MetadataFilter(key='file_name', value=allowed_files, operator=FilterOperator.IN)
+                ])
+            else:
+                all_filter = _file_filter(allowed_files[0])
+            retrievers = [
+                index.as_retriever(similarity_top_k=top_k_per_file * len(allowed_files), filters=all_filter)
+            ]
             if bm25_retriever:
-                per_file_retrievers.append(_FilteredBM25(bm25_retriever, allowed_files))
+                retrievers.append(_FilteredBM25(bm25_retriever, allowed_files))
 
             fusion_retriever = QueryFusionRetriever(
-                per_file_retrievers,
+                retrievers,
                 similarity_top_k=top_k_per_file * len(allowed_files),
                 num_queries=num_q,
                 query_gen_prompt=qprompt,
@@ -308,7 +313,7 @@ async def _hybrid_search(index, query: str, allowed_files, bm25_retriever, qe_ll
 
                 _qe_cache_key = _hashlib.md5(query.encode()).hexdigest()
                 _now = _time.time()
-                with _qe_health_cache_lock:
+                async with _qe_health_cache_lock:
                     cached_qe = _qe_result_cache.get(_qe_cache_key)
                 if cached_qe and (_now - cached_qe[1]) < _QE_RESULT_TTL:
                     generated_bundles = cached_qe[0]
@@ -318,7 +323,7 @@ async def _hybrid_search(index, query: str, allowed_files, bm25_retriever, qe_ll
                         generated_bundles = await asyncio.to_thread(
                             fusion_retriever._get_queries, query
                         )
-                        with _qe_health_cache_lock:
+                        async with _qe_health_cache_lock:
                             _qe_result_cache[_qe_cache_key] = (generated_bundles, _now)
                         logger.info(
                             "  [RAG] 🧠 Сгенерированные поисковые запросы (Query Expansion):"
@@ -392,8 +397,8 @@ async def _hybrid_search(index, query: str, allowed_files, bm25_retriever, qe_ll
                     ]
                     all_bm.extend(per_bm)
                 all_nodes = _rrf_fuse(all_vec, all_bm)
-                if len(all_nodes) > config.RAG_RERANK_POOL:
-                    all_nodes = all_nodes[: config.RAG_RERANK_POOL]
+                if len(all_nodes) > config.rag.rerank_pool:
+                    all_nodes = all_nodes[: config.rag.rerank_pool]
                 if bm25_retriever:
                     logger.info(
                         f"  [RAG] 🔍 Per-file Гибрид (RRF, vector+BM25) "
@@ -412,21 +417,21 @@ async def _hybrid_search(index, query: str, allowed_files, bm25_retriever, qe_ll
 
 
 async def _rerank_nodes(all_nodes, query: str):
-    if not all_nodes or not config.USE_RERANKER:
+    if not all_nodes or not config.rag.use_reranker:
         return all_nodes
 
     _original_scores = [n.score if hasattr(n, "score") else 0.0 for n in all_nodes]
 
-    if len(all_nodes) > config.RAG_RERANK_POOL:
+    if len(all_nodes) > config.rag.rerank_pool:
         all_nodes.sort(
             key=lambda x: x.score if hasattr(x, "score") and x.score else 0,
             reverse=True,
         )
-        all_nodes = all_nodes[: config.RAG_RERANK_POOL]
+        all_nodes = all_nodes[: config.rag.rerank_pool]
 
     logger.info(f"  [RAG] Чанков для реранкинга: {len(all_nodes)}")
 
-    reranker_name = config.RERANKER_MODEL_NAME
+    reranker_name = config.rag.reranker_model
     reranker_available = config.validate_gguf_path(reranker_name)
     if not reranker_available:
         logger.warning(
@@ -509,7 +514,7 @@ async def _rerank_nodes(all_nodes, query: str):
             node.score = float(score)
 
     all_nodes.sort(key=lambda x: x.score, reverse=True)
-    all_nodes = all_nodes[: config.RAG_FINAL_TOP_N]
+    all_nodes = all_nodes[: config.rag.final_top_n]
 
     return all_nodes
 
@@ -521,10 +526,10 @@ def _filter_chunks(all_nodes):
         mad = _stats.median([abs(s - median) for s in score_vals]) or 0.05
         adaptive_thr = max(0.0, median - 2.0 * mad)
     else:
-        adaptive_thr = config.RERANK_SCORE_THRESHOLD
+        adaptive_thr = config.rag.rerank_score_threshold
 
     above_threshold = [n for n in all_nodes if n.score >= adaptive_thr]
-    min_chunks = min(config.MIN_FINAL_CHUNKS, len(all_nodes))
+    min_chunks = min(config.rag.min_final_chunks, len(all_nodes))
 
     if len(above_threshold) >= min_chunks:
         if len(above_threshold) < len(all_nodes):
@@ -541,14 +546,14 @@ def _filter_chunks(all_nodes):
             f"(мин. score: {all_nodes[-1].score:.3f})"
         )
 
-    if config.RAG_TOP_K_RATIO > 0 and all_nodes:
+    if config.rag.top_k_ratio > 0 and all_nodes:
         top_score = all_nodes[0].score
-        ratio_thr = top_score * config.RAG_TOP_K_RATIO
+        ratio_thr = top_score * config.rag.top_k_ratio
         above_ratio = [n for n in all_nodes if n.score >= ratio_thr]
         if len(above_ratio) >= min_chunks and len(above_ratio) < len(all_nodes):
             logger.info(
-                f"  [RAG] 🎯 Top-K ratio {config.RAG_TOP_K_RATIO:.2f} "
-                f"(порог {ratio_thr:.3f} = {top_score:.3f}*{config.RAG_TOP_K_RATIO:.2f}): "
+                f"  [RAG] 🎯 Top-K ratio {config.rag.top_k_ratio:.2f} "
+                f"(порог {ratio_thr:.3f} = {top_score:.3f}*{config.rag.top_k_ratio:.2f}): "
                 f"убрано {len(all_nodes) - len(above_ratio)} чанков"
             )
             all_nodes = above_ratio
@@ -584,12 +589,12 @@ async def retrieve_nodes(query: str, notebook_id: str, allowed_files=None, max_t
 
     bm25_retriever = await _load_bm25_retriever(notebook_id)
 
-    qe_llm = await _get_qe_llm() if config.RAG_QUERY_EXPANSION else None
+    qe_llm = await _get_qe_llm() if config.rag.query_expansion else None
 
     all_nodes = await _hybrid_search(index, query, allowed_files, bm25_retriever, qe_llm)
 
     all_nodes = await _rerank_nodes(all_nodes, query)
-    if all_nodes and config.USE_RERANKER:
+    if all_nodes and config.rag.use_reranker:
         all_nodes = _filter_chunks(all_nodes)
         logger.info(f"  [RAG] Итого после реранкинга: {len(all_nodes)} чанков")
 

@@ -141,18 +141,6 @@ def collect_rag_config() -> dict:
     return asdict(rag)
 
 
-EMBEDDING_MODEL_NAME = rag.embedding_model
-RERANKER_MODEL_NAME = rag.reranker_model
-EMBEDDING_N_PARALLEL = rag.embedding_n_parallel
-RAG_TOP_K_PER_FILE = rag.top_k_per_file
-RAG_RERANK_POOL = rag.rerank_pool
-RAG_FINAL_TOP_N = rag.final_top_n
-USE_RERANKER = rag.use_reranker
-RAG_QUERY_EXPANSION = rag.query_expansion
-RERANK_SCORE_THRESHOLD = rag.rerank_score_threshold
-MIN_FINAL_CHUNKS = rag.min_final_chunks
-RAG_RRF_K = rag.rrf_k
-RAG_TOP_K_RATIO = rag.top_k_ratio
 GGUF_THREADS = int(os.getenv("GGUF_THREADS", "0"))
 GGUF_GPU_LAYERS = int(os.getenv("GGUF_GPU_LAYERS", "-1"))
 VISION_TEMPERATURE = float(os.getenv("VISION_TEMPERATURE", "0.1"))
@@ -160,30 +148,9 @@ VISION_REPEAT_PENALTY = float(os.getenv("VISION_REPEAT_PENALTY", "1.3"))
 VISION_TOP_P = float(os.getenv("VISION_TOP_P", "0.9"))
 VISION_MIN_P = float(os.getenv("VISION_MIN_P", "0.05"))
 CHAT_TEMPERATURE = float(os.getenv("CHAT_TEMPERATURE", "0.7"))
-GGUF_SEARCH_DIRS = rag.gguf_search_dirs
 GGUF_CTX_SIZE = int(os.getenv("GGUF_CTX_SIZE", "16384"))
 GGUF_CTX_EMBED_CHARS = int(os.getenv("GGUF_CTX_EMBED_CHARS", "4096"))
 VISION_CONCURRENCY = int(os.getenv("VISION_CONCURRENCY", "4"))
-SURYA_MODE = rag.surya_mode
-
-
-def _apply_rag_config(data: dict) -> None:
-    update_rag_config(data)
-    global EMBEDDING_MODEL_NAME, RERANKER_MODEL_NAME, EMBEDDING_N_PARALLEL
-    global RAG_TOP_K_PER_FILE, RAG_RERANK_POOL, RAG_FINAL_TOP_N
-    global USE_RERANKER, RAG_QUERY_EXPANSION, RERANK_SCORE_THRESHOLD, GGUF_SEARCH_DIRS
-    global SURYA_MODE
-    EMBEDDING_MODEL_NAME = rag.embedding_model
-    RERANKER_MODEL_NAME = rag.reranker_model
-    EMBEDDING_N_PARALLEL = rag.embedding_n_parallel
-    RAG_TOP_K_PER_FILE = rag.top_k_per_file
-    RAG_RERANK_POOL = rag.rerank_pool
-    RAG_FINAL_TOP_N = rag.final_top_n
-    USE_RERANKER = rag.use_reranker
-    RAG_QUERY_EXPANSION = rag.query_expansion
-    RERANK_SCORE_THRESHOLD = rag.rerank_score_threshold
-    GGUF_SEARCH_DIRS = rag.gguf_search_dirs
-    SURYA_MODE = rag.surya_mode
 
 
 def _collect_rag_config() -> dict:
@@ -199,7 +166,7 @@ def _load_config_sync():
         if os.path.exists(RAG_CONFIG_FILE):
             with open(RAG_CONFIG_FILE, "rb") as f:
                 data = orjson.loads(f.read())
-            _apply_rag_config(data)
+            update_rag_config(data)
     except Exception as e:
         logger.warning(f"Не удалось загрузить RAG config: {e}")
 

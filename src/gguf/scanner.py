@@ -31,7 +31,7 @@ async def _dir_mtime(root: str) -> float:
 async def _scan_gguf_dirs_uncached() -> list[dict]:
 
     results = []
-    search_dirs = [d.strip() for d in config.GGUF_SEARCH_DIRS.split(";") if d.strip()]
+    search_dirs = [d.strip() for d in config.rag.gguf_search_dirs.split(";") if d.strip()]
 
     for base_dir in search_dirs:
         if not await aiofiles.os.path.exists(base_dir):
@@ -85,7 +85,7 @@ async def scan_gguf_dirs() -> list[dict]:
                 saved_at = float(cached.get("saved_at", 0))
                 age = time.time() - saved_at
                 cached_mtimes = cached.get("dir_mtimes", {}) or {}
-                roots = [d.strip() for d in config.GGUF_SEARCH_DIRS.split(";") if d.strip()]
+                roots = [d.strip() for d in config.rag.gguf_search_dirs.split(";") if d.strip()]
                 roots_valid = all(
                     cached_mtimes.get(r) == await _dir_mtime(r) for r in roots
                 ) and len(cached_mtimes) == len(roots)
@@ -96,7 +96,7 @@ async def scan_gguf_dirs() -> list[dict]:
 
         results = await _scan_gguf_dirs_uncached()
         try:
-            roots = [d.strip() for d in config.GGUF_SEARCH_DIRS.split(";") if d.strip()]
+            roots = [d.strip() for d in config.rag.gguf_search_dirs.split(";") if d.strip()]
             payload = {
                 "saved_at": time.time(),
                 "dir_mtimes": {r: await _dir_mtime(r) for r in roots},
@@ -127,7 +127,7 @@ def find_gguf_by_name_sync(filename: str) -> str | None:
     if not filename:
         return None
     name = os.path.basename(filename)
-    search_dirs = [d.strip() for d in config.GGUF_SEARCH_DIRS.split(";") if d.strip()]
+    search_dirs = [d.strip() for d in config.rag.gguf_search_dirs.split(";") if d.strip()]
     for base_dir in search_dirs:
         if not os.path.exists(base_dir):
             continue

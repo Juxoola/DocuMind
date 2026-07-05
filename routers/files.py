@@ -403,7 +403,6 @@ async def delete_file(filename: str, notebook_id: str):
                         await asyncio.sleep(0.2)
 
         await _sync_remove_with_retry(file_path)
-        # Удаляем кеш предварительного извлечения
         extracted = os.path.join(paths["data"], f"{filename}.extracted.md")
         if await aiofiles.os.path.exists(extracted):
             try:
@@ -431,26 +430,22 @@ async def delete_file(filename: str, notebook_id: str):
     from src.rag.indexing import get_vector_store
 
     vector_store = await get_vector_store(notebook_id)
-    await asyncio.to_thread(vector_store._collection.delete, where={"file_name": filename})
     from src.rag.retrieval import invalidate_index_cache
 
-    await invalidate_index_cache(notebook_id)
-    try:
-        from src.bookmarks import mark_stale_for_file
-
-        stale_count = await mark_stale_for_file(notebook_id, filename)
-        if stale_count:
-            logger.info(
-                f"[BOOKMARKS] {stale_count} закладок помечены как stale после удаления {filename}"
-            )
-    except Exception as e:
-        logger.info(f"[BOOKMARKS] Не удалось пометить stale: {e}")
+    # Run chroma delete, cache invalidation, and bookmark stale-mark in parallel
+    await asyncio.gather(
+        asyncio.to_thread(vector_store._collection.delete, where={"file_name": filename}),
+        invalidate_index_cache(notebook_id),
+        _mark_stale(notebook_id, filename),
+        return_exceptions=True,
+    )
     return {"status": "ok"}
 
 
 # ── Кеш source_content: {key: (timestamp, text)} — TTL 5 минут ──
 _source_content_cache: dict[str, tuple[float, str]] = {}
 _CACHE_TTL = 300
+_MAX_CACHE_ENTRIES = 500
 
 
 def _get_cached_source(key: str) -> str | None:
@@ -461,7 +456,46 @@ def _get_cached_source(key: str) -> str | None:
 
 
 def _set_cached_source(key: str, text: str):
+    if len(_source_content_cache) >= _MAX_CACHE_ENTRIES:
+        # Evict oldest entry
+        oldest_key = min(_source_content_cache, key=lambda k: _source_content_cache[k][0])
+        _source_content_cache.pop(oldest_key, None)
     _source_content_cache[key] = (time.time(), text)
+
+
+async def _read_chroma_content(filename: str, notebook_id: str) -> str:
+    """Read text content from ChromaDB for a file, grouped by page."""
+    from src.rag.indexing import get_vector_store
+    vector_store = await get_vector_store(notebook_id)
+    collection = vector_store._collection
+    result = await asyncio.to_thread(
+        collection.get, where={'file_name': filename}, include=['documents', 'metadatas']
+    )
+    if not result or not result.get('documents'):
+        return ''
+    from collections import defaultdict
+    by_page: dict[int, list[str]] = defaultdict(list)
+    for doc, meta in zip(result['documents'], result['metadatas']):
+        page = meta.get('page', 0)
+        by_page[page].append(doc)
+    pages_sorted = sorted(by_page.items())
+    parts = []
+    for page_num, chunks in pages_sorted:
+        parts.append(f"\n\n--- Стр. {page_num} ---\n\n" + "\n\n".join(chunks))
+    return "\n\n".join(parts)
+
+
+async def _mark_stale(notebook_id: str, filename: str) -> None:
+    """Mark bookmarks as stale for a deleted file. Logs but never raises."""
+    try:
+        from src.bookmarks import mark_stale_for_file
+        stale_count = await mark_stale_for_file(notebook_id, filename)
+        if stale_count:
+            logger.info(
+                f"[BOOKMARKS] {stale_count} закладок помечены как stale после удаления {filename}"
+            )
+    except Exception as e:
+        logger.info(f"[BOOKMARKS] Не удалось пометить stale: {e}")
 
 
 @router.get("/api/source_content")
@@ -488,26 +522,8 @@ async def get_source_content(filename: str, notebook_id: str):
 
     # ── ChromaDB: текст + описания, чередуя по страницам ──
     try:
-        from src.rag.indexing import get_vector_store
-
-        vector_store = await get_vector_store(notebook_id)
-        collection = vector_store._collection
-        result = await asyncio.to_thread(
-            collection.get, where={"file_name": filename}, include=["documents", "metadatas"]
-        )
-        if result and result.get("documents"):
-            # Группируем чанки по странице, текст и описания чередуются
-            from collections import defaultdict
-
-            by_page: dict[int, list[str]] = defaultdict(list)
-            for doc, meta in zip(result["documents"], result["metadatas"]):
-                page = meta.get("page", 0)
-                by_page[page].append(doc)
-            pages_sorted = sorted(by_page.items())
-            parts = []
-            for page_num, chunks in pages_sorted:
-                parts.append(f"\n\n--- Стр. {page_num} ---\n\n" + "\n\n".join(chunks))
-            full_text = "\n\n".join(parts)
+        full_text = await _read_chroma_content(filename, notebook_id)
+        if full_text:
             _set_cached_source(cache_key, full_text)
             return {"text": full_text}
     except Exception as e:
@@ -640,41 +656,18 @@ async def export_text(filename: str, notebook_id: str, fmt: str = "txt"):
     else:
         file_path = os.path.join(paths["data"], filename)
 
-        # Пытаемся взять текст из тех же источников, что и source_content
         cache_key = f"{notebook_id}:{filename}"
         cached = _get_cached_source(cache_key)
         if cached is not None:
             text = cached
         elif ext == ".pdf":
-            # .extracted.md
             extracted_path = os.path.join(paths["data"], f"{filename}.extracted.md")
             if await aiofiles.os.path.exists(extracted_path):
                 async with aiofiles.open(extracted_path, encoding="utf-8") as ef:
                     text = await ef.read()
         if not text:
-            # ChromaDB: текст + описания, чередуя по страницам
             try:
-                from src.rag.indexing import get_vector_store
-
-                vector_store = await get_vector_store(notebook_id)
-                collection = vector_store._collection
-                result = await asyncio.to_thread(
-                    collection.get,
-                    where={"file_name": filename},
-                    include=["documents", "metadatas"],
-                )
-                if result and result.get("documents"):
-                    from collections import defaultdict
-
-                    by_page = defaultdict(list)
-                    for doc, meta in zip(result["documents"], result["metadatas"]):
-                        page = meta.get("page", 0)
-                        by_page[page].append(doc)
-                    pages_sorted = sorted(by_page.items())
-                    parts = []
-                    for page_num, chunks in pages_sorted:
-                        parts.append(f"\n\n--- Стр. {page_num} ---\n\n" + "\n\n".join(chunks))
-                    text = "\n\n".join(parts)
+                text = await _read_chroma_content(filename, notebook_id)
             except Exception as e:
                 logger.debug("export_text: не удалось прочитать из ChromaDB: %s", e)
         if not text:
@@ -724,7 +717,6 @@ async def clear_notebook(notebook_id: str):
 
     from src.rag.indexing import close_all_clients as _close_all
 
-    # Очищаем кеш source_content для этого блокнота
     _prefix = f"{notebook_id}:"
     for k in [k for k in _source_content_cache if k.startswith(_prefix)]:
         del _source_content_cache[k]

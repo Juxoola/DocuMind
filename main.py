@@ -6,7 +6,6 @@ import logging
 import os
 import signal
 import sys
-import threading
 import time
 import uuid
 from contextlib import asynccontextmanager
@@ -208,8 +207,6 @@ async def enforce_upload_size(request, call_next):
     return await call_next(request)
 
 
-_rate_lock = threading.Lock()
-
 # Rate limiting: простой sliding-window по IP. Лимиты: upload=10/min, chat=30/min, other=60/min.
 _rate_store: dict[str, list[float]] = {}
 _RATE_LIMITS = {
@@ -241,21 +238,20 @@ async def rate_limit_middleware(request, call_next):
         limit, window = _DEFAULT_RATE
 
     key = f"{client_ip}:{request.url.path.split('/')[2] if len(request.url.path.split('/')) > 2 else 'root'}"
-    with _rate_lock:
-        # Evict stale entries periodically to prevent unbounded growth
-        if len(_rate_store) > 10000:
-            stale = {k for k, v in _rate_store.items() if not v or now - v[-1] >= 120}
-            for k in stale:
-                _rate_store.pop(k, None)
-        timestamps = _rate_store.get(key, [])
-        timestamps = [t for t in timestamps if now - t < window]
-        if len(timestamps) >= limit:
-            return JSONResponse(
-                status_code=429,
-                content={"detail": "Слишком много запросов. Попробуйте позже."},
-            )
-        timestamps.append(now)
-        _rate_store[key] = timestamps
+    # Evict stale entries periodically to prevent unbounded growth
+    if len(_rate_store) > 10000:
+        stale = {k for k, v in _rate_store.items() if not v or now - v[-1] >= 120}
+        for k in stale:
+            _rate_store.pop(k, None)
+    timestamps = _rate_store.get(key, [])
+    timestamps = [t for t in timestamps if now - t < window]
+    if len(timestamps) >= limit:
+        return JSONResponse(
+            status_code=429,
+            content={"detail": "Слишком много запросов. Попробуйте позже."},
+        )
+    timestamps.append(now)
+    _rate_store[key] = timestamps
 
     return await call_next(request)
 
