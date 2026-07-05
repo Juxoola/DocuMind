@@ -27,13 +27,10 @@ def _ensure_predictor():
         try:
             llama_binary = os.getenv("LLAMA_CPP_BINARY")
             if not llama_binary:
-                for candidate in [
-                    r"F:\llama.cpp\build\bin\Release\llama-server.exe",
-                    r"F:\llama.cpp\build\bin\llama-server",
-                ]:
-                    if os.path.exists(candidate):
-                        os.environ["LLAMA_CPP_BINARY"] = candidate
-                        break
+                import shutil
+                llama_binary = shutil.which("llama-server")
+                if llama_binary:
+                    os.environ["LLAMA_CPP_BINARY"] = llama_binary
 
             os.environ.setdefault("SURYA_GUIDED_LAYOUT", "false")
             os.environ.setdefault("SURYA_INFERENCE_PARALLEL", "2")

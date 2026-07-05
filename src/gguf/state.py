@@ -3,11 +3,10 @@
 from __future__ import annotations
 
 import asyncio
-import ctypes
 import logging
 import os
+import platform
 import subprocess
-from ctypes import wintypes
 
 import config
 
@@ -15,7 +14,11 @@ import config
 
 logger = logging.getLogger(__name__)
 
-SERVER_EXE = os.path.join(config.BASE_DIR, "bin", "llama-server.exe")
+# ── Определение платформы: llama-server binary ──
+if platform.system() == "Windows":
+    SERVER_EXE = os.path.join(config.BASE_DIR, "bin", "llama-server.exe")
+else:
+    SERVER_EXE = "llama-server"
 
 _server_processes: dict[str, subprocess.Popen] = {}
 _server_ports: dict[str, int] = {}
@@ -39,6 +42,9 @@ _win32_job = None
 # ── Win32 Job Object: привязывает llama-server к job для аварийного завершения ──
 if os.name == "nt":
     try:
+        import ctypes
+        from ctypes import wintypes
+
         _win32_job = ctypes.windll.kernel32.CreateJobObjectW(None, None)
         limit_info = (wintypes.DWORD * 36)()
         limit_info[4] = 0x2000
@@ -50,9 +56,11 @@ if os.name == "nt":
 
 
 def _assign_to_job(process):
-
     if _win32_job is not None:
         try:
+            import ctypes
+            from ctypes import wintypes
+
             ctypes.windll.kernel32.AssignProcessToJobObject(
                 _win32_job, wintypes.HANDLE(int(process._handle))
             )

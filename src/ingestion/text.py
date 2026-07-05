@@ -464,17 +464,32 @@ async def _surya_layout_pass(
 # Конвертация Office-файлов в PDF: LibreOffice (приоритет), COM (резерв), текстовый fallback
 def _find_soffice():
     import shutil
+    import platform
 
-    local = os.path.join(config.BASE_DIR, "libreoffice", "program", "soffice.exe")
-    if os.path.isfile(local):
-        return local
-    found = shutil.which("soffice")
+    # 1. env override
+    env_path = os.getenv("LIBREOFFICE_PATH")
+    if env_path and os.path.isfile(env_path):
+        return env_path
+
+    # 2. shutil.which — работает на всех платформах
+    found = shutil.which("soffice") or shutil.which("soffice.exe")
     if found:
         return found
-    for pf in ["Program Files", "Program Files (x86)"]:
-        p = os.path.join("C:\\", pf, "LibreOffice", "program", "soffice.exe")
-        if os.path.isfile(p):
-            return p
+
+    # 3. Платформо-специфичные пути
+    if platform.system() == "Windows":
+        local = os.path.join(config.BASE_DIR, "libreoffice", "program", "soffice.exe")
+        if os.path.isfile(local):
+            return local
+        for pf in ["Program Files", "Program Files (x86)"]:
+            p = os.path.join("C:\\", pf, "LibreOffice", "program", "soffice.exe")
+            if os.path.isfile(p):
+                return p
+    else:
+        for p in ["/usr/bin/soffice", "/usr/lib/libreoffice/program/soffice"]:
+            if os.path.isfile(p):
+                return p
+
     return None
 
 
