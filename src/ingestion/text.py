@@ -20,64 +20,7 @@ from src.ingestion.vision import describe_image_with_lmstudio, get_vision_url
 logger = logging.getLogger(__name__)
 
 
-<<<<<<< HEAD
-# Извлечение встроенных изображений со страницы PDF
-# (только когда surya_mode=disabled — иначе surya layout делает это лучше)
-
-
-async def _analyze_and_build_page(
-    page_num, doc, images_dir, file_name, splitter, surya_mode="disabled"
-):
-
-    if surya_mode in ("layout_only", "full"):
-        return page_num, []
-
-    def _sync_build():
-        page = doc.load_page(page_num)
-        images = page.get_images()
-
-        image_paths = []
-        seen_xrefs = set()
-        for img_info in images:
-            xref = img_info[0]
-            if xref in seen_xrefs:
-                continue
-            seen_xrefs.add(xref)
-            try:
-                rects = page.get_image_rects(xref)
-                if not rects:
-                    continue
-                base_image = page.parent.extract_image(xref)
-                if not base_image or not base_image.get("image"):
-                    continue
-                ext = base_image.get("ext", "png")
-                if ext == "jpeg":
-                    ext = "jpg"
-                for rect in rects:
-                    w, h = rect.width, rect.height
-                    if w < 50 or h < 50:
-                        continue
-                    try:
-                        clip = fitz.Rect(rect)
-                        pix = page.get_pixmap(clip=clip, dpi=150)
-                        img_name = f"p_{page_num + 1}_x{xref}_{uuid.uuid4().hex[:4]}.{ext}"
-                        img_path = os.path.join(images_dir, img_name)
-                        pix.save(img_path)
-                        image_paths.append(img_path)
-                    except Exception:
-                        continue
-            except Exception:
-                continue
-
-        return page_num, image_paths
-
-    return await asyncio.to_thread(_sync_build)
-
-
-# Основной конвейер PDF: извлечение текста, батчевая параллельная обработка, Vision-анализ
-=======
 # Основной конвейер PDF: извлечение текста (pymupdf4llm), изображения (surya layout), Vision-анализ
->>>>>>> 62b6f39 (refactor(async): замена asyncio.to_thread(os.path.exists) на aiofiles.os.path.exists)
 async def process_pdf(
     file_path,
     images_dir,
@@ -100,7 +43,10 @@ async def process_pdf(
     results = []
     splitter = _get_splitter()
     total_pages = len(doc)
+    surya_mode = getattr(config, "SURYA_MODE", "disabled")
 
+    # ── Шаг 1: pymupdf4llm для текста ──
+    use_surya_ocr = False
     try:
         import pymupdf4llm
 
@@ -111,18 +57,6 @@ async def process_pdf(
             progress_cb(10, "Извлечение текста (pymupdf4llm)...")
         md_chunks = await asyncio.to_thread(_extract_markdown)
 
-<<<<<<< HEAD
-        def _clean_markdown(text: str) -> str:
-            import re
-
-            text = re.sub(r"^(#{1,6})\s*\*\*(.+?)\*\*\s*$", r"\1 \2", text, flags=re.MULTILINE)
-            text = re.sub(r"\*\*==>.+?intentionally omitted.+?<==\*\*", "", text)
-            text = re.sub(r"\*\*(.+?\.{3,}\d+)\*\*", r"\1", text)
-            text = re.sub(r"\n\s*\d{1,3}\s*\n", "\n", text)
-            text = text.replace("\\n", "\n")
-            text = re.sub(r"\n{3,}", "\n\n", text)
-            return text
-=======
         # Оцениваем качество извлечения
         total_chars = sum(len(c.get("text", "")) for c in md_chunks)
         avg_chars = total_chars / max(total_pages, 1)
@@ -158,43 +92,8 @@ async def process_pdf(
                 text = re.sub(r"\n{3,}", "\n\n", text)
                 text = text.strip()
                 return text
->>>>>>> 62b6f39 (refactor(async): замена asyncio.to_thread(os.path.exists) на aiofiles.os.path.exists)
 
-        for chunk in md_chunks:
-            page_num = chunk.get("metadata", {}).get("page_number", 0)
-            md_text = chunk.get("text", "")
-            if md_text and md_text.strip():
-                md_text = _clean_markdown(md_text)
-                nodes.extend(
-                    splitter.get_nodes_from_documents(
-                        [
-                            TextNode(
-                                text=md_text,
-                                metadata={
-                                    "file_name": file_name,
-                                    "page": page_num,
-                                },
-                            )
-                        ]
-                    )
-                )
-        logger.info(f"[Ingestion] pymupdf4llm: {len(md_chunks)} чанков, {len(nodes)} узлов")
-
-        # ── Сохраняем извлечённый текст на диск для мгновенного доступа ──
-        try:
-            extracted_parts = []
             for chunk in md_chunks:
-<<<<<<< HEAD
-                t = chunk.get("text", "")
-                if t and t.strip():
-                    extracted_parts.append(t)
-            if extracted_parts:
-                extracted_path = os.path.join(os.path.dirname(file_path), f"{file_name}.extracted.md")
-                async with aiofiles.open(extracted_path, "w", encoding="utf-8") as ef:
-                    await ef.write("\n\n---\n\n".join(extracted_parts))
-        except Exception as e:
-            logger.warning(f"[Ingestion] Не удалось сохранить .extracted.md: {e}")
-=======
                 page_num = chunk.get("metadata", {}).get("page_number", 0)
                 md_text = chunk.get("text", "")
                 if md_text and md_text.strip():
@@ -231,64 +130,16 @@ async def process_pdf(
 
             logger.info(f"[Ingestion] pymupdf4llm: {len(nodes)} узлов")
 
->>>>>>> 62b6f39 (refactor(async): замена asyncio.to_thread(os.path.exists) на aiofiles.os.path.exists)
     except ImportError:
-        logger.warning("[Ingestion] pymupdf4llm не установлен — fallback на page.get_text()")
-        for page_num in range(total_pages):
-            page = doc.load_page(page_num)
-            text = page.get_text()
-            if text and text.strip():
-                nodes.extend(
-                    splitter.get_nodes_from_documents(
-                        [
-                            TextNode(
-                                text=text,
-                                metadata={
-                                    "file_name": file_name,
-                                    "page": page_num + 1,
-                                },
-                            )
-                        ]
-                    )
-                )
+        logger.warning("[Ingestion] pymupdf4llm не установлен → Surya OCR")
+        use_surya_ocr = True
+    except Exception as e:
+        logger.warning(f"[Ingestion] pymupdf4llm ошибка: {e} → Surya OCR")
+        use_surya_ocr = True
 
-    surya_mode = getattr(config, "SURYA_MODE", "disabled")
-    n_workers = min(8, (os.cpu_count() or 4), total_pages)
-
+    # Surya layout: все изображения извлекаются через surya
     try:
-        BATCH_SIZE = 16
-        if n_workers <= 1:
-            for page_num in range(total_pages):
-                if _is_cancelled():
-                    raise IngestionCancelled(f"Cancelled at page {page_num + 1}")
-                pn, image_paths = await _analyze_and_build_page(
-                    page_num, doc, images_dir, file_name, splitter, surya_mode
-                )
-                for img_p in image_paths or []:
-                    frame_list.append({"page": pn + 1, "path": img_p})
-        else:
-            for batch_start in range(0, total_pages, BATCH_SIZE):
-                if _is_cancelled():
-                    raise IngestionCancelled(f"Cancelled at page {batch_start + 1}")
-                batch_end = min(batch_start + BATCH_SIZE, total_pages)
-
-                async def _process_batch_pages(batch_start, batch_end):
-                    tasks = []
-                    for page_num in range(batch_start, batch_end):
-                        tasks.append(
-                            _analyze_and_build_page(
-                                page_num, doc, images_dir, file_name, splitter, surya_mode
-                            )
-                        )
-                    return await asyncio.gather(*tasks)
-
-                page_results = await _process_batch_pages(batch_start, batch_end)
-                for page_num_result, image_paths in page_results:
-                    for img_p in image_paths or []:
-                        frame_list.append({"page": page_num_result + 1, "path": img_p})
-
-        surya_mode = getattr(config, "SURYA_MODE", "disabled")
-        if surya_mode in ("layout_only", "full") and not _is_cancelled():
+        if not _is_cancelled():
             surya_frame_list = await _surya_layout_pass(
                 doc,
                 file_name,
@@ -299,7 +150,7 @@ async def process_pdf(
                 shared_llm_url,
                 progress_cb,
                 cancel_check,
-                surya_mode,
+                "layout_only" if not use_surya_ocr else "full",
                 frame_data,
                 keep_vision_alive,
             )
@@ -363,50 +214,11 @@ async def process_pdf(
                                 break
 
                 results.sort(key=lambda x: x[0]["page"])
+
+                # Группируем описания по страницам
+                page_descs = {}
                 for frame_info, desc in results:
                     if desc and "Изображение без описания" not in desc:
-<<<<<<< HEAD
-                        full_text = f"Изображение PDF {file_name} стр {frame_info['page']}: {desc}"
-                        if len(full_text) <= config.GGUF_CTX_EMBED_CHARS:
-                            nodes.append(
-                                TextNode(
-                                    text=full_text,
-                                    metadata={
-                                        "file_name": file_name,
-                                        "image_path": frame_info["path"],
-                                        "page": frame_info["page"],
-                                    },
-                                )
-                            )
-                        else:
-                            desc_nodes = splitter.get_nodes_from_documents(
-                                [
-                                    TextNode(
-                                        text=full_text,
-                                        metadata={
-                                            "file_name": file_name,
-                                            "image_path": frame_info["path"],
-                                            "page": frame_info["page"],
-                                        },
-                                    )
-                                ]
-                            )
-                            nodes.extend(desc_nodes)
-                        frame_data.append(
-                            {
-                                "page": frame_info["page"],
-                                "image_path": frame_info["path"],
-                                "description": desc,
-                            }
-                        )
-                    else:
-                        try:
-                            await aiofiles.os.remove(frame_info["path"])
-                        except Exception:
-                            pass
-
-            results.clear()
-=======
                         pg = frame_info["page"]
                         if pg not in page_descs:
                             page_descs[pg] = []
@@ -436,7 +248,6 @@ async def process_pdf(
                         )
 
         if frame_data:
->>>>>>> 62b6f39 (refactor(async): замена asyncio.to_thread(os.path.exists) на aiofiles.os.path.exists)
             import gc
 
             gc.collect()
@@ -547,7 +358,7 @@ async def _surya_layout_pass(
         except Exception as e:
             logger.warning(f"[Surya] Ошибка OCR: {e}")
 
-    regions = {"Diagram", "Equation", "Table"}
+    regions = {"Diagram", "Figure", "Picture"}
     extracted = extract_regions(pil_images, layout_results, regions)
 
     n_regions = sum(len(r) for r in extracted.values())
@@ -558,25 +369,58 @@ async def _surya_layout_pass(
 
     logger.info(f"[Surya] Найдено {n_regions} regions для описания")
 
+    # Группируем邻近ные regions на одной странице
     for page_idx, page_regions in extracted.items():
-        for region in page_regions:
+        if _is_cancelled():
+            break
+
+        # Сортируем по y, потом x
+        page_regions.sort(key=lambda r: (r["bbox"][1], r["bbox"][0]))
+
+        # Группируем: расстояние между bbox < 200px
+        groups = []
+        used = [False] * len(page_regions)
+        for i in range(len(page_regions)):
+            if used[i]:
+                continue
+            group = [page_regions[i]]
+            used[i] = True
+            for j in range(i + 1, len(page_regions)):
+                if used[j]:
+                    continue
+                # Сравниваем с общим bbox группы
+                gx0 = min(r["bbox"][0] for r in group)
+                gy0 = min(r["bbox"][1] for r in group)
+                gx1 = max(r["bbox"][2] for r in group)
+                gy1 = max(r["bbox"][3] for r in group)
+                b2 = page_regions[j]["bbox"]
+                h_dist = max(0, max(gx0, b2[0]) - min(gx1, b2[2]))
+                v_dist = max(0, max(gy0, b2[1]) - min(gy1, b2[3]))
+                if h_dist < 200 and v_dist < 200:
+                    group.append(page_regions[j])
+                    used[j] = True
+            groups.append(group)
+
+        for group_idx, group in enumerate(groups):
             if _is_cancelled():
                 break
             try:
-                label = region["label"]
-                img = region["image"]
-                img_name = f"surya_{label.lower()}_p{page_idx + 1}_{uuid.uuid4().hex[:4]}.png"
+                all_bboxes = [r["bbox"] for r in group]
+                x0 = min(b[0] for b in all_bboxes) - 10
+                y0 = min(b[1] for b in all_bboxes) - 10
+                x1 = max(b[2] for b in all_bboxes) + 10
+                y1 = max(b[3] for b in all_bboxes) + 10
+                img = pil_images[page_idx]
+                cropped = img.crop((x0, y0, x1, y1))
+                labels = "+".join(set(r["label"] for r in group))
+                img_name = f"surya_{labels.lower()}_p{page_idx + 1}_g{group_idx}_{uuid.uuid4().hex[:4]}.png"
                 img_path = os.path.join(images_dir, img_name)
-                await asyncio.to_thread(img.save, img_path)
+                await asyncio.to_thread(cropped.save, img_path)
                 frame_list.append({"page": page_idx + 1, "path": img_path})
             except Exception:
-<<<<<<< HEAD
-                logger.debug(f"[surya_layout] Не удалось сохранить region на странице {page_idx + 1}")
-=======
                 logger.debug(
                     f"[surya_layout] Не удалось сохранить группу layout на странице {page_idx + 1}"
                 )
->>>>>>> 62b6f39 (refactor(async): замена asyncio.to_thread(os.path.exists) на aiofiles.os.path.exists)
 
     surya_shutdown()
     return frame_list
