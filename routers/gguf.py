@@ -105,7 +105,7 @@ async def _run_nvidia_smi(query_args: list[str], timeout: float = 3) -> str | No
 # ── Мониторинг VRAM и процессов GPU ──
 @router.get("/api/vram")
 async def api_vram():
-    if not shutil.which("nvidia-smi"):
+    if not await asyncio.to_thread(shutil.which, "nvidia-smi"):
         return {
             "gpu": {
                 "name": "n/a",

@@ -243,11 +243,11 @@ async def ensure_720p_video(file_path, prog_cb=None, cancel_check=None, notebook
         except Exception:
             pass
 
-    if os.path.exists(temp_final) and os.path.getsize(temp_final) > 1000:
-        if os.path.exists(file_path):
+    if await asyncio.to_thread(os.path.exists, temp_final) and os.path.getsize(temp_final) > 1000:
+        if await aiofiles.os.path.exists(file_path):
             await aiofiles.os.remove(file_path)
         new_path = os.path.splitext(file_path)[0] + ".mp4"
-        if os.path.exists(new_path) and new_path != temp_final:
+        if await asyncio.to_thread(os.path.exists, new_path) and new_path != temp_final:
             await aiofiles.os.remove(new_path)
         await aiofiles.os.rename(temp_final, new_path)
         file_path = new_path
@@ -284,12 +284,12 @@ async def ensure_mp3_audio(file_path, prog_cb=None):
         except Exception:
             pass
         raise
-    if proc.returncode == 0 and os.path.exists(temp_path) and os.path.getsize(temp_path) > 1000:
+    if proc.returncode == 0 and await asyncio.to_thread(os.path.exists, temp_path) and os.path.getsize(temp_path) > 1000:
         await aiofiles.os.remove(file_path)
         logger.info(f"[media_convert] {os.path.basename(file_path)} → mp3")
         return temp_path
     try:
-        if os.path.exists(temp_path):
+        if await aiofiles.os.path.exists(temp_path):
             await aiofiles.os.remove(temp_path)
     except OSError:
         pass

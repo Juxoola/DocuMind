@@ -263,7 +263,7 @@ async def _start_llm_server(gguf_path: str, mmproj_path: str, current_config: di
     if current_config.get("_n_threads") and current_config["_n_threads"] > 0:
         cmd.extend(["-t", str(current_config["_n_threads"])])
 
-    if current_config.get("mmproj") and os.path.exists(current_config["mmproj"]):
+    if current_config.get("mmproj") and await asyncio.to_thread(os.path.exists, current_config["mmproj"]):
         cmd.extend(["--mmproj", os.path.normpath(current_config["mmproj"])])
         logger.info(
             f"[GGUF Server] С поддержкой Vision: {os.path.basename(current_config['mmproj'])}"
@@ -669,7 +669,7 @@ async def get_vision_server(
     if current_config.get("_n_threads") and current_config["_n_threads"] > 0:
         cmd.extend(["-t", str(current_config["_n_threads"])])
 
-    if current_config.get("mmproj") and os.path.exists(current_config["mmproj"]):
+    if current_config.get("mmproj") and await asyncio.to_thread(os.path.exists, current_config["mmproj"]):
         cmd.extend(["--mmproj", os.path.normpath(current_config["mmproj"])])
         logger.info(
             f"[GGUF Server] Vision с поддержкой mmproj: {os.path.basename(current_config['mmproj'])}"

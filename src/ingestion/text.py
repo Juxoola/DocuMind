@@ -497,7 +497,7 @@ async def _convert_via_libreoffice(file_path):
     )
     _stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=120)
     pdf_path = os.path.splitext(file_path)[0] + ".pdf"
-    if proc.returncode == 0 and os.path.exists(pdf_path):
+    if proc.returncode == 0 and await asyncio.to_thread(os.path.exists, pdf_path):
         logger.info(f"[DOCX] Сконвертировано в PDF через LibreOffice: {os.path.basename(pdf_path)}")
         try:
             await aiofiles.os.remove(file_path)

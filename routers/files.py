@@ -261,19 +261,19 @@ async def upload_file(
             except Exception:
                 logger.debug("cancel: не удалось убить llama-server")
             try:
-                if os.path.exists(file_path):
+                if await aiofiles.os.path.exists(file_path):
                     await aiofiles.os.remove(file_path)
             except Exception:
                 logger.debug("cancel: не удалось удалить %s", file_path)
             sidecar = os.path.join(os.path.dirname(file_path), f"{file.filename}.json")
             try:
-                if os.path.exists(sidecar):
+                if await aiofiles.os.path.exists(sidecar):
                     await aiofiles.os.remove(sidecar)
             except Exception:
                 logger.debug("cancel: не удалось удалить sidecar %s", sidecar)
             try:
                 images_dir = paths.get("images")
-                if images_dir and os.path.exists(images_dir):
+                if images_dir and await aiofiles.os.path.exists(images_dir):
                     stem = os.path.splitext(file.filename)[0]
                     for f in await aiofiles.os.listdir(images_dir):
                         if f.startswith("p_") or f.startswith("v_") or stem in f:
@@ -369,7 +369,7 @@ async def delete_file(filename: str, notebook_id: str):
     _source_content_cache.pop(f"{notebook_id}:{filename}", None)
     paths = config.get_notebook_paths(notebook_id)
     file_path = os.path.join(paths["data"], filename)
-    if os.path.exists(file_path):
+    if await aiofiles.os.path.exists(file_path):
         if filename.lower().endswith((".mp4", ".avi", ".mov")):
             cap = cv2.VideoCapture(file_path)
             try:

@@ -27,7 +27,7 @@ async def save_rag_config(rag_config_file: str, config_data: dict) -> None:
 async def load_rag_config(rag_config_file: str, defaults: dict) -> dict:
     async with _config_lock:
         try:
-            if os.path.exists(rag_config_file):
+            if await aiofiles.os.path.exists(rag_config_file):
                 async with aiofiles.open(rag_config_file, "rb") as f:
                     data = orjson.loads(await f.read())
                     result = {}
