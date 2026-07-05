@@ -228,7 +228,7 @@ async def process_pdf(
             if shared_llm_url is None:
                 shared_llm_url = await get_vision_url(llm_settings)
             if shared_llm_url:
-                v_conc = int(llm_settings.get("vision_concurrency") or config.VISION_CONCURRENCY)
+                v_conc = int((llm_settings or {}).get("vision_concurrency") or config.VISION_CONCURRENCY)
                 n = len(frame_list)
                 if progress_cb:
                     progress_cb(
@@ -342,7 +342,7 @@ async def process_pdf(
             async with aiofiles.open(metadata_path, "w", encoding="utf-8") as f:
                 await f.write(orjson.dumps(metadata_json, option=orjson.OPT_INDENT_2).decode())
     finally:
-        doc.close()
+        await asyncio.to_thread(doc.close)
     return nodes
 
 

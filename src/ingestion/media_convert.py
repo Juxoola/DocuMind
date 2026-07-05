@@ -187,7 +187,10 @@ async def ensure_720p_video(file_path, prog_cb=None, cancel_check=None, notebook
             return out_part
 
         tasks = [encode_seg(idx) for idx in range(num_workers)]
-        parts = await asyncio.gather(*tasks)
+        raw_parts = await asyncio.gather(*tasks)
+        parts = [p for p in raw_parts if p is not None]
+        if not parts:
+            raise IngestionCancelled("All segments cancelled")
 
         if _is_cancelled():
             raise IngestionCancelled("Cancelled after turbo encode")
@@ -273,7 +276,14 @@ async def ensure_mp3_audio(file_path, prog_cb=None):
     proc = await asyncio.create_subprocess_exec(
         *cmd, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE
     )
-    await asyncio.wait_for(proc.communicate(), timeout=300)
+    try:
+        await asyncio.wait_for(proc.communicate(), timeout=300)
+    except (asyncio.CancelledError, asyncio.TimeoutError):
+        try:
+            proc.kill()
+        except Exception:
+            pass
+        raise
     if proc.returncode == 0 and os.path.exists(temp_path) and os.path.getsize(temp_path) > 1000:
         await aiofiles.os.remove(file_path)
         logger.info(f"[media_convert] {os.path.basename(file_path)} → mp3")

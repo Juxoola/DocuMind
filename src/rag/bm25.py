@@ -47,38 +47,44 @@ async def _rebuild_bm25_bg(notebook_id: str, db_path: str, new_nodes: list = Non
         else:
             import chromadb as _chromadb
 
-            tmp_client = _chromadb.PersistentClient(path=db_path)
-            collection = tmp_client.get_or_create_collection("multimodal_rag")
-            full_corpus = []
-            offset = 0
-            while True:
-                result = collection.get(limit=_PAGE_SIZE, offset=offset)
-                ids = result.get("ids", [])
-                if not ids:
-                    break
-                documents = result.get("documents", []) or []
-                metadatas = result.get("metadatas", []) or []
-                for i, doc_id in enumerate(ids):
-                    text = documents[i] if i < len(documents) else ""
-                    meta = metadatas[i] if i < len(metadatas) else {}
-                    if meta is None:
-                        meta = {}
-                    fname = meta.get("file_name", "")
-                    page = meta.get("page", "")
-                    t = meta.get("start", meta.get("time", ""))
-                    coord_parts = []
-                    if fname:
-                        coord_parts.append(str(fname))
-                    if page not in ("", None):
-                        coord_parts.append(f"стр.{page}")
-                    elif t not in ("", None):
-                        coord_parts.append(f"@{t}")
-                    if coord_parts:
-                        text = f"[{'. '.join(coord_parts)}]: {text}"
-                    full_corpus.append(TextNode(text=text, id_=doc_id, metadata=meta))
-                if len(ids) < _PAGE_SIZE:
-                    break
-                offset += _PAGE_SIZE
+            tmp_client = await asyncio.to_thread(_chromadb.PersistentClient, path=db_path)
+            try:
+                collection = tmp_client.get_or_create_collection("multimodal_rag")
+                full_corpus = []
+                offset = 0
+                while True:
+                    result = collection.get(limit=_PAGE_SIZE, offset=offset)
+                    ids = result.get("ids", [])
+                    if not ids:
+                        break
+                    documents = result.get("documents", []) or []
+                    metadatas = result.get("metadatas", []) or []
+                    for i, doc_id in enumerate(ids):
+                        text = documents[i] if i < len(documents) else ""
+                        meta = metadatas[i] if i < len(metadatas) else {}
+                        if meta is None:
+                            meta = {}
+                        fname = meta.get("file_name", "")
+                        page = meta.get("page", "")
+                        t = meta.get("start", meta.get("time", ""))
+                        coord_parts = []
+                        if fname:
+                            coord_parts.append(str(fname))
+                        if page not in ("", None):
+                            coord_parts.append(f"стр.{page}")
+                        elif t not in ("", None):
+                            coord_parts.append(f"@{t}")
+                        if coord_parts:
+                            text = f"[{'. '.join(coord_parts)}]: {text}"
+                        full_corpus.append(TextNode(text=text, id_=doc_id, metadata=meta))
+                    if len(ids) < _PAGE_SIZE:
+                        break
+                    offset += _PAGE_SIZE
+            finally:
+                try:
+                    tmp_client.close()
+                except Exception:
+                    pass
             logger.info(f"[RAG] BM25 холодная сборка из ChromaDB: {len(full_corpus)} узлов")
 
         if full_corpus:
@@ -206,7 +212,7 @@ async def flush_bm25_rebuild(
 async def is_bm25_ready(notebook_id: str) -> bool:
     paths = config.get_notebook_paths(notebook_id)
     bm25_dir = os.path.join(paths["base"], "bm25")
-    exists = os.path.exists(os.path.join(bm25_dir, "retriever.json"))
+    exists = await asyncio.to_thread(os.path.exists, os.path.join(bm25_dir, "retriever.json"))
     async with _bm25_pending_lock:
         has_pending = notebook_id in _bm25_pending_timers
     async with _bm25_rebuilding_lock:

@@ -128,8 +128,8 @@ async def update_rag_config(req: UpdateRagConfigRequest):
         data = config._collect_rag_config()
     await save_rag_config(config.RAG_CONFIG_FILE, data)
 
-    embedding_changed = old_embedding != req.embedding_model
-    reranker_changed = old_reranker != req.reranker_model
+    embedding_changed = req.embedding_model and old_embedding != req.embedding_model
+    reranker_changed = req.reranker_model and old_reranker != req.reranker_model
 
     if embedding_changed or reranker_changed:
         logger.info("[Settings] Модели изменились — выгрузка старых и загрузка новых...")

@@ -59,9 +59,16 @@ async def _write_bookmarks(notebook_id: str, bookmarks: list) -> None:
     path = _bookmarks_path(notebook_id)
     await aiofiles.os.makedirs(os.path.dirname(path), exist_ok=True)
     tmp = path + ".tmp"
-    async with aiofiles.open(tmp, "w", encoding="utf-8") as f:
-        await f.write(orjson.dumps(bookmarks, option=orjson.OPT_INDENT_2).decode())
-    await aiofiles.os.replace(tmp, path)
+    try:
+        async with aiofiles.open(tmp, "w", encoding="utf-8") as f:
+            await f.write(orjson.dumps(bookmarks, option=orjson.OPT_INDENT_2).decode())
+        await aiofiles.os.replace(tmp, path)
+    except Exception:
+        try:
+            await aiofiles.os.remove(tmp)
+        except OSError:
+            pass
+        raise
 
 
 # ── CRUD-операции с закладками ──

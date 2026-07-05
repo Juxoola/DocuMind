@@ -125,12 +125,15 @@ async def api_vram():
     if gpu_out and gpu_out.strip():
         parts = [p.strip() for p in gpu_out.strip().split(",")]
         if len(parts) >= 4:
-            gpu_name, used_mib, free_mib, total_mib = (
-                parts[0],
-                int(parts[1]),
-                int(parts[2]),
-                int(parts[3]),
-            )
+            try:
+                gpu_name, used_mib, free_mib, total_mib = (
+                    parts[0],
+                    int(parts[1]),
+                    int(parts[2]),
+                    int(parts[3]),
+                )
+            except (ValueError, IndexError):
+                logger.debug("gguf: nvidia-smi GPU output parse failed")
 
     per_process = []
     proc_out = await _run_nvidia_smi(["--query-compute-apps=pid,process_name,used_memory"])
@@ -228,6 +231,7 @@ async def api_context_usage():
                     text = resp.text
                     ratio = None
                     n_ctx = None
+                    n_used = None
                     for line in text.splitlines():
                         if line.startswith("llamacpp:kv_cache_usage_ratio"):
                             parts = line.split()
@@ -241,6 +245,8 @@ async def api_context_usage():
                             parts = line.split()
                             if len(parts) >= 2:
                                 n_ctx = int(float(parts[1]))
+                    if n_used is not None and n_ctx:
+                        return {"used": n_used, "total": n_ctx, "pct": round(n_used / n_ctx * 100, 1)}
                     if ratio is not None and n_ctx:
                         n_used = round(ratio * n_ctx)
                         return {"used": n_used, "total": n_ctx, "pct": round(ratio * 100, 1)}

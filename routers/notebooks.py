@@ -12,7 +12,7 @@ import aiofiles
 import aiofiles.os
 import orjson
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 import config
 
@@ -38,7 +38,11 @@ async def migrate_old_data():
         old_data = os.path.join(config.BASE_DIR, "data")
         old_db = os.path.join(config.BASE_DIR, "chroma_db")
         old_imgs = os.path.join(config.BASE_DIR, "images")
-        if not (os.path.exists(old_data) or os.path.exists(old_db) or os.path.exists(old_imgs)):
+        if not (
+            await aiofiles.os.path.exists(old_data)
+            or await aiofiles.os.path.exists(old_db)
+            or await aiofiles.os.path.exists(old_imgs)
+        ):
             return
         logger.info("Обнаружены старые данные. Миграция в ноутбук 'default'...")
 
@@ -83,6 +87,16 @@ async def get_notebooks():
 
 class CreateNotebookRequest(BaseModel):
     name: str
+
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            raise ValueError("имя блокнота не может быть пустым")
+        if len(v) > 200:
+            raise ValueError("имя блокнота слишком длинное")
+        return v
 
 
 @router.post("/api/notebooks")

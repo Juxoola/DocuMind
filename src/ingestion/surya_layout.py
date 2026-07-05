@@ -3,6 +3,7 @@
 import logging
 import os
 import time
+import threading
 
 from PIL import Image
 
@@ -12,6 +13,7 @@ logger = logging.getLogger(__name__)
 _layout_predictor = None
 _recognition_predictor = None
 _inference_manager = None
+_surya_lock = threading.Lock()
 
 
 def _ensure_predictor():
@@ -19,8 +21,10 @@ def _ensure_predictor():
 
     if _layout_predictor is not None:
         return _layout_predictor
-
-    try:
+    with _surya_lock:
+        if _layout_predictor is not None:
+            return _layout_predictor
+        try:
         llama_binary = os.getenv("LLAMA_CPP_BINARY")
         if not llama_binary:
             for candidate in [

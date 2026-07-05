@@ -3,6 +3,7 @@
 # ── Импорты ──
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import shutil
@@ -131,7 +132,7 @@ async def process_image(
 
     dest_name = f"img_{uuid.uuid4().hex[:6]}{os.path.splitext(file_path)[1].lower()}"
     dest_path = os.path.join(images_dir, dest_name)
-    shutil.copy2(file_path, dest_path)
+    await asyncio.to_thread(shutil.copy2, file_path, dest_path)
 
     def _is_cancelled():
         return bool(cancel_check and cancel_check())

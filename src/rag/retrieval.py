@@ -9,10 +9,6 @@ import threading
 import time as _time
 
 
-async def _empty_list():
-    return []
-
-
 import httpx
 import numpy as np
 from llama_index.core import QueryBundle, Settings, VectorStoreIndex
@@ -155,10 +151,6 @@ async def _get_qe_llm():
     )
 
 
-_qe_result_cache: dict[str, tuple[list, float]] = {}
-_QE_RESULT_TTL = 60.0
-
-
 def _rrf_fuse(*result_lists, k: int = None):
     scores: dict = {}
     nodes_by_id: dict = {}
@@ -181,7 +173,7 @@ async def _load_bm25_retriever(notebook_id: str):
     bm25_dir = os.path.join(paths["base"], "bm25")
 
     bm25_retriever = None
-    if os.path.exists(os.path.join(bm25_dir, "retriever.json")):
+    if await asyncio.to_thread(os.path.exists, os.path.join(bm25_dir, "retriever.json")):
         try:
             bm25_retriever = await asyncio.to_thread(BM25Retriever.from_persist_dir, bm25_dir)
         except Exception as e:
@@ -194,7 +186,7 @@ async def _load_bm25_retriever(notebook_id: str):
             await flush_bm25_rebuild(
                 notebook_id, db_path=paths["chroma_db"], wait=True, timeout=180
             )
-            if os.path.exists(os.path.join(bm25_dir, "retriever.json")):
+            if await asyncio.to_thread(os.path.exists, os.path.join(bm25_dir, "retriever.json")):
                 try:
                     bm25_retriever = await asyncio.to_thread(
                         BM25Retriever.from_persist_dir, bm25_dir

@@ -361,7 +361,7 @@ async def _load_llm(gguf_path: str, mmproj_path: str, current_config: dict) -> s
         _server_configs[gguf_path] = current_config
     await unload_rag_models_safe()
     await unload_all_models(role="llm")
-    if not os.path.exists(gguf_path):
+    if not await asyncio.to_thread(os.path.exists, gguf_path):
         async with _lock:
             _llm_load_state.update({"state": "error", "error": f"Model not found: {gguf_path}"})
         raise FileNotFoundError(f"GGUF модель не найдена: {gguf_path}")
@@ -456,7 +456,7 @@ async def preload_gguf_llm(gguf_path: str, mmproj_path: str = None, **kwargs) ->
         try:
             await unload_rag_models_safe()
             await unload_all_models(role="llm")
-            if not os.path.exists(gguf_path):
+            if not await asyncio.to_thread(os.path.exists, gguf_path):
                 raise FileNotFoundError(f"GGUF модель не найдена: {gguf_path}")
             url = await _start_llm_server(gguf_path, mmproj_path, current_config)
             elapsed = time.time() - _llm_load_state["started_at"]
@@ -535,7 +535,7 @@ async def get_gguf_embedding_url(
 
     await unload_all_models(role=role)
 
-    if not os.path.exists(gguf_path):
+    if not await asyncio.to_thread(os.path.exists, gguf_path):
         raise FileNotFoundError(f"GGUF модель не найдена: {gguf_path}")
 
     port = _allocate_port()
@@ -626,7 +626,7 @@ async def get_vision_server(
 
     await unload_all_models(role="vision")
 
-    if not os.path.exists(gguf_path):
+    if not await asyncio.to_thread(os.path.exists, gguf_path):
         raise FileNotFoundError(f"Vision модель не найдена: {gguf_path}")
 
     port = _allocate_port()

@@ -25,7 +25,8 @@ async def init_settings(max_tokens=1024):
 
     async with _model_cache_lock:
         embed_ready = "embed_model" in _model_cache
-    if embed_ready and max_tokens == _last_max_tokens:
+        tokens_match = max_tokens == _last_max_tokens
+    if embed_ready and tokens_match:
         return
 
     device = "cuda" if torch.cuda.is_available() else "cpu"

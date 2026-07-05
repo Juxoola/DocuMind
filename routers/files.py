@@ -43,7 +43,7 @@ async def get_files(notebook_id: str):
 
     notebook_id = validate_nb_id(notebook_id)
     paths = config.get_notebook_paths(notebook_id)
-    if os.path.exists(paths["data"]):
+    if await aiofiles.os.path.exists(paths["data"]):
         files_list = [
             f for f in await aiofiles.os.listdir(paths["data"]) if not f.endswith(".json")
         ]
@@ -400,9 +400,27 @@ async def delete_file(filename: str, notebook_id: str):
         await _sync_remove_with_retry(file_path)
         # Удаляем кеш предварительного извлечения
         extracted = os.path.join(paths["data"], f"{filename}.extracted.md")
-        if os.path.exists(extracted):
+        if await aiofiles.os.path.exists(extracted):
             try:
                 await aiofiles.os.remove(extracted)
+            except Exception:
+                pass
+        metadata_path = os.path.join(paths["data"], f"{filename}.json")
+        if await aiofiles.os.path.exists(metadata_path):
+            try:
+                async with aiofiles.open(metadata_path, "r", encoding="utf-8") as f:
+                    meta = orjson.loads(await f.read())
+                for frame in meta.get("frames", []):
+                    img = frame.get("image_path") or frame.get("path")
+                    if img and await aiofiles.os.path.exists(img):
+                        try:
+                            await aiofiles.os.remove(img)
+                        except Exception:
+                            pass
+            except Exception:
+                pass
+            try:
+                await aiofiles.os.remove(metadata_path)
             except Exception:
                 pass
     from src.rag.indexing import get_vector_store
@@ -456,7 +474,7 @@ async def get_source_content(filename: str, notebook_id: str):
     # ── Быстрый путь: читаем предварительно извлечённый .extracted.md ──
     if ext == ".pdf":
         extracted_path = os.path.join(paths["data"], f"{filename}.extracted.md")
-        if os.path.exists(extracted_path):
+        if await aiofiles.os.path.exists(extracted_path):
             async with aiofiles.open(extracted_path, encoding="utf-8") as f:
                 text = await f.read()
             if text:
@@ -516,7 +534,10 @@ def _build_pdf(title: str, text: str) -> bytes:
     html_body = markdown.markdown(text, extensions=["tables", "fenced_code"])
     html = f"<h1>{title}</h1>\n{html_body}"
 
-    out_path = f"_export_{os.getpid()}.pdf"
+    import tempfile as _tf
+    _out_fd, out_path = _tf.mkstemp(suffix=".pdf", prefix="_export_")
+    os.close(_out_fd)
+    compressed_path = None
     try:
         writer = fitz.DocumentWriter(out_path)
         story = fitz.Story(html=html, user_css=_PDF_CSS)
@@ -530,8 +551,9 @@ def _build_pdf(title: str, text: str) -> bytes:
         story.write_stabilized(writer, contentfn, rectfn, em=10)
         writer.close()
 
+        _c_fd, compressed_path = _tf.mkstemp(suffix=".pdf", prefix="_export_c_")
+        os.close(_c_fd)
         doc = fitz.open(out_path)
-        compressed_path = f"_export_{os.getpid()}_c.pdf"
         doc.save(compressed_path, garbage=4, deflate=True)
         doc.close()
 
@@ -540,10 +562,11 @@ def _build_pdf(title: str, text: str) -> bytes:
 
     finally:
         for _f in (out_path, compressed_path):
-            try:
-                os.unlink(_f)
-            except (OSError, UnboundLocalError):
-                pass
+            if _f is not None:
+                try:
+                    os.unlink(_f)
+                except OSError:
+                    pass
     return pdf_bytes
 
 
@@ -574,7 +597,7 @@ async def export_text(filename: str, notebook_id: str, fmt: str = "txt"):
 
     if is_media or is_image:
         json_path = os.path.join(paths["data"], f"{filename}.json")
-        if os.path.exists(json_path):
+        if await aiofiles.os.path.exists(json_path):
             async with aiofiles.open(json_path, "rb") as f:
                 data = orjson.loads(await f.read())
             if is_media:
@@ -620,7 +643,7 @@ async def export_text(filename: str, notebook_id: str, fmt: str = "txt"):
         elif ext == ".pdf":
             # .extracted.md
             extracted_path = os.path.join(paths["data"], f"{filename}.extracted.md")
-            if os.path.exists(extracted_path):
+            if await aiofiles.os.path.exists(extracted_path):
                 async with aiofiles.open(extracted_path, encoding="utf-8") as ef:
                     text = await ef.read()
         if not text:
@@ -682,7 +705,7 @@ async def get_video_metadata(filename: str, notebook_id: str):
     paths = config.get_notebook_paths(notebook_id)
     json_path = os.path.join(paths["data"], f"{filename}.json")
 
-    if not os.path.exists(json_path):
+    if not await aiofiles.os.path.exists(json_path):
         return {"error": "Метаданные не найдены"}
     async with aiofiles.open(json_path, "rb") as f:
         data = orjson.loads(await f.read())
@@ -691,6 +714,9 @@ async def get_video_metadata(filename: str, notebook_id: str):
 
 @router.delete("/api/clear")
 async def clear_notebook(notebook_id: str):
+    from routers.notebooks import validate_nb_id
+    notebook_id = validate_nb_id(notebook_id)
+
     from src.rag.indexing import close_all_clients as _close_all
 
     # Очищаем кеш source_content для этого блокнота
@@ -703,7 +729,7 @@ async def clear_notebook(notebook_id: str):
         paths = config.get_notebook_paths(notebook_id)
         for d in ("data", "chroma_db", "images"):
             p = paths[d]
-            if os.path.exists(p):
+            if await aiofiles.os.path.exists(p):
                 await robust_rmtree(p)
             await aiofiles.os.makedirs(p, exist_ok=True)
 
@@ -713,6 +739,9 @@ async def clear_notebook(notebook_id: str):
 
 @router.get("/api/ingestion_status")
 async def get_ingestion_status(notebook_id: str):
+    from routers.notebooks import validate_nb_id
+    notebook_id = validate_nb_id(notebook_id)
+
     await _cleanup_ingestion_status()
     async with _ingestion_lock:
         return ingestion_status.get(notebook_id, {"is_uploading": False})

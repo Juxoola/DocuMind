@@ -87,7 +87,8 @@ def _patch_whisperx_ffmpeg():
                 str(sr),
                 "-",
             ]
-            out = subprocess.run(cmd, capture_output=True, check=True).stdout
+            result = subprocess.run(cmd, capture_output=True, check=True, timeout=120)
+            out = result.stdout
             return np.frombuffer(out, np.int16).flatten().astype(np.float32) / 32768.0
 
         _wa.load_audio = _patched_load
@@ -269,10 +270,11 @@ async def process_audio_video(
             _RANGES = _H_RANGES + _SV_RANGES + _SV_RANGES
 
             cap = cv2.VideoCapture(file_path)
-            if not cap.isOpened():
-                return []
-            fps = cap.get(cv2.CAP_PROP_FPS) or 25
-            total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+            try:
+                if not cap.isOpened():
+                    return []
+                fps = cap.get(cv2.CAP_PROP_FPS) or 25
+                total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
 
             prev_hist = None
             scenes = []  # [(start_sec, end_sec)]
@@ -280,34 +282,34 @@ async def process_audio_video(
             frame_idx = 0
             last_hist_frame = -_CHECK_EVERY
 
-            while True:
-                ok, frame = cap.read()
-                if not ok:
-                    break
-                if frame_idx - last_hist_frame < _CHECK_EVERY:
+                while True:
+                    ok, frame = cap.read()
+                    if not ok:
+                        break
+                    if frame_idx - last_hist_frame < _CHECK_EVERY:
+                        frame_idx += 1
+                        continue
+                    last_hist_frame = frame_idx
+
+                    hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+                    hist = cv2.calcHist([hsv], [0, 1, 2], None, _HIST_SIZE, _RANGES)
+                    cv2.normalize(hist, hist)
+
+                    if prev_hist is not None and (frame_idx - last_cut_frame) >= _MIN_SCENE_LEN:
+                        diff = cv2.compareHist(prev_hist, hist, cv2.HISTCMP_BHATTACHARYYA)
+                        if diff >= _HIST_THRESH:
+                            sec = frame_idx / fps
+                            if scenes:
+                                scenes[-1] = (scenes[-1][0], sec)
+                            scenes.append((sec, total / fps))
+                            last_cut_frame = frame_idx
+
+                    prev_hist = hist
                     frame_idx += 1
-                    continue
-                last_hist_frame = frame_idx
 
-                hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
-                hist = cv2.calcHist([hsv], [0, 1, 2], None, _HIST_SIZE, _RANGES)
-                cv2.normalize(hist, hist)
-
-                if prev_hist is not None and (frame_idx - last_cut_frame) >= _MIN_SCENE_LEN:
-                    diff = cv2.compareHist(prev_hist, hist, cv2.HISTCMP_BHATTACHARYYA)
-                    if diff >= _HIST_THRESH:
-                        sec = frame_idx / fps
-                        if scenes:
-                            scenes[-1] = (scenes[-1][0], sec)
-                        scenes.append((sec, total / fps))
-                        last_cut_frame = frame_idx
-
-                prev_hist = hist
-                frame_idx += 1
-
-            cap.release()
-
-            return scenes
+                return scenes
+            finally:
+                cap.release()
 
         try:
             scene_list = await asyncio.to_thread(_detect_scenes_cv2)
@@ -333,7 +335,7 @@ async def process_audio_video(
             prog(65, f"Запуск Vision-сервера для описания {n} кадров...")
             shared_llm_url = await get_vision_url(llm_settings, progress_cb=prog)
 
-        v_conc = int(llm_settings.get("vision_concurrency") or config.VISION_CONCURRENCY)
+        v_conc = int((llm_settings or {}).get("vision_concurrency") or config.VISION_CONCURRENCY)
         VISION_BATCH_SIZE = 100
 
         sem = asyncio.Semaphore(v_conc)

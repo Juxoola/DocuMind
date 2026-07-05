@@ -116,7 +116,7 @@ async def robust_rmtree(path: str, max_retries: int = 3, delay: float = 0.5) -> 
     if not any(path.startswith(r) for r in allowed_roots):
         raise ValueError(f"robust_rmtree: путь вне допустимых каталогов: {path!r}")
 
-    if not os.path.exists(path):
+    if not await aiofiles.os.path.exists(path):
         return True, None
 
     def _remove_readonly_sync():
@@ -163,7 +163,7 @@ async def robust_rmtree(path: str, max_retries: int = 3, delay: float = 0.5) -> 
                 stderr=asyncio.subprocess.PIPE,
             )
             await asyncio.wait_for(proc.communicate(), timeout=5)
-            if not os.path.exists(path):
+            if not await aiofiles.os.path.exists(path):
                 return True, None
         except Exception:
             logger.debug("robust_rmtree: cmd rmdir не удался для %s", path)
@@ -186,7 +186,7 @@ async def robust_rmtree(path: str, max_retries: int = 3, delay: float = 0.5) -> 
                     stderr=asyncio.subprocess.PIPE,
                 )
                 await asyncio.wait_for(proc.communicate(), timeout=10)
-                if not os.path.exists(path):
+                if not await aiofiles.os.path.exists(path):
                     return True, None
             except Exception:
                 logger.debug("robust_rmtree: cmd move не удался для %s", path)
@@ -251,13 +251,21 @@ class SSEBatchBuffer:
 
 
 def validate_llm_url(url: str) -> None:
-
     parsed = urlparse(url)
     hostname = parsed.hostname or ""
     _LOCAL = ("localhost", "127.0.0.1", "::1")
-    _LAN_PREFIXES = ("192.168.", "10.", "172.")
-    if hostname in _LOCAL or hostname.startswith(_LAN_PREFIXES):
+    if hostname in _LOCAL:
         return
+    if hostname.startswith("192.168.") or hostname.startswith("10."):
+        return
+    # 172.16.0.0/12
+    if hostname.startswith("172."):
+        try:
+            second = int(hostname.split(".")[1])
+            if 16 <= second <= 31:
+                return
+        except (IndexError, ValueError):
+            pass
     if not hostname:
         raise HTTPException(status_code=400, detail="Некорректный URL LLM-сервера")
     raise HTTPException(

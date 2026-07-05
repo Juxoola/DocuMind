@@ -5,6 +5,7 @@ import logging
 import os
 
 import chromadb
+import aiofiles.os
 from llama_index.core import VectorStoreIndex
 from llama_index.core.storage.storage_context import StorageContext
 from llama_index.vector_stores.chroma import ChromaVectorStore
@@ -65,8 +66,8 @@ async def get_vector_store(notebook_id: str):
                 pass
             logger.debug(f"LRU eviction: закрыт ChromaDB клиент {_oldest_path}")
 
-    os.makedirs(db_path, exist_ok=True)
-    db = chromadb.PersistentClient(path=db_path)
+    await aiofiles.os.makedirs(db_path, exist_ok=True)
+    db = await asyncio.to_thread(chromadb.PersistentClient, path=db_path)
     chroma_collection = db.get_or_create_collection("multimodal_rag")
     vector_store = ChromaVectorStore(chroma_collection=chroma_collection)
 

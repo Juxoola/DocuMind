@@ -182,6 +182,11 @@ async def rate_limit_middleware(request, call_next):
 
     key = f"{client_ip}:{request.url.path.split('/')[2] if len(request.url.path.split('/')) > 2 else 'root'}"
     with _rate_lock:
+        # Evict stale entries periodically to prevent unbounded growth
+        if len(_rate_store) > 10000:
+            stale = {k for k, v in _rate_store.items() if not v or now - v[-1] >= 120}
+            for k in stale:
+                _rate_store.pop(k, None)
         timestamps = _rate_store.get(key, [])
         timestamps = [t for t in timestamps if now - t < window]
         if len(timestamps) >= limit:
