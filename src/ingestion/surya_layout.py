@@ -25,32 +25,32 @@ def _ensure_predictor():
         if _layout_predictor is not None:
             return _layout_predictor
         try:
-        llama_binary = os.getenv("LLAMA_CPP_BINARY")
-        if not llama_binary:
-            for candidate in [
-                r"F:\llama.cpp\build\bin\Release\llama-server.exe",
-                r"F:\llama.cpp\build\bin\llama-server",
-            ]:
-                if os.path.exists(candidate):
-                    os.environ["LLAMA_CPP_BINARY"] = candidate
-                    break
+            llama_binary = os.getenv("LLAMA_CPP_BINARY")
+            if not llama_binary:
+                for candidate in [
+                    r"F:\llama.cpp\build\bin\Release\llama-server.exe",
+                    r"F:\llama.cpp\build\bin\llama-server",
+                ]:
+                    if os.path.exists(candidate):
+                        os.environ["LLAMA_CPP_BINARY"] = candidate
+                        break
 
-        os.environ.setdefault("SURYA_GUIDED_LAYOUT", "false")
-        os.environ.setdefault("SURYA_INFERENCE_PARALLEL", "2")
-        os.environ.setdefault("SURYA_INFERENCE_CTX_SIZE", "16384")
+            os.environ.setdefault("SURYA_GUIDED_LAYOUT", "false")
+            os.environ.setdefault("SURYA_INFERENCE_PARALLEL", "2")
+            os.environ.setdefault("SURYA_INFERENCE_CTX_SIZE", "16384")
 
-        from surya.inference import SuryaInferenceManager
-        from surya.layout import LayoutPredictor
+            from surya.inference import SuryaInferenceManager
+            from surya.layout import LayoutPredictor
 
-        logger.info("[Surya] Инициализация inference manager (llamacpp)...")
-        _inference_manager = SuryaInferenceManager(method="llamacpp")
-        _layout_predictor = LayoutPredictor(_inference_manager)
-        logger.info("[Surya] Layout predictor готов.")
-        return _layout_predictor
+            logger.info("[Surya] Инициализация inference manager (llamacpp)...")
+            _inference_manager = SuryaInferenceManager(method="llamacpp")
+            _layout_predictor = LayoutPredictor(_inference_manager)
+            logger.info("[Surya] Layout predictor готов.")
+            return _layout_predictor
 
-    except Exception as e:
-        logger.error(f"[Surya] Ошибка инициализации layout: {e}")
-        return None
+        except Exception as e:
+            logger.error(f"[Surya] Ошибка инициализации layout: {e}")
+            return None
 
 
 def _ensure_recognition():
@@ -63,16 +63,19 @@ def _ensure_recognition():
     if _inference_manager is None:
         return None
 
-    try:
-        from surya.recognition import RecognitionPredictor
+    with _surya_lock:
+        if _recognition_predictor is not None:
+            return _recognition_predictor
+        try:
+            from surya.recognition import RecognitionPredictor
 
-        _recognition_predictor = RecognitionPredictor(_inference_manager)
-        logger.info("[Surya] Recognition predictor готов.")
-        return _recognition_predictor
+            _recognition_predictor = RecognitionPredictor(_inference_manager)
+            logger.info("[Surya] Recognition predictor готов.")
+            return _recognition_predictor
 
-    except Exception as e:
-        logger.error(f"[Surya] Ошибка инициализации recognition: {e}")
-        return None
+        except Exception as e:
+            logger.error(f"[Surya] Ошибка инициализации recognition: {e}")
+            return None
 
 
 # Типы regions которые извлекаем как изображения
@@ -160,13 +163,14 @@ def extract_regions(
 def shutdown():
     global _layout_predictor, _recognition_predictor, _inference_manager
 
-    if _inference_manager is not None:
-        try:
-            _inference_manager.stop()
-        except Exception as e:
-            logger.warning(f"[Surya] Ошибка остановки server: {e}")
+    with _surya_lock:
+        if _inference_manager is not None:
+            try:
+                _inference_manager.stop()
+            except Exception as e:
+                logger.warning(f"[Surya] Ошибка остановки server: {e}")
 
-    _layout_predictor = None
-    _recognition_predictor = None
-    _inference_manager = None
+        _layout_predictor = None
+        _recognition_predictor = None
+        _inference_manager = None
     logger.info("[Surya] Predictor'ы и server выгружены.")
