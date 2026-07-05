@@ -27,8 +27,13 @@ def _ensure_predictor():
         try:
             llama_binary = os.getenv("LLAMA_CPP_BINARY")
             if not llama_binary:
-                import shutil
-                llama_binary = shutil.which("llama-server")
+                import shutil, platform
+                exe = "llama-server.exe" if platform.system() == "Windows" else "llama-server"
+                local = os.path.join(config.BASE_DIR, "bin", exe)
+                if os.path.isfile(local):
+                    llama_binary = local
+                else:
+                    llama_binary = shutil.which("llama-server")
                 if llama_binary:
                     os.environ["LLAMA_CPP_BINARY"] = llama_binary
 
