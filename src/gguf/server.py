@@ -7,6 +7,7 @@ import socket
 import subprocess
 import time
 
+import aiofiles
 import httpx
 import psutil
 import torch
@@ -263,7 +264,7 @@ async def _start_llm_server(gguf_path: str, mmproj_path: str, current_config: di
     if current_config.get("_n_threads") and current_config["_n_threads"] > 0:
         cmd.extend(["-t", str(current_config["_n_threads"])])
 
-    if current_config.get("mmproj") and await asyncio.to_thread(os.path.exists, current_config["mmproj"]):
+    if current_config.get("mmproj") and await aiofiles.os.path.exists(current_config["mmproj"]):
         cmd.extend(["--mmproj", os.path.normpath(current_config["mmproj"])])
         logger.info(
             f"[GGUF Server] С поддержкой Vision: {os.path.basename(current_config['mmproj'])}"
@@ -361,7 +362,7 @@ async def _load_llm(gguf_path: str, mmproj_path: str, current_config: dict) -> s
         _server_configs[gguf_path] = current_config
     await unload_rag_models_safe()
     await unload_all_models(role="llm")
-    if not await asyncio.to_thread(os.path.exists, gguf_path):
+    if not await aiofiles.os.path.exists(gguf_path):
         async with _lock:
             _llm_load_state.update({"state": "error", "error": f"Model not found: {gguf_path}"})
         raise FileNotFoundError(f"GGUF модель не найдена: {gguf_path}")
@@ -456,7 +457,7 @@ async def preload_gguf_llm(gguf_path: str, mmproj_path: str = None, **kwargs) ->
         try:
             await unload_rag_models_safe()
             await unload_all_models(role="llm")
-            if not await asyncio.to_thread(os.path.exists, gguf_path):
+            if not await aiofiles.os.path.exists(gguf_path):
                 raise FileNotFoundError(f"GGUF модель не найдена: {gguf_path}")
             url = await _start_llm_server(gguf_path, mmproj_path, current_config)
             elapsed = time.time() - _llm_load_state["started_at"]
@@ -535,7 +536,7 @@ async def get_gguf_embedding_url(
 
     await unload_all_models(role=role)
 
-    if not await asyncio.to_thread(os.path.exists, gguf_path):
+    if not await aiofiles.os.path.exists(gguf_path):
         raise FileNotFoundError(f"GGUF модель не найдена: {gguf_path}")
 
     port = _allocate_port()
@@ -626,7 +627,7 @@ async def get_vision_server(
 
     await unload_all_models(role="vision")
 
-    if not await asyncio.to_thread(os.path.exists, gguf_path):
+    if not await aiofiles.os.path.exists(gguf_path):
         raise FileNotFoundError(f"Vision модель не найдена: {gguf_path}")
 
     port = _allocate_port()
@@ -669,7 +670,7 @@ async def get_vision_server(
     if current_config.get("_n_threads") and current_config["_n_threads"] > 0:
         cmd.extend(["-t", str(current_config["_n_threads"])])
 
-    if current_config.get("mmproj") and await asyncio.to_thread(os.path.exists, current_config["mmproj"]):
+    if current_config.get("mmproj") and await aiofiles.os.path.exists(current_config["mmproj"]):
         cmd.extend(["--mmproj", os.path.normpath(current_config["mmproj"])])
         logger.info(
             f"[GGUF Server] Vision с поддержкой mmproj: {os.path.basename(current_config['mmproj'])}"

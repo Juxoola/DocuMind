@@ -3,7 +3,6 @@
 import asyncio
 import logging
 import os
-import shutil
 
 import orjson
 from fastapi import APIRouter, HTTPException
@@ -105,7 +104,10 @@ async def _run_nvidia_smi(query_args: list[str], timeout: float = 3) -> str | No
 # ── Мониторинг VRAM и процессов GPU ──
 @router.get("/api/vram")
 async def api_vram() -> dict:
-    if not await asyncio.to_thread(shutil.which, "nvidia-smi"):
+    _proc = await asyncio.create_subprocess_exec(
+        "where", "nvidia-smi", stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL
+    )
+    if _proc.returncode != 0:
         return {
             "gpu": {
                 "name": "n/a",
@@ -246,7 +248,11 @@ async def api_context_usage():
                             if len(parts) >= 2:
                                 n_ctx = int(float(parts[1]))
                     if n_used is not None and n_ctx:
-                        return {"used": n_used, "total": n_ctx, "pct": round(n_used / n_ctx * 100, 1)}
+                        return {
+                            "used": n_used,
+                            "total": n_ctx,
+                            "pct": round(n_used / n_ctx * 100, 1),
+                        }
                     if ratio is not None and n_ctx:
                         n_used = round(ratio * n_ctx)
                         return {"used": n_used, "total": n_ctx, "pct": round(ratio * 100, 1)}

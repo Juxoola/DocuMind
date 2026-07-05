@@ -50,7 +50,9 @@ async def ensure_720p_video(file_path, prog_cb=None, cancel_check=None, notebook
                 f"[ensure_720p_video] WARNING get_duration timeout для {os.path.basename(path)} (30с)"
             )
         except Exception:
-            logger.debug(f"[ensure_720p_video] Не удалось получить длительность видео: {os.path.basename(path)}")
+            logger.debug(
+                f"[ensure_720p_video] Не удалось получить длительность видео: {os.path.basename(path)}"
+            )
         return 0
 
     logger.info(f"[ensure_720p_video] Начало: {os.path.basename(file_path)}")
@@ -109,7 +111,9 @@ async def ensure_720p_video(file_path, prog_cb=None, cancel_check=None, notebook
             try:
                 await aiofiles.os.remove(temp_final)
             except Exception:
-                logger.debug(f"[ensure_720p_video] Не удалось удалить промежуточный файл {os.path.basename(temp_final)}")
+                logger.debug(
+                    f"[ensure_720p_video] Не удалось удалить промежуточный файл {os.path.basename(temp_final)}"
+                )
             raise IngestionCancelled("Cancelled during 720p encode")
     else:
         if _is_cancelled():
@@ -236,18 +240,20 @@ async def ensure_720p_video(file_path, prog_cb=None, cancel_check=None, notebook
             try:
                 await aiofiles.os.remove(temp_final)
             except Exception:
-                logger.debug(f"[ensure_720p_video] Не удалось удалить промежуточный файл после сборки: {os.path.basename(temp_final)}")
+                logger.debug(
+                    f"[ensure_720p_video] Не удалось удалить промежуточный файл после сборки: {os.path.basename(temp_final)}"
+                )
             raise IngestionCancelled("Cancelled after video merge")
         try:
             await asyncio.to_thread(shutil.rmtree, temp_dir)
         except Exception:
             logger.debug(f"[ensure_720p_video] Не удалось удалить временную директорию: {temp_dir}")
 
-    if await asyncio.to_thread(os.path.exists, temp_final) and os.path.getsize(temp_final) > 1000:
+    if await aiofiles.os.path.exists(temp_final) and os.path.getsize(temp_final) > 1000:
         if await aiofiles.os.path.exists(file_path):
             await aiofiles.os.remove(file_path)
         new_path = os.path.splitext(file_path)[0] + ".mp4"
-        if await asyncio.to_thread(os.path.exists, new_path) and new_path != temp_final:
+        if await aiofiles.os.path.exists(new_path) and new_path != temp_final:
             await aiofiles.os.remove(new_path)
         await aiofiles.os.rename(temp_final, new_path)
         file_path = new_path
@@ -278,13 +284,19 @@ async def ensure_mp3_audio(file_path, prog_cb=None):
     )
     try:
         await asyncio.wait_for(proc.communicate(), timeout=300)
-    except (asyncio.CancelledError, asyncio.TimeoutError):
+    except (TimeoutError, asyncio.CancelledError):
         try:
             proc.kill()
         except Exception:
-            logger.debug("[ensure_mp3_audio] Не удалось завершить процесс ffmpeg при отмене/таймауте")
+            logger.debug(
+                "[ensure_mp3_audio] Не удалось завершить процесс ffmpeg при отмене/таймауте"
+            )
         raise
-    if proc.returncode == 0 and await asyncio.to_thread(os.path.exists, temp_path) and os.path.getsize(temp_path) > 1000:
+    if (
+        proc.returncode == 0
+        and await aiofiles.os.path.exists(temp_path)
+        and os.path.getsize(temp_path) > 1000
+    ):
         await aiofiles.os.remove(file_path)
         logger.info(f"[media_convert] {os.path.basename(file_path)} → mp3")
         return temp_path

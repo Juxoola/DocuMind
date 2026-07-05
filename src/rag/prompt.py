@@ -1,8 +1,9 @@
 """Построение промпта и контекста для RAG-ответа."""
 
-import asyncio
 import logging
 import os
+
+import aiofiles.os
 
 import config
 from src.rag.state import _model_cache
@@ -21,7 +22,7 @@ async def build_file_context(nodes, notebook_id: str):
     }
     existing_imgs = set()
     if img_paths:
-        existing_imgs = await asyncio.to_thread(lambda: {p for p in img_paths if os.path.exists(p)})
+        existing_imgs = {p for p in img_paths if await aiofiles.os.path.exists(p)}
 
     sources = []
     context_parts = []

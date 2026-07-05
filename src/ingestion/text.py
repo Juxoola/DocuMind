@@ -20,6 +20,7 @@ from src.ingestion.vision import describe_image_with_lmstudio, get_vision_url
 logger = logging.getLogger(__name__)
 
 
+<<<<<<< HEAD
 # Извлечение встроенных изображений со страницы PDF
 # (только когда surya_mode=disabled — иначе surya layout делает это лучше)
 
@@ -74,6 +75,9 @@ async def _analyze_and_build_page(
 
 
 # Основной конвейер PDF: извлечение текста, батчевая параллельная обработка, Vision-анализ
+=======
+# Основной конвейер PDF: извлечение текста (pymupdf4llm), изображения (surya layout), Vision-анализ
+>>>>>>> 62b6f39 (refactor(async): замена asyncio.to_thread(os.path.exists) на aiofiles.os.path.exists)
 async def process_pdf(
     file_path,
     images_dir,
@@ -107,6 +111,7 @@ async def process_pdf(
             progress_cb(10, "Извлечение текста (pymupdf4llm)...")
         md_chunks = await asyncio.to_thread(_extract_markdown)
 
+<<<<<<< HEAD
         def _clean_markdown(text: str) -> str:
             import re
 
@@ -117,6 +122,43 @@ async def process_pdf(
             text = text.replace("\\n", "\n")
             text = re.sub(r"\n{3,}", "\n\n", text)
             return text
+=======
+        # Оцениваем качество извлечения
+        total_chars = sum(len(c.get("text", "")) for c in md_chunks)
+        avg_chars = total_chars / max(total_pages, 1)
+        logger.info(
+            f"[Ingestion] pymupdf4llm: {len(md_chunks)} чанков, {total_chars} симв., среднее {avg_chars:.0f}/стр"
+        )
+
+        if avg_chars < 100:
+            # PDF-скан, мало текста → нужен Surya OCR
+            logger.info("[Ingestion] Мало текста (< 100/стр) → Surya OCR")
+            use_surya_ocr = True
+        else:
+            # Хороший текстовый PDF
+            import re
+
+            # ── Очистка markdown от артефактов pymupdf ──
+            def _clean_markdown(text):
+                text = re.sub(r"^(#{1,6})\s*\*\*(.+?)\*\*\s*$", r"\1 \2", text, flags=re.MULTILINE)
+                text = re.sub(
+                    r"\*{0,2}={1,2}> picture \[\d+ x \d+\] intentionally omitted <={1,2}\*{0,2}",
+                    "",
+                    text,
+                )
+                text = re.sub(
+                    r"----- Start of picture text -----.*?----- End of picture text -----",
+                    "",
+                    text,
+                    flags=re.DOTALL,
+                )
+                text = re.sub(r"\*\*(.+?\.{3,}\d+)\*\*", r"\1", text)
+                text = re.sub(r"\n\s*\d{1,3}\s*\n", "\n", text)
+                text = text.replace("\\n", "\n")
+                text = re.sub(r"\n{3,}", "\n\n", text)
+                text = text.strip()
+                return text
+>>>>>>> 62b6f39 (refactor(async): замена asyncio.to_thread(os.path.exists) на aiofiles.os.path.exists)
 
         for chunk in md_chunks:
             page_num = chunk.get("metadata", {}).get("page_number", 0)
@@ -142,6 +184,7 @@ async def process_pdf(
         try:
             extracted_parts = []
             for chunk in md_chunks:
+<<<<<<< HEAD
                 t = chunk.get("text", "")
                 if t and t.strip():
                     extracted_parts.append(t)
@@ -151,6 +194,44 @@ async def process_pdf(
                     await ef.write("\n\n---\n\n".join(extracted_parts))
         except Exception as e:
             logger.warning(f"[Ingestion] Не удалось сохранить .extracted.md: {e}")
+=======
+                page_num = chunk.get("metadata", {}).get("page_number", 0)
+                md_text = chunk.get("text", "")
+                if md_text and md_text.strip():
+                    md_text = _clean_markdown(md_text)
+
+                    # Удаляем pymupdf image placeholders — surya layout извлекает изображения
+                    md_text = re.sub(
+                        r"=> picture \[\d+ x \d+\] intentionally omitted <=.*?(?=----- Start|$)",
+                        "",
+                        md_text,
+                        flags=re.DOTALL,
+                    )
+                    md_text = re.sub(
+                        r"----- Start of picture text -----.*?----- End of picture text -----",
+                        "",
+                        md_text,
+                        flags=re.DOTALL,
+                    )
+                    md_text = re.sub(r"\n{3,}", "\n\n", md_text).strip()
+
+                    if md_text and md_text.strip():
+                        # Добавляем номер страницы
+                        page_header = f"## Стр. {page_num}\n\n"
+                        nodes.extend(
+                            splitter.get_nodes_from_documents(
+                                [
+                                    TextNode(
+                                        text=page_header + md_text,
+                                        metadata={"file_name": file_name, "page": page_num},
+                                    )
+                                ]
+                            )
+                        )
+
+            logger.info(f"[Ingestion] pymupdf4llm: {len(nodes)} узлов")
+
+>>>>>>> 62b6f39 (refactor(async): замена asyncio.to_thread(os.path.exists) на aiofiles.os.path.exists)
     except ImportError:
         logger.warning("[Ingestion] pymupdf4llm не установлен — fallback на page.get_text()")
         for page_num in range(total_pages):
@@ -228,7 +309,9 @@ async def process_pdf(
             if shared_llm_url is None:
                 shared_llm_url = await get_vision_url(llm_settings)
             if shared_llm_url:
-                v_conc = int((llm_settings or {}).get("vision_concurrency") or config.VISION_CONCURRENCY)
+                v_conc = int(
+                    (llm_settings or {}).get("vision_concurrency") or config.VISION_CONCURRENCY
+                )
                 n = len(frame_list)
                 if progress_cb:
                     progress_cb(
@@ -282,6 +365,7 @@ async def process_pdf(
                 results.sort(key=lambda x: x[0]["page"])
                 for frame_info, desc in results:
                     if desc and "Изображение без описания" not in desc:
+<<<<<<< HEAD
                         full_text = f"Изображение PDF {file_name} стр {frame_info['page']}: {desc}"
                         if len(full_text) <= config.GGUF_CTX_EMBED_CHARS:
                             nodes.append(
@@ -322,6 +406,37 @@ async def process_pdf(
                             pass
 
             results.clear()
+=======
+                        pg = frame_info["page"]
+                        if pg not in page_descs:
+                            page_descs[pg] = []
+                        page_descs[pg].append(
+                            {
+                                "text": desc,
+                                "image_path": frame_info["path"],
+                            }
+                        )
+
+                # Добавляем описания как ОТДЕЛЬНЫЕ ноды (не обрезаются сплиттером)
+                for pg, descs in list(page_descs.items()):
+                    for d in descs:
+                        desc_text = f"--- Изображение (стр. {pg}) ---\n{d['text']}\n---"
+                        nodes.append(
+                            TextNode(
+                                text=desc_text,
+                                metadata={
+                                    "file_name": file_name,
+                                    "page": pg,
+                                    "image_path": d["image_path"],
+                                },
+                            )
+                        )
+                        frame_data.append(
+                            {"page": pg, "image_path": d["image_path"], "description": d["text"]}
+                        )
+
+        if frame_data:
+>>>>>>> 62b6f39 (refactor(async): замена asyncio.to_thread(os.path.exists) на aiofiles.os.path.exists)
             import gc
 
             gc.collect()
@@ -455,7 +570,13 @@ async def _surya_layout_pass(
                 await asyncio.to_thread(img.save, img_path)
                 frame_list.append({"page": page_idx + 1, "path": img_path})
             except Exception:
+<<<<<<< HEAD
                 logger.debug(f"[surya_layout] Не удалось сохранить region на странице {page_idx + 1}")
+=======
+                logger.debug(
+                    f"[surya_layout] Не удалось сохранить группу layout на странице {page_idx + 1}"
+                )
+>>>>>>> 62b6f39 (refactor(async): замена asyncio.to_thread(os.path.exists) на aiofiles.os.path.exists)
 
     surya_shutdown()
     return frame_list
@@ -463,20 +584,20 @@ async def _surya_layout_pass(
 
 # Конвертация Office-файлов в PDF: LibreOffice (приоритет), COM (резерв), текстовый fallback
 def _find_soffice():
-    import shutil
     import platform
+    import shutil
 
-    # 1. env override
+    # ── env override ──
     env_path = os.getenv("LIBREOFFICE_PATH")
     if env_path and os.path.isfile(env_path):
         return env_path
 
-    # 2. shutil.which — работает на всех платформах
+    # ── shutil.which — работает на всех платформах ──
     found = shutil.which("soffice") or shutil.which("soffice.exe")
     if found:
         return found
 
-    # 3. Платформо-специфичные пути
+    # ── Платформо-специфичные пути ──
     if platform.system() == "Windows":
         local = os.path.join(config.BASE_DIR, "libreoffice", "program", "soffice.exe")
         if os.path.isfile(local):
@@ -515,7 +636,7 @@ async def _convert_via_libreoffice(file_path):
     )
     _stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=120)
     pdf_path = os.path.splitext(file_path)[0] + ".pdf"
-    if proc.returncode == 0 and await asyncio.to_thread(os.path.exists, pdf_path):
+    if proc.returncode == 0 and await aiofiles.os.path.exists(pdf_path):
         logger.info(f"[DOCX] Сконвертировано в PDF через LibreOffice: {os.path.basename(pdf_path)}")
         try:
             await aiofiles.os.remove(file_path)

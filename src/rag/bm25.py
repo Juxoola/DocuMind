@@ -212,7 +212,7 @@ async def flush_bm25_rebuild(
 async def is_bm25_ready(notebook_id: str) -> bool:
     paths = config.get_notebook_paths(notebook_id)
     bm25_dir = os.path.join(paths["base"], "bm25")
-    exists = await asyncio.to_thread(os.path.exists, os.path.join(bm25_dir, "retriever.json"))
+    exists = await aiofiles.os.path.exists(os.path.join(bm25_dir, "retriever.json"))
     async with _bm25_pending_lock:
         has_pending = notebook_id in _bm25_pending_timers
     async with _bm25_rebuilding_lock:
