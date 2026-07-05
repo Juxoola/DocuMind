@@ -1,11 +1,14 @@
 """DocuMind — основной модуль."""
 
 import asyncio
+import contextvars
 import logging
 import os
+import signal
 import sys
 import threading
 import time
+import uuid
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -15,19 +18,61 @@ from fastapi.responses import JSONResponse
 import config
 from routers.notebooks import _NB_ID_PATTERN
 
-# ── Настройка логирования ──
+# ── Contextvars для request tracing ──
+request_id_var: contextvars.ContextVar[str] = contextvars.ContextVar("request_id", default="")
+
+# ── Структурированное JSON-логирование ──
 _LOG_DIR = os.path.join(config.BASE_DIR, "logs")
 os.makedirs(_LOG_DIR, exist_ok=True)
 
+
+class _RequestIDFilter(logging.Filter):
+    """Подставляет request_id из contextvars в каждый лог-запис."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        record.request_id = request_id_var.get("")
+        return True
+
+
+try:
+    from pythonjsonlogger.json import JsonFormatter as _JsonFormatter
+
+    _json_formatter = _JsonFormatter(
+        fmt="%(asctime)s %(levelname)s %(name)s %(message)s %(request_id)s",
+        rename_fields={"asctime": "time", "levelname": "level", "name": "logger"},
+        static_fields={"request_id": ""},
+        datefmt="%Y-%m-%dT%H:%M:%S",
+    )
+except Exception:
+    # fallback — простой JSON без сторонней библиотеки
+    class _FallbackFormatter(logging.Formatter):
+        def format(self, record: logging.LogRecord) -> str:
+            import json as _json
+            return _json.dumps({
+                "time": self.formatTime(record, "%Y-%m-%dT%H:%M:%S"),
+                "level": record.levelname,
+                "logger": record.name,
+                "message": record.getMessage(),
+                "request_id": getattr(record, "request_id", ""),
+            })
+
+    _json_formatter = _FallbackFormatter()
+
+_root_handler_file = logging.FileHandler(
+    os.path.join(_LOG_DIR, "server.log"), encoding="utf-8"
+)
+_root_handler_file.setFormatter(_json_formatter)
+_root_handler_file.addFilter(_RequestIDFilter())
+
+_root_handler_stream = logging.StreamHandler(sys.stdout)
+_root_handler_stream.setFormatter(_json_formatter)
+_root_handler_stream.addFilter(_RequestIDFilter())
+
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-    datefmt="%H:%M:%S",
-    handlers=[
-        logging.FileHandler(os.path.join(_LOG_DIR, "server.log"), encoding="utf-8"),
-        logging.StreamHandler(sys.stdout),
-    ],
+    handlers=[_root_handler_file, _root_handler_stream],
 )
+del _root_handler_file, _root_handler_stream
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("chromadb").setLevel(logging.WARNING)
 logging.getLogger("llama_index").setLevel(logging.WARNING)
@@ -108,6 +153,21 @@ def _shutdown_models():
     except Exception as e:
         logger.error(f"Ошибка при выгрузке моделей: {e}")
 
+
+# ── Graceful shutdown: обработка SIGTERM/SIGINT ──
+def _graceful_signal_handler(signum, frame):
+    """Обработчик SIGTERM/SIGINT — выгружает модели и завершает процесс."""
+    logger.info(f"Получен сигнал {signum}, запуск graceful shutdown...")
+    _shutdown_models()
+    sys.exit(0)
+
+
+for _sig in (signal.SIGINT, signal.SIGTERM):
+    try:
+        signal.signal(_sig, _graceful_signal_handler)
+    except (OSError, ValueError):
+        # Windows не поддерживает SIGTERM; fallback ниже
+        pass
 
 # Windows Console Control Handler — перехватывает CTRL_CLOSE/CTRL_BREAK для graceful shutdown.
 if os.name == "nt":
@@ -200,6 +260,20 @@ async def rate_limit_middleware(request, call_next):
     return await call_next(request)
 
 
+# ── Request tracing middleware ──
+@app.middleware("http")
+async def request_tracing_middleware(request, call_next):
+    """Генерирует UUID request_id и пробрасывает в contextvars + response header."""
+    req_id = uuid.uuid4().hex
+    token = request_id_var.set(req_id)
+    try:
+        response = await call_next(request)
+    finally:
+        request_id_var.reset(token)
+    response.headers["X-Request-ID"] = req_id
+    return response
+
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=config.CORS_ORIGINS,
@@ -212,6 +286,68 @@ app.add_middleware(
 @app.get("/health")
 async def health():
     return {"status": "ok", "app": "DocuMind"}
+
+
+# ── Deep health check: проверка всех компонентов ──
+@app.get("/health/deep")
+async def health_deep():
+    """Проверяет ChromaDB, LLM availability, GPU VRAM."""
+    from datetime import datetime, timezone
+
+    components: dict = {}
+    overall = "ok"
+
+    # ChromaDB
+    try:
+        import chromadb
+        _client = chromadb.Client()
+        _client.heartbeat()
+        components["chromadb"] = {"status": "ok"}
+    except Exception as e:
+        components["chromadb"] = {"status": "error", "detail": str(e)}
+        overall = "degraded"
+
+    # LLM
+    try:
+        from src.gguf.server import get_active_llm_url
+        url = await asyncio.wait_for(get_active_llm_url(), timeout=5)
+        if url:
+            components["llm"] = {"status": "ok"}
+        else:
+            components["llm"] = {"status": "not_loaded"}
+    except Exception as e:
+        components["llm"] = {"status": "unavailable", "detail": str(e)}
+        overall = "degraded"
+
+    # GPU
+    try:
+        import torch
+        if torch.cuda.is_available():
+            _dev = torch.cuda.get_device_properties(0)
+            _total = _dev.total_mem / (1024 ** 3)
+            _free = torch.cuda.mem_get_info(0)[0] / (1024 ** 3)
+            components["gpu"] = {
+                "status": "ok",
+                "device": _dev.name,
+                "total_gb": round(_total, 2),
+                "free_gb": round(_free, 2),
+            }
+        else:
+            components["gpu"] = {"status": "unavailable", "detail": "CUDA not available"}
+    except Exception as e:
+        components["gpu"] = {"status": "unavailable", "detail": str(e)}
+
+    if any(c.get("status") == "error" for c in components.values()):
+        overall = "degraded"
+    if all(c.get("status") in ("unavailable", "error") for c in components.values()):
+        overall = "error"
+
+    return {
+        "status": overall,
+        "app": "DocuMind",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "components": components,
+    }
 
 
 os.makedirs(os.path.join(config.BASE_DIR, "static"), exist_ok=True)

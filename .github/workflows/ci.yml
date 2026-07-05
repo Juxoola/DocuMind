@@ -1,0 +1,44 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      
+      - name: Install dependencies
+        run: |
+          pip install -r requirements-cuda.txt
+          pip install pytest pytest-asyncio
+      
+      - name: Lint
+        run: |
+          pip install ruff
+          ruff check .
+      
+      - name: Test
+        run: pytest tests/ -v --tb=short
+        env:
+          HF_HUB_OFFLINE: '1'
+          GGUF_SEARCH_DIRS: '/dev/null'
+
+  docker:
+    runs-on: ubuntu-latest
+    needs: test
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Build Docker image
+        run: docker build -t documind:latest .

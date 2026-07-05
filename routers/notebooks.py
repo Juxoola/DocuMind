@@ -11,7 +11,7 @@ import uuid
 import aiofiles
 import aiofiles.os
 import orjson
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, field_validator
 
 import config
@@ -69,7 +69,10 @@ async def migrate_old_data():
 
 # ── CRUD-эндпоинты блокнотов ──
 @router.get("/api/notebooks")
-async def get_notebooks() -> dict:
+async def get_notebooks(
+    offset: int = Query(0, ge=0, description="Смещение от начала списка"),
+    limit: int = Query(100, ge=1, le=500, description="Максимум записей"),
+) -> dict:
     nbs = []
     if await aiofiles.os.path.exists(config.NOTEBOOKS_DIR):
         for entry in await aiofiles.os.listdir(config.NOTEBOOKS_DIR):
@@ -82,7 +85,8 @@ async def get_notebooks() -> dict:
                         nbs.append(orjson.loads(await f.read()))
                 except Exception as e:
                     logger.debug(f"Не удалось прочитать {meta_path}: {e}")
-    return nbs
+    total = len(nbs)
+    return {"items": nbs[offset : offset + limit], "total": total, "offset": offset, "limit": limit}
 
 
 class CreateNotebookRequest(BaseModel):

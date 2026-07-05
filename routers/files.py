@@ -38,7 +38,11 @@ router = APIRouter(tags=["files"])
 
 
 @router.get("/api/files")
-async def get_files(notebook_id: str):
+async def get_files(
+    notebook_id: str,
+    offset: int = Query(0, ge=0, description="Смещение от начала списка"),
+    limit: int = Query(100, ge=1, le=500, description="Максимум записей"),
+):
     from routers.notebooks import validate_nb_id
 
     notebook_id = validate_nb_id(notebook_id)
@@ -49,7 +53,8 @@ async def get_files(notebook_id: str):
         ]
     else:
         files_list = []
-    return {"files": files_list}
+    total = len(files_list)
+    return {"files": files_list[offset : offset + limit], "total": total, "offset": offset, "limit": limit}
 
 
 # ── Загрузка файлов в блокнот ──
