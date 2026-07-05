@@ -9,7 +9,6 @@ import time
 
 import aiofiles
 import httpx
-import psutil
 import torch
 
 import config
@@ -26,7 +25,12 @@ from src.gguf.state import (
 )
 
 logger = logging.getLogger(__name__)
-_watchdog_tasks: set[asyncio.Task] = set()
+from src.gguf.watchdog import (
+    _WATCHDOG_LIMITS,
+    _proc_alive,
+    _watchdog_memory,
+    _watchdog_tasks,
+)
 
 # ── Переиспользуемый HTTP-клиент для health-check (один коннект на все polling-циклы) ──
 _health_http: httpx.AsyncClient | None = None
@@ -120,13 +124,6 @@ async def _wait_for_server(
     raise TimeoutError(f"{role.capitalize()} сервер не ответил за 60 секунд")
 
 
-def _proc_alive(proc) -> bool:
-
-    if hasattr(proc, "poll"):
-        return proc.poll() is None
-    return proc.returncode is None
-
-
 async def is_server_ready(port: int) -> bool:
     try:
         client = await _get_health_client()
@@ -134,80 +131,6 @@ async def is_server_ready(port: int) -> bool:
         return r.status_code == 200
     except Exception:
         return False
-
-
-# Лимиты RSS по ролям (MB): при превышении — auto-restart
-_WATCHDOG_LIMITS = {
-    "llm": 12000,
-    "vision": 4000,
-    "embedding": 2000,
-    "reranker": 2000,
-}
-
-
-async def _watchdog_memory(server_key: str, process, role: str):
-    limit_mb = _WATCHDOG_LIMITS.get(role, 8000)
-    while _proc_alive(process):
-        await asyncio.sleep(30)
-        try:
-            proc = psutil.Process(process.pid)
-            rss_mb = proc.memory_info().rss // (1024 * 1024)
-            if rss_mb > limit_mb:
-                logger.warning(
-                    f"[GGUF Watchdog] {role}/{os.path.basename(server_key)}: "
-                    f"RSS {rss_mb}MB > {limit_mb}MB limit. Restarting..."
-                )
-                # Сигнал vision-запросам: ждите, сервер умирает
-                if role == "vision":
-                    from src.ingestion.vision import set_vision_url
-
-                    set_vision_url(None)
-                await _kill_server_process(process)
-                try:
-                    await asyncio.wait_for(process.wait(), timeout=5)
-                except Exception as e:
-                    logger.debug(f"process.wait() timeout при auto-restart watchdog ({role}): {e}")
-                await asyncio.sleep(2)
-                async with _lock:
-                    cfg = _server_configs.get(server_key)
-                if cfg is None:
-                    return
-                try:
-                    if role == "llm":
-                        url = await _start_llm_server(server_key, cfg.get("mmproj"), cfg)
-                    elif role in ("embedding", "reranker"):
-                        url = await get_gguf_embedding_url(
-                            server_key,
-                            is_reranker=(role == "reranker"),
-                            n_parallel=cfg.get("n_parallel", 1),
-                        )
-                    elif role == "vision":
-                        gguf_path = server_key.split(":", 1)[1] if ":" in server_key else server_key
-                        url = await get_vision_server(
-                            gguf_path,
-                            mmproj_path=cfg.get("mmproj"),
-                            ctx_size=cfg.get("ctx_size", 4096),
-                            gpu_layers=cfg.get("gpu_layers", -1),
-                            n_batch=cfg.get("n_batch", 512),
-                            n_ubatch=cfg.get("n_ubatch", 256),
-                            flash_attn=cfg.get("flash_attn", True),
-                            n_parallel=cfg.get("n_parallel", 1),
-                        )
-                        from src.ingestion.vision import set_vision_url
-
-                        set_vision_url(url)
-                    else:
-                        return
-                    logger.info(f"[GGUF Watchdog] Restarted {role} on {url}")
-                except Exception as e:
-                    logger.error(f"[GGUF Watchdog] Failed to restart {role}: {e}")
-                return
-        except psutil.NoSuchProcess:
-            break
-        except psutil.AccessDenied:
-            break
-        except Exception as e:
-            logger.debug(f"[GGUF Watchdog] {server_key}: {e}")
 
 
 async def _start_llm_server(gguf_path: str, mmproj_path: str, current_config: dict) -> str:
@@ -795,9 +718,7 @@ async def unload_all_models(role: str = None):
             _server_roles.pop(path, None)
 
         # Clean up stale entries where the process is dead
-        stale_keys = [
-            k for k, p in _server_processes.items() if not _proc_alive(p)
-        ]
+        stale_keys = [k for k, p in _server_processes.items() if not _proc_alive(p)]
         for k in stale_keys:
             _server_processes.pop(k, None)
             _server_ports.pop(k, None)

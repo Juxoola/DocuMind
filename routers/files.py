@@ -15,6 +15,7 @@ import cv2
 import orjson
 from fastapi import APIRouter, File, HTTPException, Query, UploadFile
 from fastapi.responses import JSONResponse, Response, StreamingResponse
+from pydantic import BaseModel
 
 import config
 from src.rag.state import RAG_POOL
@@ -32,6 +33,101 @@ from .shared import (
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["files"])
+
+
+# ── Pydantic-модель для параметров LLM/Vision при загрузке ──
+
+
+class UploadLLMSettings(BaseModel):
+    """Группировка всех LLM/Vision-параметров загрузки в одной модели."""
+
+    llm_url: str | None = None
+    llm_api_key: str | None = None
+    llm_model: str | None = None
+    use_gguf_direct: bool = False
+    gguf_model_path: str | None = None
+    gguf_mmproj_path: str | None = None
+    vision_model_path: str | None = None
+    vision_mmproj_path: str | None = None
+    vision_temperature: float | None = 0.1
+    vision_ctx_size: int | None = 4096
+    vision_gpu_layers: int | None = -1
+    vision_threads: int | None = 8
+    vision_batch_size: int | None = 512
+    vision_ubatch_size: int | None = 256
+    vision_flash_attn: str | None = "true"
+    vision_max_tokens: int | None = 4096
+    vision_repeat_penalty: float | None = 1.2
+    vision_top_p: float | None = 0.9
+    vision_min_p: float | None = 0.05
+    vision_presence_penalty: float | None = 0.0
+    vision_frequency_penalty: float | None = 0.0
+    vision_concurrency: int | None = None
+    vision_kv_quant: int | None = 2
+    vision_mtp_enabled: bool | None = False
+
+    def to_llm_settings_dict(self) -> dict:
+        """Конвертация в dict для передачи в ingest_file."""
+        return self.model_dump()
+
+
+def _build_upload_settings(
+    llm_url,
+    llm_api_key,
+    llm_model,
+    use_gguf,
+    gguf_model_path,
+    gguf_mmproj_path,
+    vision_model_path,
+    vision_mmproj_path,
+    vision_temperature,
+    vision_ctx_size,
+    vision_gpu_layers,
+    vision_threads,
+    vision_batch_size,
+    vision_ubatch_size,
+    vision_flash_attn,
+    vision_max_tokens,
+    vision_repeat_penalty,
+    vision_top_p,
+    vision_min_p,
+    vision_presence_penalty,
+    vision_frequency_penalty,
+    vision_concurrency,
+    vision_kv_quant,
+    vision_mtp_enabled,
+) -> dict:
+    """Сборка параметров из query string в dict для ingest_file."""
+    use_gguf_direct = use_gguf == "true" and bool(gguf_model_path)
+    effective_model = os.path.basename(gguf_model_path) if use_gguf_direct else llm_model
+
+    settings = UploadLLMSettings(
+        llm_url=llm_url,
+        llm_api_key=llm_api_key,
+        llm_model=effective_model,
+        use_gguf_direct=use_gguf_direct,
+        gguf_model_path=gguf_model_path if use_gguf_direct else None,
+        gguf_mmproj_path=gguf_mmproj_path if use_gguf_direct else None,
+        vision_model_path=vision_model_path,
+        vision_mmproj_path=vision_mmproj_path,
+        vision_temperature=vision_temperature,
+        vision_ctx_size=vision_ctx_size,
+        vision_gpu_layers=vision_gpu_layers,
+        vision_threads=vision_threads,
+        vision_batch_size=vision_batch_size,
+        vision_ubatch_size=vision_ubatch_size,
+        vision_flash_attn=vision_flash_attn,
+        vision_max_tokens=vision_max_tokens,
+        vision_repeat_penalty=vision_repeat_penalty,
+        vision_top_p=vision_top_p,
+        vision_min_p=vision_min_p,
+        vision_presence_penalty=vision_presence_penalty,
+        vision_frequency_penalty=vision_frequency_penalty,
+        vision_concurrency=vision_concurrency,
+        vision_kv_quant=vision_kv_quant,
+        vision_mtp_enabled=vision_mtp_enabled,
+    )
+    return settings.to_llm_settings_dict()
 
 
 # ── Получение списка файлов блокнота ──
@@ -54,7 +150,210 @@ async def get_files(
     else:
         files_list = []
     total = len(files_list)
-    return {"files": files_list[offset : offset + limit], "total": total, "offset": offset, "limit": limit}
+    return {
+        "files": files_list[offset : offset + limit],
+        "total": total,
+        "offset": offset,
+        "limit": limit,
+    }
+
+
+async def _run_upload_ingestion(
+    *,
+    task_id: str,
+    q: queue.Queue,
+    file_path: str,
+    file: UploadFile,
+    notebook_id: str,
+    current_idx: int,
+    total_count: int,
+    llm_settings: dict,
+    paths: dict,
+) -> None:
+    """Основная логика ingestion для загружаемого файла (вынесена из upload_file)."""
+    start_time = time.time()
+    cancel_event = upload_cancel_flags.setdefault(task_id, threading.Event())
+    cancel_event.clear()
+
+    async with _ingestion_lock:
+        ingestion_status[notebook_id] = {
+            "is_uploading": True,
+            "progress": 0,
+            "batch_progress": (current_idx - 1) / total_count * 100,
+            "current_file": current_idx,
+            "total_files": total_count,
+            "status": "Подготовка...",
+            "task_id": task_id,
+            "updated_at": time.time(),
+        }
+
+    try:
+        from src.ingestion import IngestionCancelled
+    except ImportError:
+        IngestionCancelled = RuntimeError
+
+    try:
+
+        def prog(pct, msg):
+            q.put({"type": "progress", "pct": pct, "msg": msg})
+            if notebook_id in ingestion_status:
+                ingestion_status[notebook_id].update({"progress": pct, "status": msg})
+
+        prog(5, "Файл сохранён, подготовка...")
+        is_last_in_batch = current_idx >= total_count
+        from src.ingestion import ingest_file
+        from src.rag.indexing import build_index
+
+        nodes = await ingest_file(
+            file_path,
+            notebook_id,
+            progress_cb=prog,
+            llm_settings=llm_settings,
+            cancel_check=cancel_event.is_set,
+            keep_vision_alive=not is_last_in_batch,
+            keep_whisper_alive=False,
+        )
+        prog(90, "Построение индекса (ChromaDB)...")
+        await build_index(nodes, notebook_id)
+        from src.rag.retrieval import invalidate_index_cache
+
+        await invalidate_index_cache(notebook_id)
+
+        elapsed = time.time() - start_time
+        mins = int(elapsed // 60)
+        secs = int(elapsed % 60)
+        time_str = f"{mins}м {secs}с" if mins > 0 else f"{secs}с"
+
+        if is_last_in_batch:
+            await _finalize_batch(notebook_id, total_count)
+        else:
+            async with _ingestion_lock:
+                ingestion_status[notebook_id].update(
+                    {
+                        "batch_progress": current_idx / total_count * 100,
+                        "status": f"Готово: {file.filename}",
+                    }
+                )
+
+        q.put(
+            {
+                "type": "done",
+                "filename": file.filename,
+                "elapsed": time_str,
+                "elapsed_sec": elapsed,
+            }
+        )
+        logger.info(f"[INGESTION] Готово: {file.filename} ({time_str})")
+
+    except IngestionCancelled:
+        logger.info(f"[INGESTION] Загрузка отменена пользователем: {file.filename}")
+        await _cleanup_cancelled_upload(file_path, file.filename, notebook_id, paths)
+        q.put({"type": "cancelled", "filename": file.filename})
+
+    except Exception as e:
+        logger.error("Ошибка при обработке загрузки", exc_info=True)
+        async with _ingestion_lock:
+            ingestion_status[notebook_id] = {
+                "is_uploading": False,
+                "error": "Внутренняя ошибка обработки файла",
+                "updated_at": time.time(),
+            }
+        q.put({"type": "error", "msg": "Ошибка обработки файла"})
+
+    finally:
+        upload_cancel_flags.pop(task_id, None)
+        try:
+            from src.ingestion import cleanup_gpu
+
+            cleanup_gpu()
+        except Exception:
+            logger.debug("finally: не удалось вызвать cleanup_gpu")
+
+
+async def _finalize_batch(notebook_id: str, total_count: int) -> None:
+    """Очистка ресурсов после завершения пачки файлов."""
+    logger.info(f"[INGESTION] Пачка завершена. {total_count} файлов обработано.")
+    try:
+        from src.gguf.server import unload_all_models
+
+        await unload_all_models(role="llm")
+    except Exception as e:
+        logger.error(f"[INGESTION] Ошибка выгрузки LLM-сервера: {e}")
+    try:
+        from src.ingestion import unload_whisper_model
+
+        await unload_whisper_model()
+    except Exception as e:
+        logger.error(f"[INGESTION] Ошибка выгрузки WhisperX: {e}")
+    try:
+        from src.rag.bm25 import flush_bm25_rebuild
+
+        await flush_bm25_rebuild(notebook_id)
+    except Exception as e:
+        logger.info(f"[INGESTION] Не удалось форсировать BM25 rebuild: {e}")
+    async with _ingestion_lock:
+        ingestion_status[notebook_id] = {
+            "is_uploading": False,
+            "updated_at": time.time(),
+        }
+
+
+async def _cleanup_cancelled_upload(
+    file_path: str, filename: str, notebook_id: str, paths: dict
+) -> None:
+    """Очистка файлов и индексов при отмене загрузки."""
+    try:
+        from src.gguf.server import kill_stray_servers
+
+        await kill_stray_servers()
+    except Exception:
+        logger.debug("cancel: не удалось убить llama-server")
+
+    # Удаление загруженного файла
+    try:
+        if await aiofiles.os.path.exists(file_path):
+            await aiofiles.os.remove(file_path)
+    except Exception:
+        logger.debug("cancel: не удалось удалить %s", file_path)
+
+    # Удаление sidecar JSON
+    sidecar = os.path.join(os.path.dirname(file_path), f"{filename}.json")
+    try:
+        if await aiofiles.os.path.exists(sidecar):
+            await aiofiles.os.remove(sidecar)
+    except Exception:
+        logger.debug("cancel: не удалось удалить sidecar %s", sidecar)
+
+    # Удаление изображений
+    try:
+        images_dir = paths.get("images")
+        if images_dir and await aiofiles.os.path.exists(images_dir):
+            stem = os.path.splitext(filename)[0]
+            for f in await aiofiles.os.listdir(images_dir):
+                if f.startswith("p_") or f.startswith("v_") or stem in f:
+                    try:
+                        await aiofiles.os.remove(os.path.join(images_dir, f))
+                    except Exception:
+                        logger.debug("cancel: не удалось удалить %s", f)
+    except Exception:
+        logger.debug("cancel: ошибка при чистке images")
+
+    # Очистка векторных индексов
+    try:
+        from src.rag.indexing import get_vector_store
+
+        vector_store = await get_vector_store(notebook_id)
+        collection = vector_store._collection
+        collection.delete(where={"file_name": filename})
+    except Exception:
+        logger.debug("cancel: не удалось очистить векторные индексы для %s", filename)
+
+    async with _ingestion_lock:
+        ingestion_status[notebook_id] = {
+            "is_uploading": False,
+            "cancelled": True,
+            "updated_at": time.time(),
+        }
 
 
 # ── Загрузка файлов в блокнот ──
@@ -124,202 +423,48 @@ async def upload_file(
     await save_upload()
 
     q: queue.Queue = queue.Queue()
-    effective_llm_url = llm_url
-    effective_llm_api_key = llm_api_key
-    effective_llm_model = llm_model
-    use_gguf_direct = False
-
-    if use_gguf == "true" and gguf_model_path:
-        use_gguf_direct = True
-        effective_llm_model = os.path.basename(gguf_model_path)
-
-    llm_settings = {
-        "llm_url": effective_llm_url,
-        "llm_api_key": effective_llm_api_key,
-        "llm_model": effective_llm_model,
-        "use_gguf_direct": use_gguf_direct,
-        "gguf_model_path": gguf_model_path if use_gguf_direct else None,
-        "gguf_mmproj_path": gguf_mmproj_path if use_gguf_direct else None,
-        "vision_model_path": vision_model_path,
-        "vision_mmproj_path": vision_mmproj_path,
-        "vision_temperature": vision_temperature,
-        "vision_ctx_size": vision_ctx_size,
-        "vision_gpu_layers": vision_gpu_layers,
-        "vision_threads": vision_threads,
-        "vision_batch_size": vision_batch_size,
-        "vision_ubatch_size": vision_ubatch_size,
-        "vision_flash_attn": vision_flash_attn,
-        "vision_max_tokens": vision_max_tokens,
-        "vision_repeat_penalty": vision_repeat_penalty,
-        "vision_top_p": vision_top_p,
-        "vision_min_p": vision_min_p,
-        "vision_presence_penalty": vision_presence_penalty,
-        "vision_frequency_penalty": vision_frequency_penalty,
-        "vision_concurrency": vision_concurrency,
-        "vision_kv_quant": vision_kv_quant,
-        "vision_mtp_enabled": vision_mtp_enabled,
-    }
+    llm_settings = _build_upload_settings(
+        llm_url,
+        llm_api_key,
+        llm_model,
+        use_gguf,
+        gguf_model_path,
+        gguf_mmproj_path,
+        vision_model_path,
+        vision_mmproj_path,
+        vision_temperature,
+        vision_ctx_size,
+        vision_gpu_layers,
+        vision_threads,
+        vision_batch_size,
+        vision_ubatch_size,
+        vision_flash_attn,
+        vision_max_tokens,
+        vision_repeat_penalty,
+        vision_top_p,
+        vision_min_p,
+        vision_presence_penalty,
+        vision_frequency_penalty,
+        vision_concurrency,
+        vision_kv_quant,
+        vision_mtp_enabled,
+    )
 
     task_id = _uuid.uuid4().hex
     q.put({"type": "started", "task_id": task_id, "filename": file.filename})
 
     async def process_task():
-        start_time = time.time()
-        cancel_event = upload_cancel_flags.setdefault(task_id, threading.Event())
-        cancel_event.clear()
-        async with _ingestion_lock:
-            ingestion_status[notebook_id] = {
-                "is_uploading": True,
-                "progress": 0,
-                "batch_progress": (current_idx - 1) / total_count * 100,
-                "current_file": current_idx,
-                "total_files": total_count,
-                "status": "Подготовка...",
-                "task_id": task_id,
-                "updated_at": time.time(),
-            }
-        try:
-            from src.ingestion import IngestionCancelled
-        except ImportError:
-            IngestionCancelled = RuntimeError
-        try:
-
-            def prog(pct, msg):
-                q.put({"type": "progress", "pct": pct, "msg": msg})
-                if notebook_id in ingestion_status:
-                    ingestion_status[notebook_id].update({"progress": pct, "status": msg})
-
-            prog(5, "Файл сохранён, подготовка...")
-            is_last_in_batch = current_idx >= total_count
-            from src.ingestion import ingest_file
-            from src.rag.indexing import build_index
-
-            nodes = await ingest_file(
-                file_path,
-                notebook_id,
-                progress_cb=prog,
-                llm_settings=llm_settings,
-                cancel_check=cancel_event.is_set,
-                keep_vision_alive=not is_last_in_batch,
-                keep_whisper_alive=False,
-            )
-            prog(90, "Построение индекса (ChromaDB)...")
-            await build_index(nodes, notebook_id)
-            from src.rag.retrieval import invalidate_index_cache
-
-            await invalidate_index_cache(notebook_id)
-
-            elapsed = time.time() - start_time
-            mins = int(elapsed // 60)
-            secs = int(elapsed % 60)
-            time_str = f"{mins}м {secs}с" if mins > 0 else f"{secs}с"
-
-            if is_last_in_batch:
-                logger.info(f"[INGESTION] Пачка завершена. {total_count} файлов обработано.")
-                try:
-                    from src.gguf.server import unload_all_models
-
-                    await unload_all_models(role="llm")
-                except Exception as llm_err:
-                    logger.error(f"[INGESTION] Ошибка выгрузки vision-сервера: {llm_err}")
-                try:
-                    from src.ingestion import unload_whisper_model
-
-                    await unload_whisper_model()
-                except Exception as whisper_err:
-                    logger.error(f"[INGESTION] Ошибка выгрузки WhisperX: {whisper_err}")
-                try:
-                    from src.rag.bm25 import flush_bm25_rebuild
-
-                    await flush_bm25_rebuild(notebook_id)
-                except Exception as bm25_err:
-                    logger.info(f"[INGESTION] Не удалось форсировать BM25 rebuild: {bm25_err}")
-                async with _ingestion_lock:
-                    ingestion_status[notebook_id] = {
-                        "is_uploading": False,
-                        "updated_at": time.time(),
-                    }
-            else:
-                async with _ingestion_lock:
-                    ingestion_status[notebook_id].update(
-                        {
-                            "batch_progress": current_idx / total_count * 100,
-                            "status": f"Готово: {file.filename}",
-                        }
-                    )
-
-            q.put(
-                {
-                    "type": "done",
-                    "filename": file.filename,
-                    "elapsed": time_str,
-                    "elapsed_sec": elapsed,
-                }
-            )
-            logger.info(f"[INGESTION] Готово: {file.filename} ({time_str})")
-        except IngestionCancelled:
-            logger.info(f"[INGESTION] Загрузка отменена пользователем: {file.filename}")
-            try:
-                from src.gguf.server import kill_stray_servers
-
-                await kill_stray_servers()
-            except Exception:
-                logger.debug("cancel: не удалось убить llama-server")
-            try:
-                if await aiofiles.os.path.exists(file_path):
-                    await aiofiles.os.remove(file_path)
-            except Exception:
-                logger.debug("cancel: не удалось удалить %s", file_path)
-            sidecar = os.path.join(os.path.dirname(file_path), f"{file.filename}.json")
-            try:
-                if await aiofiles.os.path.exists(sidecar):
-                    await aiofiles.os.remove(sidecar)
-            except Exception:
-                logger.debug("cancel: не удалось удалить sidecar %s", sidecar)
-            try:
-                images_dir = paths.get("images")
-                if images_dir and await aiofiles.os.path.exists(images_dir):
-                    stem = os.path.splitext(file.filename)[0]
-                    for f in await aiofiles.os.listdir(images_dir):
-                        if f.startswith("p_") or f.startswith("v_") or stem in f:
-                            try:
-                                await aiofiles.os.remove(os.path.join(images_dir, f))
-                            except Exception:
-                                logger.debug("cancel: не удалось удалить %s", f)
-            except Exception:
-                logger.debug("cancel: ошибка при чистке images")
-            try:
-                from src.rag.indexing import get_vector_store
-
-                vector_store = await get_vector_store(notebook_id)
-                collection = vector_store._collection
-                collection.delete(where={"file_name": file.filename})
-            except Exception:
-                logger.debug("cancel: не удалось очистить векторные индексы для %s", file.filename)
-            async with _ingestion_lock:
-                ingestion_status[notebook_id] = {
-                    "is_uploading": False,
-                    "cancelled": True,
-                    "updated_at": time.time(),
-                }
-            q.put({"type": "cancelled", "filename": file.filename})
-        except Exception as e:
-            logger.error("Ошибка при обработке загрузки", exc_info=True)
-            async with _ingestion_lock:
-                ingestion_status[notebook_id] = {
-                    "is_uploading": False,
-                    "error": "Внутренняя ошибка обработки файла",
-                    "updated_at": time.time(),
-                }
-            q.put({"type": "error", "msg": "Ошибка обработки файла"})
-        finally:
-            upload_cancel_flags.pop(task_id, None)
-            try:
-                from src.ingestion import cleanup_gpu
-
-                cleanup_gpu()
-            except Exception:
-                logger.debug("finally: не удалось вызвать cleanup_gpu")
+        await _run_upload_ingestion(
+            task_id=task_id,
+            q=q,
+            file_path=file_path,
+            file=file,
+            notebook_id=notebook_id,
+            current_idx=current_idx,
+            total_count=total_count,
+            llm_settings=llm_settings,
+            paths=paths,
+        )
 
     _task = asyncio.create_task(process_task())
     _background_tasks.add(_task)
@@ -412,7 +557,7 @@ async def delete_file(filename: str, notebook_id: str):
         metadata_path = os.path.join(paths["data"], f"{filename}.json")
         if await aiofiles.os.path.exists(metadata_path):
             try:
-                async with aiofiles.open(metadata_path, "r", encoding="utf-8") as f:
+                async with aiofiles.open(metadata_path, encoding="utf-8") as f:
                     meta = orjson.loads(await f.read())
                 for frame in meta.get("frames", []):
                     img = frame.get("image_path") or frame.get("path")
@@ -466,17 +611,19 @@ def _set_cached_source(key: str, text: str):
 async def _read_chroma_content(filename: str, notebook_id: str) -> str:
     """Read text content from ChromaDB for a file, grouped by page."""
     from src.rag.indexing import get_vector_store
+
     vector_store = await get_vector_store(notebook_id)
     collection = vector_store._collection
     result = await asyncio.to_thread(
-        collection.get, where={'file_name': filename}, include=['documents', 'metadatas']
+        collection.get, where={"file_name": filename}, include=["documents", "metadatas"]
     )
-    if not result or not result.get('documents'):
-        return ''
+    if not result or not result.get("documents"):
+        return ""
     from collections import defaultdict
+
     by_page: dict[int, list[str]] = defaultdict(list)
-    for doc, meta in zip(result['documents'], result['metadatas']):
-        page = meta.get('page', 0)
+    for doc, meta in zip(result["documents"], result["metadatas"]):
+        page = meta.get("page", 0)
         by_page[page].append(doc)
     pages_sorted = sorted(by_page.items())
     parts = []
@@ -489,6 +636,7 @@ async def _mark_stale(notebook_id: str, filename: str) -> None:
     """Mark bookmarks as stale for a deleted file. Logs but never raises."""
     try:
         from src.bookmarks import mark_stale_for_file
+
         stale_count = await mark_stale_for_file(notebook_id, filename)
         if stale_count:
             logger.info(
@@ -556,6 +704,7 @@ def _build_pdf(title: str, text: str) -> bytes:
     html = f"<h1>{title}</h1>\n{html_body}"
 
     import tempfile as _tf
+
     _out_fd, out_path = _tf.mkstemp(suffix=".pdf", prefix="_export_")
     os.close(_out_fd)
     compressed_path = None
@@ -713,6 +862,7 @@ async def get_video_metadata(filename: str, notebook_id: str):
 @router.delete("/api/clear")
 async def clear_notebook(notebook_id: str):
     from routers.notebooks import validate_nb_id
+
     notebook_id = validate_nb_id(notebook_id)
 
     from src.rag.indexing import close_all_clients as _close_all
@@ -737,6 +887,7 @@ async def clear_notebook(notebook_id: str):
 @router.get("/api/ingestion_status")
 async def get_ingestion_status(notebook_id: str):
     from routers.notebooks import validate_nb_id
+
     notebook_id = validate_nb_id(notebook_id)
 
     await _cleanup_ingestion_status()

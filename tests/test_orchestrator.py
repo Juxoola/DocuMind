@@ -29,6 +29,7 @@ def mock_orch_deps():
         "src.gguf": MagicMock(),
         "src.gguf.server": MagicMock(),
         "src.ingestion.text": MagicMock(),
+        "src.ingestion.office_convert": MagicMock(),
         "src.ingestion.audio_video": MagicMock(),
         "src.ingestion.media_convert": MagicMock(),
         "src.ingestion.splitter": MagicMock(),
@@ -89,16 +90,16 @@ class TestFileRouting:
         process_pdf.assert_called_once()
 
     def test_pptx_routes_to_process_pptx(self, fake_paths):
+        from src.ingestion.office_convert import process_pptx
         from src.ingestion.orchestrator import ingest_file
-        from src.ingestion.text import process_pptx
 
         process_pptx.return_value = AsyncMock(return_value=[MagicMock()])()
         asyncio.run(ingest_file("/tmp/test.pptx", "test_nb", llm_settings={}))
         process_pptx.assert_called_once()
 
     def test_docx_routes_to_process_docx(self, fake_paths):
+        from src.ingestion.office_convert import process_docx
         from src.ingestion.orchestrator import ingest_file
-        from src.ingestion.text import process_docx
 
         process_docx.return_value = AsyncMock(return_value=[MagicMock()])()
         asyncio.run(ingest_file("/tmp/test.docx", "test_nb", llm_settings={}))

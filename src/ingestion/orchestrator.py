@@ -16,8 +16,9 @@ from llama_index.core.schema import TextNode
 import config
 from src.ingestion.audio_video import process_audio_video
 from src.ingestion.media_convert import ensure_720p_video, ensure_mp3_audio
+from src.ingestion.office_convert import process_docx, process_pptx
 from src.ingestion.splitter import _get_splitter
-from src.ingestion.text import process_docx, process_pdf, process_pptx
+from src.ingestion.text import process_pdf
 from src.ingestion.utils import IngestionCancelled
 from src.ingestion.vision import describe_image_with_lmstudio, get_vision_url
 

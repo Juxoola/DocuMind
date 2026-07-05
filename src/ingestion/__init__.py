@@ -7,12 +7,9 @@ from src.ingestion.audio_video import (
     unload_whisper_model,
 )
 from src.ingestion.media_convert import ensure_720p_video, ensure_mp3_audio
+from src.ingestion.office_convert import process_docx, process_pptx
 from src.ingestion.orchestrator import ingest_file
-from src.ingestion.text import (
-    process_docx,
-    process_pdf,
-    process_pptx,
-)
+from src.ingestion.text import process_pdf
 from src.ingestion.utils import (
     IngestionCancelled,
     cleanup_gpu,

@@ -84,6 +84,89 @@ def _build_chat_messages(
     return messages
 
 
+async def _stream_gguf_with_thinking(
+    async_gen,
+    *,
+    model_family: str,
+    thinking_mode: bool,
+    sse_buf: "SSEBatchBuffer",
+):
+    """Стриминг ответа GGUF-модели с обработкой thinking blocks.
+
+    State machine: think_detect → thinking/answer (или thinking_ignore → answer).
+    Yields SSE-события: thinking_start, thinking_chunk, thinking_done, chunk.
+    """
+
+    OPEN_TAG, CLOSE_TAG = (
+        ("<|channel|>", "<channel|>") if model_family == "gemma4" else ("<think>", "</think>")
+    )
+    phase = "think_detect"
+    buf = ""
+
+    async for delta in async_gen:
+        if not delta:
+            continue
+        buf += delta
+
+        if phase == "think_detect":
+            if OPEN_TAG in buf:
+                if thinking_mode:
+                    buf = buf[buf.index(OPEN_TAG) + len(OPEN_TAG) :]
+                    yield sse_event({"type": "thinking_start"})
+                    phase = "thinking"
+                else:
+                    buf = buf[buf.index(OPEN_TAG) + len(OPEN_TAG) :]
+                    phase = "thinking_ignore"
+            elif len(buf) > 10:
+                phase = "answer"
+                yield sse_event({"type": "chunk", "text": buf})
+                buf = ""
+
+        if phase == "thinking_ignore":
+            if CLOSE_TAG in buf:
+                _, _, rest = buf.partition(CLOSE_TAG)
+                buf = rest.lstrip("\n")
+                phase = "answer"
+            else:
+                if len(buf) > len(CLOSE_TAG):
+                    buf = buf[-len(CLOSE_TAG) :]
+                continue
+
+        if phase == "thinking":
+            if CLOSE_TAG in buf:
+                think_part, _, rest = buf.partition(CLOSE_TAG)
+                if think_part:
+                    yield sse_event({"type": "thinking_chunk", "text": think_part})
+                yield sse_event({"type": "thinking_done"})
+                phase = "answer"
+                buf = rest.lstrip("\n")
+                if buf:
+                    yield sse_event({"type": "chunk", "text": buf})
+                    buf = ""
+            else:
+                safe = buf[: -len(CLOSE_TAG)] if len(buf) > len(CLOSE_TAG) else ""
+                if safe:
+                    yield sse_event({"type": "thinking_chunk", "text": safe})
+                    buf = buf[-len(CLOSE_TAG) :]
+        elif phase == "answer":
+            flushed = sse_buf.append(buf)
+            if flushed:
+                yield flushed
+            buf = ""
+
+    # Flush remaining buffer
+    if buf and phase == "thinking":
+        yield sse_event({"type": "thinking_chunk", "text": buf})
+        yield sse_event({"type": "thinking_done"})
+    elif buf and phase == "answer":
+        flushed = sse_buf.append(buf)
+        if flushed:
+            yield flushed
+    final = sse_buf.flush()
+    if final:
+        yield final
+
+
 # ── SSE-эндпоинт чата ──
 @router.post("/api/chat")
 async def chat(request: ChatRequest):
@@ -241,13 +324,6 @@ async def chat(request: ChatRequest):
                     request.answer_mode, context, request.history, user_content
                 )
                 model_family = detect_model_family(request.gguf_model_path)
-                OPEN_TAG, CLOSE_TAG = (
-                    ("<|channel|>", "<channel|>")
-                    if model_family == "gemma4"
-                    else ("<think>", "</think>")
-                )
-                phase = "think_detect"
-                buf = ""
                 sse_buf = SSEBatchBuffer()
                 async_gen = stream_gguf_chat(
                     llm_url=active_llm,
@@ -260,64 +336,14 @@ async def chat(request: ChatRequest):
                     min_p=request.min_p,
                     model_family=model_family,
                 )
-                async for delta in async_gen:
-                    if not delta:
-                        continue
+                async for event in _stream_gguf_with_thinking(
+                    async_gen,
+                    model_family=model_family,
+                    thinking_mode=request.thinking_mode,
+                    sse_buf=sse_buf,
+                ):
                     token_count += 1
-                    buf += delta
-                    if phase == "think_detect":
-                        if OPEN_TAG in buf:
-                            if request.thinking_mode:
-                                buf = buf[buf.index(OPEN_TAG) + len(OPEN_TAG) :]
-                                yield sse_event({"type": "thinking_start"})
-                                phase = "thinking"
-                            else:
-                                buf = buf[buf.index(OPEN_TAG) + len(OPEN_TAG) :]
-                                phase = "thinking_ignore"
-                        elif len(buf) > 10:
-                            phase = "answer"
-                            yield sse_event({"type": "chunk", "text": buf})
-                            buf = ""
-                    if phase == "thinking_ignore":
-                        if CLOSE_TAG in buf:
-                            _, _, rest = buf.partition(CLOSE_TAG)
-                            buf = rest.lstrip("\n")
-                            phase = "answer"
-                        else:
-                            if len(buf) > len(CLOSE_TAG):
-                                buf = buf[-len(CLOSE_TAG) :]
-                            continue
-                    if phase == "thinking":
-                        if CLOSE_TAG in buf:
-                            think_part, _, rest = buf.partition(CLOSE_TAG)
-                            if think_part:
-                                yield sse_event({"type": "thinking_chunk", "text": think_part})
-                            yield sse_event({"type": "thinking_done"})
-                            phase = "answer"
-                            buf = rest.lstrip("\n")
-                            if buf:
-                                yield sse_event({"type": "chunk", "text": buf})
-                                buf = ""
-                        else:
-                            safe = buf[: -len(CLOSE_TAG)] if len(buf) > len(CLOSE_TAG) else ""
-                            if safe:
-                                yield sse_event({"type": "thinking_chunk", "text": safe})
-                                buf = buf[-len(CLOSE_TAG) :]
-                    elif phase == "answer":
-                        flushed = sse_buf.append(buf)
-                        if flushed:
-                            yield flushed
-                        buf = ""
-                if buf and phase == "thinking":
-                    yield sse_event({"type": "thinking_chunk", "text": buf})
-                    yield sse_event({"type": "thinking_done"})
-                elif buf and phase == "answer":
-                    flushed = sse_buf.append(buf)
-                    if flushed:
-                        yield flushed
-                final = sse_buf.flush()
-                if final:
-                    yield final
+                    yield event
             else:
                 chat_messages = _build_chat_messages(
                     request.answer_mode, context, request.history, request.query
