@@ -276,11 +276,11 @@ async def process_audio_video(
                 fps = cap.get(cv2.CAP_PROP_FPS) or 25
                 total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
 
-            prev_hist = None
-            scenes = []  # [(start_sec, end_sec)]
-            last_cut_frame = -_MIN_SCENE_LEN
-            frame_idx = 0
-            last_hist_frame = -_CHECK_EVERY
+                prev_hist = None
+                scenes = []  # [(start_sec, end_sec)]
+                last_cut_frame = -_MIN_SCENE_LEN
+                frame_idx = 0
+                last_hist_frame = -_CHECK_EVERY
 
                 while True:
                     ok, frame = cap.read()

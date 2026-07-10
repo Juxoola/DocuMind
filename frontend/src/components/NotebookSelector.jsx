@@ -21,7 +21,7 @@ export default function NotebookSelector({ onSelect }) {
   const fetchNotebooks = async () => {
     try {
       const res = await axios.get('/api/notebooks');
-      setNotebooks(res.data);
+      setNotebooks(res.data.items ?? []);
     } catch (err) {
       console.error(err);
     } finally {
