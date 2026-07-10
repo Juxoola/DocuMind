@@ -41,6 +41,7 @@ try:
         rename_fields={"asctime": "time", "levelname": "level", "name": "logger"},
         static_fields={"request_id": ""},
         datefmt="%Y-%m-%dT%H:%M:%S",
+        ensure_ascii=False,
     )
 except Exception:
     # fallback — простой JSON без сторонней библиотеки
@@ -53,7 +54,7 @@ except Exception:
                 "logger": record.name,
                 "message": record.getMessage(),
                 "request_id": getattr(record, "request_id", ""),
-            })
+            }, ensure_ascii=False)
 
     _json_formatter = _FallbackFormatter()
 
@@ -63,6 +64,12 @@ _root_handler_file = logging.FileHandler(
 _root_handler_file.setFormatter(_json_formatter)
 _root_handler_file.addFilter(_RequestIDFilter())
 
+# UTF-8 для Windows console
+if sys.stdout and hasattr(sys.stdout, 'reconfigure'):
+    try:
+        sys.stdout.reconfigure(encoding='utf-8')
+    except Exception:
+        pass
 _root_handler_stream = logging.StreamHandler(sys.stdout)
 _root_handler_stream.setFormatter(_json_formatter)
 _root_handler_stream.addFilter(_RequestIDFilter())
@@ -213,7 +220,7 @@ _RATE_LIMITS = {
     "/api/upload": (10, 60),
     "/api/chat": (30, 60),
 }
-_DEFAULT_RATE = (60, 60)
+_DEFAULT_RATE = (500, 60)
 
 
 def _get_client_ip(request) -> str:
@@ -370,22 +377,7 @@ app.mount(
 )
 
 
-# Кастомный endpoint для раздачи файлов из notebooks/
-# StaticFiles на Windows держит handle на файл пока браузер его читает,
-# что блокирует os.remove(). FileResponse открывает/закрывает файл за запрос.
-@app.get("/files/{notebook_id}/{subpath:path}")
-async def serve_notebook_file(notebook_id: str, subpath: str):
-    from starlette.responses import FileResponse
-
-    if not _NB_ID_PATTERN.match(notebook_id):
-        return JSONResponse(status_code=400, content={"detail": "Некорректный ID блокнота"})
-
-    file_path = os.path.realpath(os.path.join(config.NOTEBOOKS_DIR, notebook_id, subpath))
-    if not file_path.startswith(os.path.realpath(config.NOTEBOOKS_DIR)):
-        return JSONResponse(status_code=403, content={"detail": "Forbidden"})
-    if not os.path.isfile(file_path):
-        return JSONResponse(status_code=404, content={"detail": "Not found"})
-    return FileResponse(file_path)
+app.mount("/files", _StaticFiles(directory=config.NOTEBOOKS_DIR), name="notebooks")
 
 
 # ── Подключение роутеров ──

@@ -1,6 +1,8 @@
 @echo off
 setlocal
+chcp 65001 >nul 2>&1
 title DocuMind
+set PYTHONIOENCODING=utf-8
 
 echo ============================================
 echo   DocuMind -- one console
