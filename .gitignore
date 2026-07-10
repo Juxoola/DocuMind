@@ -36,8 +36,7 @@ node_modules/
 AGENTS.md
 bin/
 libreoffice/
-docs/areas/
-docs/pipelines/
+docs/
 *.log
 *.swp
 *.swo

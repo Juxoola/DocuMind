@@ -151,27 +151,7 @@ cd C:\DocuMind
 
 ---
 
-## Документация
 
-Подробная документация расположена в `docs/`:
-
-### Пайплайны
-- [Пайплайн ингеста](docs/pipelines/ingestion.md) — как документы попадают в систему
-- [Пайплайн RAG-поиска](docs/pipelines/rag-search.md) — гибридный поиск с RRF и реранкингом
-- [Пайплайн GGUF-серверов](docs/pipelines/gguf-servers.md) — управление локальными моделями
-- [Пайплайн чата](docs/pipelines/chat.md) — генерация ответов с цитированием
-
-### API и функции
-- [Backend: routers](docs/areas/backend-routers.md) — все API-эндпоинты
-- [Backend: core](docs/areas/backend-core.md) — main.py, config.py
-- [Backend: GGUF](docs/areas/backend-gguf.md) — модуль управления серверами
-- [Backend: ingestion](docs/areas/backend-ingestion.md) — парсеры файлов
-- [Backend: RAG](docs/areas/backend-rag.md) — пайплайн поиска
-- [Frontend: components](docs/areas/frontend-components.md) — React-компоненты
-- [Frontend: lib](docs/areas/frontend-lib.md) — утилиты
-
-### Для агентов
-- [AGENTS.md](docs/AGENTS.md) — справочник для AI-агентов
 
 ---
 
@@ -233,10 +213,7 @@ pre-commit run --all-files
 ```
 C:\DocuMind/
 ├── bin/                   # llama-server.exe + DLL
-├── docs/                  # Документация
-│   ├── areas/             # API/функции (генерируется агентами)
-│   ├── pipelines/         # Описание пайплайнов
-│   └── AGENTS.md          # Справочник для агентов
+
 ├── frontend/              # React (Vite + Tailwind)
 │   └── src/components/    # Основные компоненты UI
 ├── logs/                  # server.log
