@@ -1,4 +1,5 @@
 // Боковая панель: список файлов, загрузка, состояние ingestion.
+// ── Импорты ──
 import React, { useState } from 'react';
 import {
   FileText,
@@ -28,6 +29,7 @@ import {
   Check,
 } from 'lucide-react';
 
+// ── Вспомогательная функция: иконки файлов ──
 function getFileIcon(filename) {
   const ext = filename.split('.').pop().toLowerCase();
   switch (ext) {
@@ -79,6 +81,7 @@ import axios from 'axios';
 import { LlmMarkdown } from '../lib/markdownRender';
 import { extractCleanContent, copyAsRichText } from '../lib/copyToClipboard';
 
+// ── Состояние и обработчики ──
 export default function Sidebar({ 
   notebook, 
   sources, 
@@ -107,6 +110,7 @@ export default function Sidebar({
     return () => clearInterval(timer);
   }, []);
 
+  // ── Управление процессами llama-server ──
   const killAllLlama = async () => {
     if (!confirm('Принудительно завершить ВСЕ процессы llama-server? Это освободит VRAM, но может прервать текущую генерацию.')) return;
     try {
@@ -173,6 +177,7 @@ export default function Sidebar({
   const [bmCopied, setBmCopied] = useState(false);
   const bmCopyTimeoutRef = React.useRef(null);
 
+  // ── Управление закладками ──
   const fetchBookmarks = async () => {
     setBmLoading(true);
     try {
@@ -296,6 +301,7 @@ export default function Sidebar({
     return viewingBm?.status === 'stale' || !sources.includes(fileName);
   };
 
+  // ── Рендер компонента ──
   return (
     <div style={{ width }} className="h-full border-r glass flex flex-col z-10 overflow-hidden">
       <div className="p-4 border-b flex items-center justify-between flex-shrink-0 bg-background/50 backdrop-blur-sm">

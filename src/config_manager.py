@@ -3,7 +3,6 @@
 # ── Импорты ──
 import asyncio
 import logging
-import os
 
 import aiofiles
 import orjson
@@ -42,5 +41,4 @@ async def load_rag_config(rag_config_file: str, defaults: dict) -> dict:
                     return result
         except Exception as e:
             logger.warning(f"Не удалось загрузить RAG config: {e}")
-    # Возврат значений по умолчанию при ошибке чтения
     return dict(defaults)

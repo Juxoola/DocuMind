@@ -1,10 +1,10 @@
 // Тултип-цитата: кнопка [N] и всплывающее окно с текстом источника.
+// ── Импорты ──
 import React, { useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { FileText } from 'lucide-react';
 
-// Единый компонент кнопки-цитаты и тултипа — используется и в чате, и в модале закладки
-
+// ── Компонент кнопки-сноски ──
 export function CitationButton({ n, src, onClick, onHover, onLeave }) {
   const btnRef = useRef(null);
 
@@ -36,6 +36,7 @@ export function CitationButton({ n, src, onClick, onHover, onLeave }) {
   );
 }
 
+// ── Портал тултипа-цитаты ──
 export function CitationTooltipPortal({ hoveredSource, onClose, onCancelClose, onResumeClose }) {
   useEffect(() => {
     if (!hoveredSource) return;

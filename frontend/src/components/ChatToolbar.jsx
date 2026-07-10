@@ -1,10 +1,12 @@
 // Панель инструментов чата: слайдеры параметров, выбор режима ответа.
+// ── Импорты ──
 import React, { useState, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 
 import { ChevronDown, SlidersHorizontal, Sparkles, Zap, FileText, Check, ListChecks, ListOrdered, AlignLeft, Scale, GraduationCap, Smile } from 'lucide-react';
 import { cn } from '../lib/utils';
 
+// ── Компонент слайдера настроек ──
 // Слайдер настроек — переиспользуется в панели параметров
 const SleekSlider = ({
   label,
@@ -160,6 +162,7 @@ const SleekSlider = ({
   );
 };
 
+// ── Режимы ответа и их определения ──
 // Режимы ответа — ключи и метки. Синхронизировано с config.ANSWER_MODES на бэкенде.
 const ANSWER_MODE_OPTIONS = [
   { key: 'concise', label: 'Кратко + пояснение', description: 'Сначала прямой ответ, затем разбор по источникам', Icon: Zap, accent: 'text-amber-400' },
@@ -178,6 +181,7 @@ const ANSWER_MODE_DEFAULT = ANSWER_MODE_KEYS[0];
 const normalizeAnswerMode = (raw) =>
   ANSWER_MODE_KEYS.includes(raw) ? raw : ANSWER_MODE_DEFAULT;
 
+// ── Компонент выбора режима ответа ──
 // Селектор режима ответа
 function AnswerModeSelect({ value, onChange }) {
   const [open, setOpen] = useState(false);
@@ -300,6 +304,7 @@ function AnswerModeSelect({ value, onChange }) {
   );
 }
 
+// ── Панель тонких настроек генерации ──
 // Панель параметров генерации (тоггл-секция)
 export function TuningPanel({ isTuningOpen, maxTokens, setMaxTokens, thinkingMode, thinkingBudget, setThinkingBudget, contextStrategy, setContextStrategy }) {
   return (

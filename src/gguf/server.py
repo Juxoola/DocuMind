@@ -408,6 +408,7 @@ async def preload_gguf_llm(gguf_path: str, mmproj_path: str = None, **kwargs) ->
     return {"status": "loading", "task_id": task_id, "model": os.path.basename(gguf_path)}
 
 
+# ── Текущий статус LLM: состояние, ETA, порт ──
 async def get_llm_status() -> dict:
     async with _lock:
         state = _llm_load_state.copy()
@@ -433,6 +434,7 @@ async def get_llm_status() -> dict:
     return state
 
 
+# ── URL embedding/reranker-сервера: запуск или переиспользование существующего ──
 async def get_gguf_embedding_url(
     gguf_path: str, n_threads: int = None, is_reranker: bool = False, n_parallel: int = 1
 ) -> str:
@@ -717,7 +719,6 @@ async def unload_all_models(role: str = None):
             _server_configs.pop(path, None)
             _server_roles.pop(path, None)
 
-        # Clean up stale entries where the process is dead
         stale_keys = [k for k, p in _server_processes.items() if not _proc_alive(p)]
         for k in stale_keys:
             _server_processes.pop(k, None)

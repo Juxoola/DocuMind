@@ -15,7 +15,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 import config
-from routers.notebooks import _NB_ID_PATTERN
 
 # ── Contextvars для request tracing ──
 request_id_var: contextvars.ContextVar[str] = contextvars.ContextVar("request_id", default="")
@@ -26,8 +25,6 @@ os.makedirs(_LOG_DIR, exist_ok=True)
 
 
 class _RequestIDFilter(logging.Filter):
-    """Подставляет request_id из contextvars в каждый лог-запис."""
-
     def filter(self, record: logging.LogRecord) -> bool:
         record.request_id = request_id_var.get("")
         return True
@@ -48,26 +45,28 @@ except Exception:
     class _FallbackFormatter(logging.Formatter):
         def format(self, record: logging.LogRecord) -> str:
             import json as _json
-            return _json.dumps({
-                "time": self.formatTime(record, "%Y-%m-%dT%H:%M:%S"),
-                "level": record.levelname,
-                "logger": record.name,
-                "message": record.getMessage(),
-                "request_id": getattr(record, "request_id", ""),
-            }, ensure_ascii=False)
+
+            return _json.dumps(
+                {
+                    "time": self.formatTime(record, "%Y-%m-%dT%H:%M:%S"),
+                    "level": record.levelname,
+                    "logger": record.name,
+                    "message": record.getMessage(),
+                    "request_id": getattr(record, "request_id", ""),
+                },
+                ensure_ascii=False,
+            )
 
     _json_formatter = _FallbackFormatter()
 
-_root_handler_file = logging.FileHandler(
-    os.path.join(_LOG_DIR, "server.log"), encoding="utf-8"
-)
+_root_handler_file = logging.FileHandler(os.path.join(_LOG_DIR, "server.log"), encoding="utf-8")
 _root_handler_file.setFormatter(_json_formatter)
 _root_handler_file.addFilter(_RequestIDFilter())
 
 # UTF-8 для Windows console
-if sys.stdout and hasattr(sys.stdout, 'reconfigure'):
+if sys.stdout and hasattr(sys.stdout, "reconfigure"):
     try:
-        sys.stdout.reconfigure(encoding='utf-8')
+        sys.stdout.reconfigure(encoding="utf-8")
     except Exception:
         pass
 _root_handler_stream = logging.StreamHandler(sys.stdout)
@@ -89,6 +88,7 @@ logging.getLogger("pyannote").setLevel(logging.WARNING)
 logging.getLogger("whisperx").setLevel(logging.WARNING)
 
 import warnings
+from datetime import UTC
 
 warnings.filterwarnings("ignore", message="(?s).*torchcodec is not installed")
 warnings.filterwarnings("ignore", message="(?s).*Could not load libtorchcodec")
@@ -162,7 +162,6 @@ def _shutdown_models():
 
 # ── Graceful shutdown: обработка SIGTERM/SIGINT ──
 def _graceful_signal_handler(signum, frame):
-    """Обработчик SIGTERM/SIGINT — выгружает модели и завершает процесс."""
     logger.info(f"Получен сигнал {signum}, запуск graceful shutdown...")
     _shutdown_models()
     sys.exit(0)
@@ -245,7 +244,6 @@ async def rate_limit_middleware(request, call_next):
         limit, window = _DEFAULT_RATE
 
     key = f"{client_ip}:{request.url.path.split('/')[2] if len(request.url.path.split('/')) > 2 else 'root'}"
-    # Evict stale entries periodically to prevent unbounded growth
     if len(_rate_store) > 10000:
         stale = {k for k, v in _rate_store.items() if not v or now - v[-1] >= 120}
         for k in stale:
@@ -266,7 +264,6 @@ async def rate_limit_middleware(request, call_next):
 # ── Request tracing middleware ──
 @app.middleware("http")
 async def request_tracing_middleware(request, call_next):
-    """Генерирует UUID request_id и пробрасывает в contextvars + response header."""
     req_id = uuid.uuid4().hex
     token = request_id_var.set(req_id)
     try:
@@ -294,15 +291,14 @@ async def health():
 # ── Deep health check: проверка всех компонентов ──
 @app.get("/health/deep")
 async def health_deep():
-    """Проверяет ChromaDB, LLM availability, GPU VRAM."""
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     components: dict = {}
     overall = "ok"
 
-    # ChromaDB
     try:
         import chromadb
+
         _client = chromadb.Client()
         _client.heartbeat()
         components["chromadb"] = {"status": "ok"}
@@ -310,9 +306,9 @@ async def health_deep():
         components["chromadb"] = {"status": "error", "detail": str(e)}
         overall = "degraded"
 
-    # LLM
     try:
         from src.gguf.server import get_active_llm_url
+
         url = await asyncio.wait_for(get_active_llm_url(), timeout=5)
         if url:
             components["llm"] = {"status": "ok"}
@@ -322,13 +318,13 @@ async def health_deep():
         components["llm"] = {"status": "unavailable", "detail": str(e)}
         overall = "degraded"
 
-    # GPU
     try:
         import torch
+
         if torch.cuda.is_available():
             _dev = torch.cuda.get_device_properties(0)
-            _total = _dev.total_mem / (1024 ** 3)
-            _free = torch.cuda.mem_get_info(0)[0] / (1024 ** 3)
+            _total = _dev.total_mem / (1024**3)
+            _free = torch.cuda.mem_get_info(0)[0] / (1024**3)
             components["gpu"] = {
                 "status": "ok",
                 "device": _dev.name,
@@ -348,7 +344,7 @@ async def health_deep():
     return {
         "status": overall,
         "app": "DocuMind",
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": datetime.now(UTC).isoformat(),
         "components": components,
     }
 
@@ -359,12 +355,9 @@ from starlette.staticfiles import StaticFiles as _StaticFiles
 
 
 class _CachedStaticFiles(_StaticFiles):
-    """StaticFiles с Cache-Control заголовками."""
-
     async def get_response(self, path, scope):
         response = await super().get_response(path, scope)
         if response.status_code == 200:
-            # JS/CSS/pdf.js — долгий кеш, статика не меняется в рантайме
             if path.endswith((".js", ".css", ".wasm")):
                 response.headers["Cache-Control"] = "public, max-age=604800, immutable"
             elif path.endswith((".woff2", ".woff", ".ttf")):

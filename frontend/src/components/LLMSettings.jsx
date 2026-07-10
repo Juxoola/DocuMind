@@ -1,10 +1,11 @@
 // LLM настройки: API/GGUF режим, параметры генерации, загрузка моделей.
+// ── Импорты ──
 import React from 'react';
 import { RefreshCw, Globe, Key, Cpu, Server } from 'lucide-react';
 import { cn } from '../lib/utils';
 import VisionSettings from './VisionSettings';
 import IngestionSettings from './IngestionSettings';
-
+// ── Компонент настроек LLM ──
 export default function LLMSettings({
     localSettings,
     setLocalSettings,
@@ -22,6 +23,7 @@ export default function LLMSettings({
     toggleDir,
     updateSearchDirs,
 }) {
+    // ── Рендер настроек LLM ──
     return (
         <div className="p-6 space-y-6">
             {/* ── Режим работы: API или GGUF ── */}

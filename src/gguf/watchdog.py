@@ -10,9 +10,11 @@ from src.gguf.state import _lock, _server_configs
 
 logger = logging.getLogger(__name__)
 
+# ── Активные фоновые задачи watchdog ──
 _watchdog_tasks: set[asyncio.Task] = set()
 
 
+# ── Проверка работоспособности процесса ──
 def _proc_alive(proc) -> bool:
     if hasattr(proc, "poll"):
         return proc.poll() is None
@@ -20,6 +22,7 @@ def _proc_alive(proc) -> bool:
 
 
 # Лимиты RSS по ролям (MB): при превышении — auto-restart
+# ── Лимиты RSS по ролям (MB): при превышении — auto-restart ──
 _WATCHDOG_LIMITS = {
     "llm": 12000,
     "vision": 4000,
@@ -28,8 +31,8 @@ _WATCHDOG_LIMITS = {
 }
 
 
+# ── Фоновый мониторинг памяти и auto-restart ──
 async def _watchdog_memory(server_key: str, process, role: str):
-    # Lazy import server.py to avoid circular import
     from src.gguf.server import (
         _kill_server_process,
         _start_llm_server,

@@ -1,9 +1,11 @@
 // Область ввода: textarea, прикрепление файлов, кнопка отправки.
+// ── Импорты ──
 import { useRef } from 'react';
 
 import { Send, Square, Image as ImageIcon, Plus, X as XIcon, RefreshCw } from 'lucide-react';
 import { cn } from '../lib/utils';
 
+// ── Пропсы компонента ──
 export default function ChatInput({
     input,
     setInput,

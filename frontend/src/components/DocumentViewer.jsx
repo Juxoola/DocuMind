@@ -1,10 +1,12 @@
 // Просмотрщик документов: PDF, изображения, видео, аудио, текст.
+// ── Импорты ──
 import React, { useState, useEffect, useRef, useMemo, useCallback, startTransition } from 'react';
 import { X, FileText, Play, Image as ImageIcon, Clock, AlertCircle, Download, ChevronDown } from 'lucide-react';
 import { marked } from 'marked';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { cn } from '../lib/utils';
 
+// ── Карточка кадра видео/幻灯ки ──
 const FrameCard = React.memo(({ frame, notebookId }) => {
   const [imgLoaded, setImgLoaded] = useState(false);
   const imgSrc = `/files/${notebookId}/images/${frame.image_path.split(/[\\/]/).pop()}`;
@@ -35,6 +37,7 @@ const FrameCard = React.memo(({ frame, notebookId }) => {
 });
 FrameCard.displayName = 'FrameCard';
 
+// ── Секция текстового контента ──
 const TextSection = React.memo(({ text }) => {
   const html = useMemo(() => marked.parse(text, { gfm: true, breaks: true }), [text]);
   if (!text) return null;
@@ -43,6 +46,7 @@ const TextSection = React.memo(({ text }) => {
 TextSection.displayName = 'TextSection';
 
 
+// ── Основной компонент просмотрщика ──
 export default function DocumentViewer({ file, notebook, onClose }) {
   const [content, setContent] = useState(null);
   const [contentLoading, setContentLoading] = useState(false);

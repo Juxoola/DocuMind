@@ -1,5 +1,6 @@
 """Конфигурация приложения: переменные окружения, пути и параметры RAG-пайплайна."""
 
+# ── Стандартные библиотеки и зависимости ──
 import logging
 import os
 import threading
@@ -25,6 +26,7 @@ os.makedirs(NOTEBOOKS_DIR, exist_ok=True)
 _notebook_paths_cache: dict[str, dict] = {}
 
 
+# ── Получение путей к директориям блокнота ──
 def get_notebook_paths(notebook_id: str) -> dict:
     cached = _notebook_paths_cache.get(notebook_id)
     if cached is not None:
@@ -40,6 +42,7 @@ def get_notebook_paths(notebook_id: str) -> dict:
     return paths
 
 
+# ── Сетевые параметры: хост, порт, CORS, таймауты ──
 HOST = os.getenv("HOST", "127.0.0.1")
 PORT = int(os.getenv("PORT", 8000))
 RELOAD = os.getenv("RELOAD", "false").lower() in ("1", "true", "yes")
@@ -88,6 +91,7 @@ ALLOWED_UPLOAD_EXTENSIONS = frozenset(
 )
 
 
+# ── Конфигурация RAG-пайплайна (модели, поиск, реранкинг) ──
 @dataclass(frozen=True)
 class RAGConfig:
     embedding_model: str = os.getenv("EMBEDDING_MODEL_NAME", "Qwen3-Embedding-0.6B-Q8_0.gguf")
@@ -131,7 +135,6 @@ def update_rag_config(data: dict) -> None:
         min_final_chunks=int(data.get("min_final_chunks", rag.min_final_chunks)),
         rrf_k=int(data.get("rrf_k", rag.rrf_k)),
         top_k_ratio=float(data.get("top_k_ratio", rag.top_k_ratio)),
-
     )
 
 
@@ -141,6 +144,7 @@ def collect_rag_config() -> dict:
     return asdict(rag)
 
 
+# ── Параметры GGUF и Vision по умолчанию ──
 GGUF_THREADS = int(os.getenv("GGUF_THREADS", "0"))
 GGUF_GPU_LAYERS = int(os.getenv("GGUF_GPU_LAYERS", "-1"))
 VISION_TEMPERATURE = float(os.getenv("VISION_TEMPERATURE", "0.1"))
@@ -174,7 +178,7 @@ def _load_config_sync():
 _load_config_sync()
 
 
-# TTL-кэш для resolve_model_path: решает проблему устаревших путей при переименовании моделей.
+# ── TTL-кэш для резолва путей к моделям ──
 _resolve_cache: dict[str, tuple[str, float]] = {}
 _resolve_cache_lock = threading.Lock()
 _RESOLVE_MODEL_TTL = 300.0

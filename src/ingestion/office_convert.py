@@ -14,6 +14,7 @@ logger = logging.getLogger(__name__)
 
 
 # Конвертация Office-файлов в PDF: LibreOffice (приоритет), COM (резерв), текстовый fallback
+# ── Поиск LibreOffice: env override → shutil.which → платформо-специфичные пути ──
 def _find_soffice():
     import platform
     import shutil
@@ -82,6 +83,7 @@ async def _convert_via_libreoffice(file_path):
     )
 
 
+# ── Конвертация через COM-интерфейс (PowerPoint/Word) на Windows ──
 async def _convert_via_com(file_path, app_name, format_code):
 
     def _sync_com():
@@ -193,6 +195,7 @@ async def _process_office_textonly(file_path, file_name, extract_fn, log_prefix)
 
 
 # Обработка PPTX/DOCX: конвертация в PDF + Vision или текстовый fallback
+# ── Обработка PPTX: конвертация в PDF + Vision или текстовый fallback ──
 async def process_pptx(
     file_path,
     images_dir,
@@ -225,6 +228,7 @@ async def process_pptx(
     )
 
 
+# ── Обработка DOCX: конвертация в PDF + Vision или текстовый fallback ──
 async def process_docx(
     file_path,
     images_dir,

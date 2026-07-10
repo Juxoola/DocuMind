@@ -2,10 +2,9 @@
 
 import asyncio
 import logging
-import os
 
-import chromadb
 import aiofiles.os
+import chromadb
 from llama_index.core import VectorStoreIndex
 from llama_index.core.storage.storage_context import StorageContext
 from llama_index.vector_stores.chroma import ChromaVectorStore
@@ -25,6 +24,7 @@ _MAX_EMBED_CHARS = 12000
 
 
 # Построение векторного индекса из узлов и запуск фоновой пересборки BM25
+# ── Построение векторного индекса из узлов и запуск фоновой пересборки BM25 ──
 async def build_index(nodes, notebook_id: str):
     await init_settings()
 
@@ -48,6 +48,7 @@ async def build_index(nodes, notebook_id: str):
 
 
 # LRU-кэш ChromaDB-клиентов: переиспользование при повторных запросах к одному ноутбуку
+# ── LRU-кэш ChromaDB-клиентов: переиспользование при повторных запросах ──
 async def get_vector_store(notebook_id: str):
     global _client_cache
     paths = config.get_notebook_paths(notebook_id)
@@ -86,6 +87,7 @@ async def get_vector_store(notebook_id: str):
 
 
 # Закрытие всех ChromaDB-клиентов (при завершении работы или сбросе кэша)
+# ── Закрытие всех ChromaDB-клиентов ──
 async def close_all_clients():
     global _client_cache
     async with _client_cache_lock:
@@ -98,6 +100,7 @@ async def close_all_clients():
 
 
 # Закрытие клиента конкретного ноутбука и удаление его коллекции
+# ── Закрытие клиента конкретного ноутбука и удаление его коллекции ──
 async def close_notebook_client(notebook_id: str):
     global _client_cache
     from config import get_notebook_paths

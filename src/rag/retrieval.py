@@ -34,6 +34,7 @@ from src.rag.state import (
 logger = logging.getLogger(__name__)
 
 # HTTP-клиент для реранкинга, кэш здоровья LLM и предкомпилированные регулярки QE
+# ── HTTP-клиент для реранкинга, кэш здоровья LLM и предкомпилированные регулярки QE ──
 _async_rerank_http = httpx.AsyncClient(timeout=60)
 
 _qe_health_cache: dict[str, tuple[bool, float]] = {}
@@ -71,6 +72,7 @@ async def _is_llm_healthy(url: str) -> bool:
 
 
 # Обёртка над BM25Retriever: фильтрация по списку разрешённых файлов перед RRF-слиянием
+# ── Обёртка над BM25Retriever: фильтрация по списку разрешённых файлов ──
 class _FilteredBM25:
     def __init__(self, base, allowed_files):
         self._base = base
@@ -81,6 +83,7 @@ class _FilteredBM25:
         return [r for r in results if r.node.metadata.get("file_name") in self._allowed]
 
 
+# ── Инвалидация кэша векторного индекса ──
 async def invalidate_index_cache(notebook_id: str = None):
     async with _index_cache_lock:
         if notebook_id:
@@ -114,6 +117,7 @@ def _file_filter(file_names: str | list[str]):
 
 
 # Промпт Query Expansion: LLM генерирует альтернативные поисковые запросы для лучшего покрытия
+# ── Промпт Query Expansion: LLM генерирует альтернативные поисковые запросы ──
 _QUERY_GEN_PROMPT = (
     "Ты — эксперт по поиску информации. Сформулируй ровно {num_queries} разных коротких поисковых запроса "
     "на том же языке для поиска справочной теории, правил и формул в учебных материалах на основе следующего задания/вопроса.\n"
@@ -125,6 +129,7 @@ _QUERY_GEN_PROMPT = (
 )
 
 
+# ── Получение LLM для Query Expansion с проверкой здоровья ──
 async def _get_qe_llm():
     from src.gguf.server import get_active_llm_url
 
@@ -156,6 +161,7 @@ async def _get_qe_llm():
     )
 
 
+# ── Reciprocal Rank Fusion: слияние результатов поиска ──
 def _rrf_fuse(*result_lists, k: int = None):
     scores: dict = {}
     nodes_by_id: dict = {}
@@ -224,7 +230,6 @@ async def _hybrid_search(index, query: str, allowed_files, bm25_retriever, qe_ll
 
     try:
         if use_qe:
-            # Single retriever for all files instead of N per-file retrievers
             if len(allowed_files) > 1:
                 all_filter = MetadataFilters(
                     filters=[

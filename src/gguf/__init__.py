@@ -18,6 +18,7 @@ from src.gguf.server import (
 from src.gguf.state import CACHE_TYPE_MAP, SERVER_EXE
 from src.gguf.streaming import stream_gguf_chat
 
+# ── Публичный API GGUF-подсистемы ──
 __all__ = [
     "CACHE_TYPE_MAP",
     "SERVER_EXE",

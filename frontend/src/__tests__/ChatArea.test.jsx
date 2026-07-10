@@ -75,7 +75,7 @@ describe('ChatArea', () => {
 
   it('renders without crashing with selected sources', () => {
     render(<ChatArea {...defaultProps} selectedSources={['test.pdf']} />)
-    // Component should render without throwing
+    // Компонент должен рендериться без ошибок
     expect(vi.mocked(global.fetch)).toBeDefined()
   })
 })

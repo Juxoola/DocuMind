@@ -18,6 +18,7 @@ _index_cache: OrderedDict = OrderedDict()
 _index_cache_lock = asyncio.Lock()
 
 # Выделенный пул потоков для CPU-интенсивных RAG-операций (embedding, reranking, BM25)
+# ── Выделенный пул потоков для CPU-интенсивных RAG-операций ──
 RAG_POOL = ThreadPoolExecutor(max_workers=4, thread_name_prefix="rag")
 
 # Debounce-механизм фоновой пересборки BM25: повторные вызовы сбрасывают таймер

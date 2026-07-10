@@ -1,11 +1,13 @@
 // Vision модель: конфигурация модели для описания изображений/видео.
+// ── Импорты ──
 import React from 'react';
 import { Cpu } from 'lucide-react';
 import { cn } from '../lib/utils';
 
+// ── Компонент настроек Vision модели ──
 export default function VisionSettings({ localSettings, setLocalSettings }) {
     if (!localSettings.vision_model_path) return null;
-
+    // ── Рендер настроек Vision ──
     return (
         <div className="rounded-2xl border border-purple-500/20 bg-purple-500/5 p-4">
             {/* ── Управление Vision моделью ── */}

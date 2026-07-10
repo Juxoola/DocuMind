@@ -28,6 +28,7 @@ logger = logging.getLogger(__name__)
 
 
 # Кэш моделей WhisperX и монопатчинг ffmpeg для совместимости с imageio-ffmpeg
+# ── Кэш моделей WhisperX и монопатчинг ffmpeg для совместимости с imageio-ffmpeg ──
 _whisper_model_cache: dict = {}
 _whisper_lock = threading.Lock()
 
@@ -35,8 +36,8 @@ _whisper_lock = threading.Lock()
 _ffmpeg_cuda_available: bool | None = None
 
 
+# ── Проверка доступности CUDA в bundled ffmpeg ──
 async def _probe_ffmpeg_cuda(ffmpeg: str) -> bool:
-    """Один раз проверяет, поддерживает ли bundled ffmpeg CUDA hwaccel."""
     global _ffmpeg_cuda_available
     if _ffmpeg_cuda_available is not None:
         return _ffmpeg_cuda_available
@@ -59,6 +60,7 @@ async def _probe_ffmpeg_cuda(ffmpeg: str) -> bool:
 
 
 # Замена ffmpeg в WhisperX на bundled imageio-ffmpeg
+# ── Замена ffmpeg в WhisperX на bundled imageio-ffmpeg ──
 def _patch_whisperx_ffmpeg():
     try:
         import whisperx.audio as _wa
@@ -101,6 +103,7 @@ _patch_whisperx_ffmpeg()
 
 
 # Ленивая загрузка моделей WhisperX с кэшированием по (model, device, compute_type)
+# ── Ленивая загрузка моделей WhisperX с кэшированием ──
 async def get_or_load_whisper(
     model_name: str = "large-v2", device: str = "cuda", compute_type: str = "int8"
 ):
@@ -144,6 +147,7 @@ async def unload_whisper_model():
 
 
 # Извлечение кадра из видео через FFmpeg (CUDA или CPU-fallback)
+# ── Извлечение кадра из видео через FFmpeg (CUDA или CPU-fallback) ──
 async def save_high_res_frame(video_path, time_sec, output_path):
     try:
         from imageio_ffmpeg import get_ffmpeg_exe
@@ -176,6 +180,7 @@ async def save_high_res_frame(video_path, time_sec, output_path):
 
 
 # Основной конвейер: транскрибация WhisperX → анализ кадров видео → Vision-описание
+# ── Основной конвейер: транскрибация → анализ кадров → Vision-описание ──
 async def process_audio_video(
     file_path,
     images_dir,
@@ -262,7 +267,7 @@ async def process_audio_video(
         # bhattacharyya, с debounce min_scene_len кадров.
         def _detect_scenes_cv2():
             _HIST_THRESH = 0.55
-            _MIN_SCENE_LEN = 90  # ~3с при 30fps — не дублируем похожие кадры
+            _MIN_SCENE_LEN = 90
             _CHECK_EVERY = 3
             _HIST_SIZE = (64, 64, 64)
             _H_RANGES = (0, 180)
@@ -277,7 +282,7 @@ async def process_audio_video(
                 total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
 
                 prev_hist = None
-                scenes = []  # [(start_sec, end_sec)]
+                scenes = []
                 last_cut_frame = -_MIN_SCENE_LEN
                 frame_idx = 0
                 last_hist_frame = -_CHECK_EVERY

@@ -1,12 +1,13 @@
 // Корневой компонент: переключение между выбором блокнота и основным приложением.
+// ── Импорты ──
 import React, { useState } from 'react';
 import NotebookSelector from './components/NotebookSelector';
 import MainApp from './components/MainApp';
 import ErrorBoundary from './components/ErrorBoundary';
-
+// ── Состояние и обработчики ──
 function App() {
   const [currentNotebook, setCurrentNotebook] = useState(null);
-  const [transitioning, setTransitioning] = useState(null); // 'open' | 'close' | null
+  const [transitioning, setTransitioning] = useState(null);
 
   const handleSelect = (nb) => {
     setTransitioning('open');
@@ -18,6 +19,7 @@ function App() {
     setCurrentNotebook(null);
   };
 
+  // ── Рендер компонента ──
   return (
     <ErrorBoundary>
       <div className="min-h-screen bg-background text-foreground overflow-hidden">

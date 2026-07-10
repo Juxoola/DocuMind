@@ -258,7 +258,6 @@ def validate_llm_url(url: str) -> None:
         return
     if hostname.startswith("192.168.") or hostname.startswith("10."):
         return
-    # 172.16.0.0/12
     if hostname.startswith("172."):
         try:
             second = int(hostname.split(".")[1])

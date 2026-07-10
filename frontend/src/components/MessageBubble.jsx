@@ -1,4 +1,5 @@
 // Пузырь сообщения: рендер пользовательских и AI-ответов с источниками, закладками.
+// ── Импорты ──
 import React, { useState, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { ChevronRight, Zap, Bookmark, BookmarkCheck, Copy, Check, X as XIcon } from 'lucide-react';
@@ -46,7 +47,7 @@ import { CitationButton } from '../lib/CitationTooltip';
 import { extractCleanContent, copyAsRichText } from '../lib/copyToClipboard';
 import axios from 'axios';
 
-// Блок рассуждений модели (thinking/CoT)
+// ── Блок рассуждений модели (thinking/CoT) ──
 const ThinkingBlock = ({ content, isStreaming }) => {
   const [open, setOpen] = useState(true);
   const bodyRef = useRef(null);
@@ -107,7 +108,7 @@ const ThinkingBlock = ({ content, isStreaming }) => {
   );
 };
 
-// Кнопка-сноска в тексте
+// ── Компонент кнопки-сноски в тексте ──
 const Citation = ({ n, sources, onClick, onHover, onLeave }) => {
   return (
     <CitationButton
@@ -120,7 +121,7 @@ const Citation = ({ n, sources, onClick, onHover, onLeave }) => {
   );
 };
 
-// Основной компонент пузыря сообщения
+// ── Основной компонент пузыря сообщения ──
 const MessageItem = React.memo(({
   msg,
   index,

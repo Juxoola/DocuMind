@@ -8,10 +8,11 @@ import aiofiles.os
 import config
 from src.rag.state import _model_cache
 
+# ── Кэшированный HTTP-клиент для Vision-запросов ──
 logger = logging.getLogger(__name__)
 
 
-# Формирование контекста из найденных фрагментов с проверкой изображений
+# ── Формирование контекста из найденных фрагментов с проверкой изображений ──
 async def build_file_context(nodes, notebook_id: str):
     paths = config.get_notebook_paths(notebook_id)
 
@@ -60,7 +61,7 @@ async def build_file_context(nodes, notebook_id: str):
     return sources, context_str
 
 
-# Получение URL работающего эмбеддинг-сервера из кэша моделей
+# ── Получение URL работающего эмбеддинг-сервера из кэша моделей ──
 def get_embedding_url() -> str | None:
     global _model_cache
     embed = _model_cache.get("embed_model")

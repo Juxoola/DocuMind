@@ -1,4 +1,5 @@
 // Граница ошибок: перехват uncaught exceptions, UI с кнопкой сброса.
+// ── Импорты ──
 import React from 'react';
 
 // ── Lifecycle: перехват ошибок React ──
@@ -17,6 +18,7 @@ class ErrorBoundary extends React.Component {
     console.error('[ErrorBoundary] Caught error:', error, errorInfo);
   }
 
+  // ── Обработчики сброса и перезагрузки ──
   handleReload = () => {
     window.location.reload();
   };

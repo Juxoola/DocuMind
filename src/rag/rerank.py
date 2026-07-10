@@ -11,10 +11,11 @@ from src.rag.state import _model_cache, _model_cache_lock
 
 logger = logging.getLogger(__name__)
 
-# HTTP-клиент для реранкинга
+# ── HTTP-клиент для реранкинга ──
 _async_rerank_http = httpx.AsyncClient(timeout=60)
 
 
+# ── Реранкинг чанков через GGUF-сервер с адаптивным порогом ──
 async def _rerank_nodes(all_nodes, query: str):
     if not all_nodes or not config.rag.use_reranker:
         return all_nodes
@@ -118,6 +119,7 @@ async def _rerank_nodes(all_nodes, query: str):
     return all_nodes
 
 
+# ── Фильтрация чанков по адаптивному порогу (median-MAD) и top-k ratio ──
 def _filter_chunks(all_nodes):
     if len(all_nodes) >= 4:
         score_vals = [n.score for n in all_nodes]

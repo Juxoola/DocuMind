@@ -1,11 +1,12 @@
 // Основной layout: боковая панель + чат + просмотрщик документов.
+// ── Импорты ──
 import React, { useState, useEffect, useRef, lazy, Suspense } from 'react';
 import Sidebar from './Sidebar';
 import ChatArea from './ChatArea';
 const DocumentViewer = lazy(() => import('./DocumentViewer'));
 import { ChevronRight } from 'lucide-react';
 import { cn } from '../lib/utils';
-
+// ── Состояние компонента ──
 export default function MainApp({ notebook, onExit }) {
   const [sources, setSources] = useState([]);
   const [selectedSources, setSelectedSources] = useState([]);
@@ -54,6 +55,7 @@ export default function MainApp({ notebook, onExit }) {
 	});
   const cancelRef = useRef(false);
 
+  // ── Обработчики загрузки файлов ──
   const cancelUpload = async () => {
     cancelRef.current = true;
     try {
@@ -166,8 +168,8 @@ export default function MainApp({ notebook, onExit }) {
     fetchSources();
   };
 
+  // ── Эффекты жизненного цикла ──
   useEffect(() => {
-
     return () => {
       if (viewerDragCleanupRef.current) {
         try { viewerDragCleanupRef.current(); } catch { /* ignore */ }
@@ -225,6 +227,7 @@ export default function MainApp({ notebook, onExit }) {
     return () => { controller.abort(); clearTimeout(timerId); };
   }, [notebook.id]);
 
+  // ── Управление источниками и панелями ──
   const fetchSources = async () => {
     try {
       const res = await fetch(`/api/files?notebook_id=${notebook.id}`);
@@ -311,6 +314,7 @@ export default function MainApp({ notebook, onExit }) {
     setSidebarClosing(false);
   };
 
+  // ── Рендер компонента ──
   return (
     <div className="flex h-screen w-full overflow-hidden bg-background relative">
 

@@ -10,6 +10,7 @@ from llama_index.llms.openai import OpenAI
 import config
 from src.rag.state import _model_cache
 
+# ── Блокировки и кэш моделей ──
 _init_lock = asyncio.Lock()
 _model_cache_lock = asyncio.Lock()
 
@@ -20,6 +21,7 @@ logger = logging.getLogger(__name__)
 
 
 # Инициализация глобальных Settings (embedding-модель + LLM) с кэшированием
+# ── Инициализация глобальных Settings (embedding-модель + LLM) с кэшированием ──
 async def init_settings(max_tokens=1024):
     global _model_cache, _last_max_tokens
 
@@ -48,6 +50,7 @@ async def init_settings(max_tokens=1024):
 
 
 # Загрузка GGUF embedding-модели через локальный сервер с автоопределением parallelism
+# ── Загрузка GGUF embedding-модели через локальный сервер ──
 async def _init_embed_model():
     model_name = config.rag.embedding_model
 
@@ -88,6 +91,7 @@ async def _init_embed_model():
 
 
 # Предзагрузка embedding и реранкера при старте приложения (lazily для LLM)
+# ── Предзагрузка embedding и реранкера при старте приложения ──
 async def preload_all_models():
     logger.info("[RAG] Предзагрузка моделей...")
     try:
@@ -113,6 +117,7 @@ async def preload_all_models():
 
 
 # Выгрузка моделей и очистка GPU-памяти (hard — полная, soft — без эмбеддингов)
+# ── Выгрузка моделей и очистка GPU-памяти ──
 def unload_rag_models(hard=True):
     global _model_cache
     if not _model_cache:

@@ -1,6 +1,6 @@
 # DocuMind
 
-**Локальный аналог Google DocuMind** — RAG-система для работы с документами на полностью локальном стеке. FastAPI + React + локальные GGUF-модели.
+**Локальный аналог Google NotebookLM** — RAG-система для работы с документами на полностью локальном стеке. FastAPI + React + локальные GGUF-модели.
 
 ![Python](https://img.shields.io/badge/python-3.11+-blue)
 ![FastAPI](https://img.shields.io/badge/FastAPI-0.136-green)
@@ -151,6 +151,30 @@ cd C:\DocuMind
 
 ---
 
+## Документация
+
+Подробная документация расположена в `docs/`:
+
+### Пайплайны
+- [Пайплайн ингеста](docs/pipelines/ingestion.md) — как документы попадают в систему
+- [Пайплайн RAG-поиска](docs/pipelines/rag-search.md) — гибридный поиск с RRF и реранкингом
+- [Пайплайн GGUF-серверов](docs/pipelines/gguf-servers.md) — управление локальными моделями
+- [Пайплайн чата](docs/pipelines/chat.md) — генерация ответов с цитированием
+
+### API и функции
+- [Backend: routers](docs/areas/backend-routers.md) — все API-эндпоинты
+- [Backend: core](docs/areas/backend-core.md) — main.py, config.py
+- [Backend: GGUF](docs/areas/backend-gguf.md) — модуль управления серверами
+- [Backend: ingestion](docs/areas/backend-ingestion.md) — парсеры файлов
+- [Backend: RAG](docs/areas/backend-rag.md) — пайплайн поиска
+- [Frontend: components](docs/areas/frontend-components.md) — React-компоненты
+- [Frontend: lib](docs/areas/frontend-lib.md) — утилиты
+
+### Для агентов
+- [AGENTS.md](docs/AGENTS.md) — справочник для AI-агентов
+
+---
+
 ## Конфигурация
 
 Все настройки в `.env` в корне проекта:
@@ -209,6 +233,10 @@ pre-commit run --all-files
 ```
 C:\DocuMind/
 ├── bin/                   # llama-server.exe + DLL
+├── docs/                  # Документация
+│   ├── areas/             # API/функции (генерируется агентами)
+│   ├── pipelines/         # Описание пайплайнов
+│   └── AGENTS.md          # Справочник для агентов
 ├── frontend/              # React (Vite + Tailwind)
 │   └── src/components/    # Основные компоненты UI
 ├── logs/                  # server.log
@@ -241,7 +269,7 @@ C:\DocuMind/
 
 Текущий пайплайн эмбеджит производные данные (транскрипт WhisperX, описание Vision) текстовыми моделями. В планах — переход на **мульти модальный embedding** напрямую из оригинального контента:
 
-- **Видео** — Jina v5 Omni эмбеджит видео целиком (вместо кадров + описания)
+- **Видео** — Jina v5 Omni эмбеджит видео целиком (вместо кадров + описаний)
 - **Аудио** — прямой embedding аудио-дорожки (без промежуточного WhisperX-транскрипта для поиска)
 - **Изображения** — embedding пикселей, а не OCR-текста
 

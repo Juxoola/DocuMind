@@ -90,7 +90,7 @@ describe('SettingsModal', () => {
   it('switches to RAG tab on click', async () => {
     render(<SettingsModal {...defaultProps} />)
     fireEvent.click(screen.getByText(/Поиск и RAG/i))
-    // After clicking, RAG tab should be visible
+    // После клика вкладка RAG должна быть видна
     await waitFor(() => {
       expect(screen.getByText(/Поиск и RAG/i)).toBeInTheDocument()
     })

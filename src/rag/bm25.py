@@ -17,6 +17,7 @@ from src.rag.state import (
     _bm25_rebuilding,
 )
 
+# ── Локальные asyncio.Lock для конкурентного доступа ──
 # Локальные asyncio.Lock вместо импортированных threading-based блокировок
 _bm25_pending_lock = asyncio.Lock()
 _bm25_rebuilding_lock = asyncio.Lock()
@@ -27,6 +28,7 @@ _bm25_tasks: set[asyncio.Task] = set()
 
 
 # Инкрементальная сборка BM25: из кэша узлов или полная загрузка из ChromaDB
+# ── Инкрементальная сборка BM25: из кэша узлов или полная загрузка из ChromaDB ──
 async def _rebuild_bm25_bg(notebook_id: str, db_path: str, new_nodes: list = None):
     _PAGE_SIZE = 2000
     try:
@@ -110,6 +112,7 @@ async def _rebuild_bm25_bg(notebook_id: str, db_path: str, new_nodes: list = Non
 
 
 # Планирование rebuild с debounce: повторные вызовы сбрасывают предыдущий таймер
+# ── Планирование rebuild с debounce: повторные вызовы сбрасывают предыдущий таймер ──
 async def _schedule_bm25_rebuild(notebook_id: str, db_path: str, new_nodes: list = None):
     async with _bm25_pending_lock:
         old = _bm25_pending_timers.get(notebook_id)
@@ -149,6 +152,7 @@ async def _schedule_bm25_rebuild(notebook_id: str, db_path: str, new_nodes: list
     )
 
 
+# ── Отмена запланированного rebuild ──
 async def cancel_bm25_rebuild(notebook_id: str):
     async with _bm25_pending_lock:
         task = _bm25_pending_timers.pop(notebook_id, None)
@@ -162,6 +166,7 @@ async def cancel_bm25_rebuild(notebook_id: str):
 
 
 # Принудительный flush: немедленный rebuild без ожидания debounce
+# ── Принудительный flush: немедленный rebuild без ожидания debounce ──
 async def flush_bm25_rebuild(
     notebook_id: str,
     db_path: str = None,
@@ -209,6 +214,7 @@ async def flush_bm25_rebuild(
 
 
 # Проверка готовности BM25: файл существует, нет pending-таймеров и нет активной сборки
+# ── Проверка готовности BM25-индекса ──
 async def is_bm25_ready(notebook_id: str) -> bool:
     paths = config.get_notebook_paths(notebook_id)
     bm25_dir = os.path.join(paths["base"], "bm25")

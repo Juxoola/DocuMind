@@ -21,6 +21,7 @@ _vision_ready.set()  # изначально "готов"
 
 
 # Кодирование изображения в base64 с ресайзом при превышении лимита
+# ── Кодирование изображения в base64 с ресайзом при превышении лимита ──
 def get_image_base64(image_path, max_dimension=1568):
     try:
         import io
@@ -40,6 +41,7 @@ def get_image_base64(image_path, max_dimension=1568):
             return base64.b64encode(image_file.read()).decode("utf-8")
 
 
+# ── Формирование multimodal-сообщения для Vision API ──
 def make_vision_message(base64_data: str, text: str = "") -> list:
     msg = [{"type": "text", "text": text}] if text else []
     msg.append(
@@ -52,6 +54,7 @@ def make_vision_message(base64_data: str, text: str = "") -> list:
 
 
 # Ленивый запуск Vision-сервера при первом обращении
+# ── Ленивый запуск Vision-сервера при первом обращении ──
 async def get_vision_url(llm_settings, progress_cb=None):
     if not llm_settings or not llm_settings.get("use_gguf_direct"):
         return None
@@ -108,6 +111,7 @@ def set_vision_url(url: str | None):
         _vision_ready.clear()
 
 
+# ── Очистка thinking-тегов из ответа модели ──
 def _clean_think_tags(text):
     text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL)
     text = re.sub(r"<\|.*?\|>", "", text)
@@ -116,6 +120,7 @@ def _clean_think_tags(text):
 
 
 # Описание изображения через GGUF Vision или LM Studio API с retry
+# ── Описание изображения через GGUF Vision или LM Studio API с retry ──
 async def describe_image_with_lmstudio(
     image_path, llm_settings=None, existing_llm_url=None, cancel_check=None
 ):

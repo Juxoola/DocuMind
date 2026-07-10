@@ -1,9 +1,12 @@
 // RAG настройки: конфигурация пайплайна поиска, реранкера, расширения запроса.
+// ── Импорты ──
 import React from 'react';
 import { Globe, RefreshCw, Zap, Filter, MessageSquare, Database, Cpu, Search } from 'lucide-react';
 import { cn } from '../lib/utils';
 
+// ── Компонент настроек RAG ──
 export default function RAGSettings({ ragConfig, setRagConfig, ggufModels }) {
+    // ── Рендер конфигурации поиска ──
     return (
         <div className="p-6 space-y-6">
             {/* Переключатель реранкера */}

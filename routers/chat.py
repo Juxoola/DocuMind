@@ -154,7 +154,6 @@ async def _stream_gguf_with_thinking(
                 yield flushed
             buf = ""
 
-    # Flush remaining buffer
     if buf and phase == "thinking":
         yield sse_event({"type": "thinking_chunk", "text": buf})
         yield sse_event({"type": "thinking_done"})

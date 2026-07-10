@@ -24,6 +24,7 @@ from src.ingestion.vision import (
     get_vision_url,
 )
 
+# ── Публичный API подсистемы ингестации ──
 __all__ = [
     "IngestionCancelled",
     "cleanup_gpu",

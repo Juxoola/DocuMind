@@ -1,10 +1,13 @@
 // Панель статистики: время, токены, использование контекста + тултип цитат.
+// ── Импорты ──
 import React from 'react';
 import { Clock, Zap, FileText } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { CitationTooltipPortal } from '../lib/CitationTooltip';
 
+// ── Рендер панели статистики ──
 export default function SourcePanel({ stats, contextUsage, hoveredSource, tooltipCoords, tooltipTimeoutRef, setHoveredSource }) {
+    // ── Статистика и тултип цитат ──
     return (
         <>
             {/* ── Отображение статистики генерации ── */}

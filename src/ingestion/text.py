@@ -39,6 +39,7 @@ _RE_MD_PICTURE_OMITTED_2 = re.compile(
 
 
 # Основной конвейер PDF: извлечение текста (pymupdf4llm), изображения (surya layout), Vision-анализ
+# ── Основной конвейер PDF: текст (pymupdf4llm) → изображения (surya) → Vision ──
 async def process_pdf(
     file_path,
     images_dir,
@@ -279,6 +280,7 @@ async def process_pdf(
 
 
 # Surya layout pass: определение Diagram/Equation/Table regions + OCR
+# ── Проход Surya layout: определение regions, OCR, извлечение изображений ──
 async def _surya_layout_pass(
     doc,
     file_name,

@@ -39,8 +39,6 @@ router = APIRouter(tags=["files"])
 
 
 class UploadLLMSettings(BaseModel):
-    """Группировка всех LLM/Vision-параметров загрузки в одной модели."""
-
     llm_url: str | None = None
     llm_api_key: str | None = None
     llm_model: str | None = None
@@ -67,7 +65,6 @@ class UploadLLMSettings(BaseModel):
     vision_mtp_enabled: bool | None = False
 
     def to_llm_settings_dict(self) -> dict:
-        """Конвертация в dict для передачи в ingest_file."""
         return self.model_dump()
 
 
@@ -271,7 +268,6 @@ async def _run_upload_ingestion(
 
 
 async def _finalize_batch(notebook_id: str, total_count: int) -> None:
-    """Очистка ресурсов после завершения пачки файлов."""
     logger.info(f"[INGESTION] Пачка завершена. {total_count} файлов обработано.")
     try:
         from src.gguf.server import unload_all_models
@@ -577,7 +573,6 @@ async def delete_file(filename: str, notebook_id: str):
     vector_store = await get_vector_store(notebook_id)
     from src.rag.retrieval import invalidate_index_cache
 
-    # Run chroma delete, cache invalidation, and bookmark stale-mark in parallel
     await asyncio.gather(
         asyncio.to_thread(vector_store._collection.delete, where={"file_name": filename}),
         invalidate_index_cache(notebook_id),
@@ -602,14 +597,12 @@ def _get_cached_source(key: str) -> str | None:
 
 def _set_cached_source(key: str, text: str):
     if len(_source_content_cache) >= _MAX_CACHE_ENTRIES:
-        # Evict oldest entry
         oldest_key = min(_source_content_cache, key=lambda k: _source_content_cache[k][0])
         _source_content_cache.pop(oldest_key, None)
     _source_content_cache[key] = (time.time(), text)
 
 
 async def _read_chroma_content(filename: str, notebook_id: str) -> str:
-    """Read text content from ChromaDB for a file, grouped by page."""
     from src.rag.indexing import get_vector_store
 
     vector_store = await get_vector_store(notebook_id)
@@ -633,7 +626,6 @@ async def _read_chroma_content(filename: str, notebook_id: str) -> str:
 
 
 async def _mark_stale(notebook_id: str, filename: str) -> None:
-    """Mark bookmarks as stale for a deleted file. Logs but never raises."""
     try:
         from src.bookmarks import mark_stale_for_file
 

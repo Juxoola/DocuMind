@@ -1,4 +1,5 @@
 // Основная область чата: ввод, стриминг, рендер сообщений, закладки.
+// ── Импорты ──
 import React, { useState, useRef, useEffect, lazy, Suspense } from 'react';
 import { Trash2, Sparkles, Settings as SettingsIcon, SlidersHorizontal } from 'lucide-react';
 import { cn } from '../lib/utils';
@@ -11,6 +12,7 @@ import SourcePanel from './SourcePanel';
 import useStreamingHandler from './StreamingHandler';
 import { AnswerModeSelect, TuningPanel, normalizeAnswerMode } from './ChatToolbar';
 
+// ── Состояние компонента ──
 export default function ChatArea({ notebook, selectedSources, onOpenSource, llmSettings, setLlmSettings }) {
   const [messages, setMessages] = useState([
     { role: 'ai', content: 'Привет! Я проанализировал ваши источники и готов ответить на любые вопросы. Что вас интересует?', system: true }
@@ -139,7 +141,7 @@ export default function ChatArea({ notebook, selectedSources, onOpenSource, llmS
     return () => clearInterval(contextIntervalRef.current);
   }, [calcContextUsage]);
 
-  // Обработчики файлов/изображений
+  // ── Обработчики файлов и изображений ──
   const handleImageChange = (e) => {
     const file = e.target.files[0];
     if (file?.type.startsWith('image/')) {
@@ -183,6 +185,7 @@ export default function ChatArea({ notebook, selectedSources, onOpenSource, llmS
     thinkingMode, thinkingBudget, contextStrategy, maxTokens, input, setInput,
   });
 
+  // ── Отправка сообщений и стриминг ──
   const handleSend = async () => {
     if ((!input.trim() && !selectedImage) || isLoading) return;
     if (llmStatus.state === 'loading') return;
@@ -197,6 +200,7 @@ export default function ChatArea({ notebook, selectedSources, onOpenSource, llmS
     setIsLoading(false);
   };
 
+  // ── Рендер компонента ──
   return (
     <div
       className="flex flex-col h-full w-full relative"

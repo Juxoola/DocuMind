@@ -33,6 +33,7 @@ except Exception:
 
 
 # Реестр дочерних процессов для отслеживания и завершения
+# ── Реестр дочерних процессов для отслеживания и завершения ──
 _active_subprocesses: dict = {}
 _subprocesses_lock = threading.Lock()
 
@@ -68,11 +69,13 @@ def kill_subprocesses(notebook_id):
 
 
 # Исключение отмены операции ингестации
+# ── Исключение отмены операции ингестации ──
 class IngestionCancelled(Exception):
     pass
 
 
 # Очистка видеопамяти перед тяжёлыми задачами
+# ── Очистка видеопамяти перед тяжёлыми задачами ──
 def cleanup_gpu():
 
     gc.collect()

@@ -1,8 +1,10 @@
 // Браузер GGUF моделей: выбор моделей, управление директориями поиска.
+// ── Импорты ──
 import React from 'react';
 import { HardDrive, FolderOpen, RefreshCw, ChevronDown, ChevronRight } from 'lucide-react';
 import { cn } from '../lib/utils';
 
+// ── Компонент браузера GGUF моделей ──
 export default function IngestionSettings({
     localSettings,
     setLocalSettings,
@@ -16,6 +18,7 @@ export default function IngestionSettings({
     toggleDir,
     updateSearchDirs,
 }) {
+    // ── Рендер списка моделей ──
     return (
         <div className="space-y-2">
             {/* ── Заголовок и кнопка обновления ── */}

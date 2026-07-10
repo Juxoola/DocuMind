@@ -22,7 +22,6 @@ def temp_notebooks_dir(monkeypatch):
     monkeypatch.setattr(cfg, "NOTEBOOKS_DIR", tmp)
     monkeypatch.setattr(cfg, "BASE_DIR", PROJECT_ROOT)
     cfg._notebook_paths_cache.clear()
-    # Создаём поддиректории
     os.makedirs(tmp, exist_ok=True)
     yield tmp
     shutil.rmtree(tmp, ignore_errors=True)
@@ -35,7 +34,6 @@ def sanitize_env(monkeypatch):
     monkeypatch.setenv("GGUF_SEARCH_DIRS", "/dev/null")
     monkeypatch.setenv("LM_STUDIO_URL", "http://localhost:9999/v1")
     monkeypatch.setenv("UPLOAD_MAX_SIZE_MB", "500")
-    # Перенаправляем rag_config.json во временную папку (тесты не загрязняют прод)
     import config as cfg
 
     monkeypatch.setattr(
