@@ -5,6 +5,7 @@ import os
 import time
 import threading
 
+import config
 from PIL import Image
 
 logger = logging.getLogger(__name__)

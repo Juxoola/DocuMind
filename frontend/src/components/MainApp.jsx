@@ -186,10 +186,13 @@ export default function MainApp({ notebook, onExit }) {
 
   useEffect(() => {
     fetchSources();
+    const controller = new AbortController();
     let timerId;
     const checkStatus = async () => {
       try {
-        const res = await fetch(`/api/ingestion_status?notebook_id=${notebook.id}`);
+        const res = await fetch(`/api/ingestion_status?notebook_id=${notebook.id}`, {
+          signal: controller.signal
+        });
         if (res.ok) {
           const data = await res.json();
           setUploadState(current => {
@@ -210,14 +213,16 @@ export default function MainApp({ notebook, onExit }) {
           });
         }
       } catch (e) {
-        console.warn("[STATUS] Polling error:", e);
+        if (e.name !== 'AbortError') console.warn("[STATUS] Polling error:", e);
       } finally {
-        timerId = setTimeout(checkStatus, 3000);
+        if (!controller.signal.aborted) {
+          timerId = setTimeout(checkStatus, 3000);
+        }
       }
     };
 
     checkStatus();
-    return () => clearTimeout(timerId);
+    return () => { controller.abort(); clearTimeout(timerId); };
   }, [notebook.id]);
 
   const fetchSources = async () => {
