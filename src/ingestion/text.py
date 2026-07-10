@@ -74,6 +74,15 @@ async def process_pdf(
             progress_cb(10, "Извлечение текста (pymupdf4llm)...")
         md_chunks = await asyncio.to_thread(_extract_markdown)
 
+        # Удаляем плейсхолдеры картинок ДО подсчёта символов
+        for chunk in md_chunks:
+            t = chunk.get("text", "")
+            if t:
+                t = _RE_MD_PICTURE_OMITTED.sub("", t)
+                t = _RE_MD_PICTURE_TEXT.sub("", t)
+                t = _RE_MD_PICTURE_OMITTED_2.sub("", t)
+                chunk["text"] = t
+
         # Оцениваем качество извлечения
         total_chars = sum(len(c.get("text", "")) for c in md_chunks)
         avg_chars = total_chars / max(total_pages, 1)
