@@ -102,7 +102,7 @@ class RAGConfig:
     min_final_chunks: int = int(os.getenv("MIN_FINAL_CHUNKS", "5"))
     rrf_k: int = int(os.getenv("RAG_RRF_K", "60"))
     top_k_ratio: float = float(os.getenv("RAG_TOP_K_RATIO", "0.1"))
-    surya_mode: str = os.getenv("SURYA_MODE", "layout_only")
+
     gguf_search_dirs: str = os.getenv(
         "GGUF_SEARCH_DIRS",
         "F:/llm;" + os.path.join(os.path.dirname(os.path.abspath(__file__)), "models"),
@@ -131,7 +131,7 @@ def update_rag_config(data: dict) -> None:
         min_final_chunks=int(data.get("min_final_chunks", rag.min_final_chunks)),
         rrf_k=int(data.get("rrf_k", rag.rrf_k)),
         top_k_ratio=float(data.get("top_k_ratio", rag.top_k_ratio)),
-        surya_mode=data.get("surya_mode", rag.surya_mode),
+
     )
 
 

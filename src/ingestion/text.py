@@ -61,7 +61,6 @@ async def process_pdf(
     results = []
     splitter = _get_splitter()
     total_pages = len(doc)
-    surya_mode = config.rag.surya_mode
 
     # ── Шаг 1: pymupdf4llm для текста ──
     use_surya_ocr = False
@@ -148,7 +147,7 @@ async def process_pdf(
                 shared_llm_url,
                 progress_cb,
                 cancel_check,
-                "layout_only" if not use_surya_ocr else "full",
+                use_surya_ocr,
                 frame_data,
                 keep_vision_alive,
             )
@@ -281,7 +280,7 @@ async def _surya_layout_pass(
     shared_llm_url,
     progress_cb,
     cancel_check,
-    surya_mode,
+    run_ocr: bool,
     frame_data,
     keep_vision_alive,
 ):
@@ -328,7 +327,7 @@ async def _surya_layout_pass(
     if not layout_results:
         return frame_list
 
-    if surya_mode == "full":
+    if run_ocr:
         try:
             if progress_cb:
                 progress_cb(65, "Surya: OCR текста...")

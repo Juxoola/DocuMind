@@ -70,7 +70,6 @@ class TestProcessPdf:
 
         with (
             patch("src.ingestion.text.fitz") as mock_fitz,
-            patch("config.SURYA_MODE", "disabled"),
             patch(
                 "pymupdf4llm.to_markdown",
                 return_value=[
@@ -101,7 +100,6 @@ class TestProcessPdf:
 
         with (
             patch("src.ingestion.text.fitz") as mock_fitz,
-            patch("config.SURYA_MODE", "disabled"),
             patch("pymupdf4llm.to_markdown", return_value=[]),
             patch("src.ingestion.text._get_splitter", return_value=mock_splitter),
         ):
@@ -129,7 +127,6 @@ class TestProcessPdf:
 
         with (
             patch("src.ingestion.text.fitz") as mock_fitz,
-            patch("config.SURYA_MODE", "disabled"),
             patch(
                 "pymupdf4llm.to_markdown",
                 return_value=[

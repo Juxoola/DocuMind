@@ -1,6 +1,6 @@
 // RAG настройки: конфигурация пайплайна поиска, реранкера, расширения запроса.
 import React from 'react';
-import { Globe, RefreshCw, Zap, Filter, MessageSquare, Database, Cpu, Search, Layout } from 'lucide-react';
+import { Globe, RefreshCw, Zap, Filter, MessageSquare, Database, Cpu, Search } from 'lucide-react';
 import { cn } from '../lib/utils';
 
 export default function RAGSettings({ ragConfig, setRagConfig, ggufModels }) {
@@ -186,43 +186,6 @@ export default function RAGSettings({ ragConfig, setRagConfig, ggufModels }) {
                 </p>
             </div>
 
-            {/* Surya Layout Detection */}
-            <div className="p-4 rounded-2xl bg-muted/30 border border-border/50 space-y-4">
-                <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest flex items-center gap-1.5">
-                    <Layout size={10} /> Surya Layout Detection
-                </p>
-                <p className="text-[9px] text-muted-foreground/60 italic">Определение Diagram, Equation, Table регионов для описания Vision LLM</p>
-                <div className="space-y-2">
-                    <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Режим</label>
-                    <div className="flex gap-2">
-                        {[
-                            { value: 'disabled', label: 'Выкл', color: 'bg-muted-foreground/30' },
-                            { value: 'layout_only', label: 'Layout only', color: 'bg-blue-500' },
-                            { value: 'full', label: 'Layout + OCR', color: 'bg-purple-500' },
-                        ].map(opt => (
-                            <button
-                                key={opt.value}
-                                onClick={() => setRagConfig({...ragConfig, surya_mode: opt.value})}
-                                className={cn(
-                                    "flex-1 px-3 py-2 rounded-xl text-[10px] font-bold transition-all border",
-                                    ragConfig.surya_mode === opt.value
-                                        ? `${opt.color} text-white border-transparent`
-                                        : "bg-muted/20 text-muted-foreground border-border/30 hover:border-primary/30"
-                                )}
-                            >
-                                {opt.label}
-                            </button>
-                        ))}
-                    </div>
-                </div>
-                {ragConfig.surya_mode !== 'disabled' && (
-                    <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/20">
-                        <p className="text-[9px] text-amber-600 dark:text-amber-400 leading-relaxed">
-                            <b>Примечание:</b> Surya требует llama-server (F:\llama.cpp) и GGUF модель surya-ocr-2. Первый запуск скачивает модели (~2GB). ~8s на layout для 7 страниц.
-                        </p>
-                    </div>
-                )}
-            </div>
 
             <div className="p-4 rounded-2xl bg-amber-500/10 border border-amber-500/20">
                 <p className="text-[10px] text-amber-600 dark:text-amber-400 leading-relaxed">

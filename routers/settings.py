@@ -69,7 +69,7 @@ async def get_rag_config():
         "use_reranker": config.rag.use_reranker,
         "query_expansion": config.rag.query_expansion,
         "rerank_score_threshold": config.rag.rerank_score_threshold,
-        "surya_mode": config.rag.surya_mode,
+
     }
 
 
@@ -84,7 +84,7 @@ class UpdateRagConfigRequest(BaseModel):
     use_reranker: bool = True
     query_expansion: bool = True
     rerank_score_threshold: float = Field(default=0.1, ge=0.0, le=1.0)
-    surya_mode: str = Field(default="layout_only")
+
 
     @field_validator("embedding_model", "reranker_model")
     @classmethod
@@ -96,12 +96,7 @@ class UpdateRagConfigRequest(BaseModel):
             raise ValueError("имя модели не может быть пустым")
         return v
 
-    @field_validator("surya_mode")
-    @classmethod
-    def validate_surya_mode(cls, v: str) -> str:
-        if v not in ("disabled", "layout_only", "full"):
-            raise ValueError("surya_mode должен быть disabled, layout_only или full")
-        return v
+
 
 
 # ── Применение новой конфигурации RAG с перезагрузкой моделей ──
