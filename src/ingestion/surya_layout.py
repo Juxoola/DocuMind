@@ -40,7 +40,7 @@ def _ensure_predictor():
 
             os.environ.setdefault("SURYA_GUIDED_LAYOUT", "false")
             os.environ.setdefault("SURYA_INFERENCE_PARALLEL", "2")
-            os.environ.setdefault("SURYA_INFERENCE_CTX_SIZE", "16384")
+            os.environ.setdefault("SURYA_INFERENCE_CTX_SIZE", "24576")
 
             from surya.inference import SuryaInferenceManager
             from surya.layout import LayoutPredictor
